@@ -122,6 +122,7 @@ function Login() {
 function Dashboard({ session, profile }) {
   const [jobs, setJobs] = useState([]);
   const [chemicals, setChemicals] = useState([]);
+  const [techs, setTechs] = useState([]);
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -137,18 +138,20 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
       supabase.from("audit_log").select("*").order("ts", { ascending: false }),
       supabase.from("trash").select("*").order("deleted_at", { ascending: false }),
+      supabase.from("profiles").select("id, full_name, phone, role"),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
     setChemicals(chr.data || []);
     setAudit(ar.data || []);
     setTrash(tr.data || []);
+    setTechs((pr.data || []).filter((p) => p.role === "tech"));
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -159,25 +162,31 @@ function Dashboard({ session, profile }) {
   const pricePerMl = (name) => { const c = chemicals.find((x) => norm(x.name) === norm(name)); return c ? (Number(c.price_per_liter) || 0) / 1000 : 0; };
   const jobChemCost = (job) => (job.chemicals || []).reduce((s, c) => s + (Number(c.ml) || 0) * pricePerMl(c.name), 0);
 
+  const techById = (id) => techs.find((t) => t.id === id);
+
   async function createJob(payload) {
     const { error } = await supabase.from("jobs").insert({ ...payload, created_by: session.user.id });
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
     setModal(null); showToast("Заявка создана"); load();
   }
-  async function submitReport(job, report, chems, docs) {
-    const { error } = await supabase.from("jobs").update({
-      report_paid: report.paid, report_cash: report.cash, report_qr: report.qr, report_method: report.method, report_note: report.note,
-      reported_by: session.user.id, reported_at: new Date().toISOString(),
-      followup_wanted: report.followUp.wanted, followup_date: report.followUp.date, followup_note: report.followUp.note,
-      docs_needed: docs.needed, docs_avr: docs.avr, docs_dogovor: docs.dogovor, docs_note: docs.note, docs_done: docs.done, status: "done",
-    }).eq("id", job.id);
+  async function assignJob(job, techId) {
+    const newStatus = job.status === "done" ? "done" : (techId ? "assigned" : "new");
+    const { error } = await supabase.from("jobs").update({ assigned_to: techId, status: newStatus }).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
-    await supabase.from("report_chemicals").delete().eq("job_id", job.id);
-    const rows = chems.filter((c) => c.name).map((c) => ({ job_id: job.id, name: c.name, ml: Number(c.ml) || 0 }));
-    if (rows.length) await supabase.from("report_chemicals").insert(rows);
-    const payStr = (report.cash > 0 && report.qr > 0) ? `${fmt(report.paid)} ₸ (нал ${fmt(report.cash)} + QR ${fmt(report.qr)})` : `${fmt(report.paid)} ₸ (${report.method})`;
-    await logAction("Отчёт", `${job.pest} · оплата ${payStr}`);
+    const from = job.assigned_to ? (techById(job.assigned_to)?.full_name || "—") : "—";
+    const to = techId ? (techById(techId)?.full_name || "—") : "не назначен";
+    await logAction("Назначение", `${job.pest} · ${from} → ${to}`);
+    setModal(null); showToast("Дезинфектор назначен"); load();
+  }
+  async function submitReport(job, report, chems, docs) {
+    const { error } = await supabase.rpc("submit_report", {
+      p_job: job.id, p_cash: report.cash, p_qr: report.qr, p_note: report.note,
+      p_chems: chems.filter((c) => c.name).map((c) => ({ name: c.name, ml: Number(c.ml) || 0 })),
+      p_fu_wanted: report.followUp.wanted, p_fu_date: report.followUp.date, p_fu_note: report.followUp.note,
+      p_docs_needed: docs.needed, p_docs_avr: docs.avr, p_docs_dogovor: docs.dogovor, p_docs_note: docs.note,
+    });
+    if (error) { showToast("Ошибка: " + error.message); return; }
     setModal(null); showToast("Отчёт сохранён"); load();
   }
   async function deleteJob(job) {
@@ -255,12 +264,15 @@ function Dashboard({ session, profile }) {
 
   const sorted = [...jobs].sort((a, b) => jobTime(a) - jobTime(b));
   const groups = groupByDate(sorted);
-  const tabs = [
+  const tabs = isAdmin ? [
     { id: "jobs", label: "Заявки" },
     { id: "finance", label: "Финансы" },
     { id: "stock", label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
+    { id: "team", label: "Дезинфекторы" },
     { id: "journal", label: "Журнал" },
     { id: "trash", label: `Корзина${trash.length ? " · " + trash.length : ""}` },
+  ] : [
+    { id: "jobs", label: "Мои заявки" },
   ];
 
   return (
@@ -291,9 +303,10 @@ function Dashboard({ session, profile }) {
                 <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                 <div className="kd-list">
                   {g.jobs.map((j) => (
-                    <JobCard key={j.id} job={j} isAdmin={isAdmin}
+                    <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name}
                       onCopy={() => copyText(buildMsg(j), () => showToast("Текст скопирован"))}
                       onReport={() => setModal({ kind: "report", job: j })}
+                      onAssign={() => setModal({ kind: "assign", job: j })}
                       onView={() => setModal({ kind: "view", job: j })}
                       onDelete={() => deleteJob(j)} />
                   ))}
@@ -375,6 +388,27 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
+        {!loading && tab === "team" && (
+          <div className="kd-list">
+            <div className="kd-empty" style={{ textAlign: "left" }}>
+              Чтобы добавить дезинфектора: в Supabase → Authentication → Add user (как создавал свой аккаунт, с галочкой Auto Confirm).
+              Новый пользователь сам появится здесь как дезинфектор, и его можно будет назначать на заявки.
+            </div>
+            {techs.map((t) => {
+              const cnt = jobs.filter((j) => j.assigned_to === t.id).length;
+              return (
+                <div key={t.id} className="kd-card tech">
+                  <div className="kd-tech-avatar">{(t.full_name || "?").slice(0, 1)}</div>
+                  <div style={{ flex: 1 }}>
+                    <div className="kd-tech-name">{t.full_name || "(без имени)"}</div>
+                    <div className="kd-muted">{t.phone || "—"} · заявок: {cnt}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {!loading && tab === "journal" && (
           <div className="kd-card">
             {audit.length === 0 && <div className="kd-muted">Пока нет записей.</div>}
@@ -409,6 +443,7 @@ function Dashboard({ session, profile }) {
       </main>
 
       {modal?.kind === "new" && <NewJobModal onClose={() => setModal(null)} onSave={createJob} />}
+      {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} />}
       {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "view" && <ViewModal job={modal.job} onClose={() => setModal(null)} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
@@ -418,7 +453,7 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, onCopy, onReport, onView, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, onCopy, onReport, onAssign, onView, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   return (
     <div className="kd-card">
@@ -436,11 +471,13 @@ function JobCard({ job, isAdmin, onCopy, onReport, onView, onDelete }) {
       </div>
       <div className="kd-card-foot">
         <span className="kd-muted">Клиент: {job.client_phone}</span>
+        {isAdmin && <span className="kd-muted">{assignedName ? "Дезинфектор: " + assignedName : "Не назначен"}</span>}
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
       </div>
       <div className="kd-actions">
         <button className="kd-btn wa" onClick={onCopy}>Скопировать для WhatsApp</button>
-        {isAdmin && job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
+        {job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
+        {isAdmin && job.status !== "done" && <button className="kd-btn ghost" onClick={onAssign}>{assignedName ? "Переназначить" : "Назначить"}</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
         {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить">✕</button>}
       </div>
@@ -461,6 +498,27 @@ function ModalShell({ title, onClose, children, footer }) {
   );
 }
 const Field = ({ label, children }) => <label className="kd-field"><span>{label}</span>{children}</label>;
+
+function AssignModal({ job, techs, onClose, onSave }) {
+  const [techId, setTechId] = useState(job.assigned_to || "");
+  const [saving, setSaving] = useState(false);
+  async function save() { setSaving(true); await onSave(job, techId || null); setSaving(false); }
+  return (
+    <ModalShell title="Назначить дезинфектора" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
+      {techs.length === 0 && <div className="kd-muted" style={{ marginBottom: 12 }}>Дезинфекторов пока нет — добавь их в Supabase (Authentication → Add user).</div>}
+      <Field label="Дезинфектор">
+        <select value={techId} onChange={(e) => setTechId(e.target.value)}>
+          <option value="">— не назначен —</option>
+          {techs.map((t) => (<option key={t.id} value={t.id}>{t.full_name || t.id.slice(0, 6)}</option>))}
+        </select>
+      </Field>
+    </ModalShell>
+  );
+}
 
 function NewJobModal({ onClose, onSave }) {
   const [f, setF] = useState({ type: "Первичная", scheduled_date: "", scheduled_time: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6 });
