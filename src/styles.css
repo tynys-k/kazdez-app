@@ -112,8 +112,37 @@ body{
 .kd-logaction{font-weight:700;}
 .kd-logsum{color:var(--muted);}
 
+/* period + finance + stock */
+.kd-periodbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
+.kd-seg{display:inline-flex;background:#EAEDE9;border-radius:11px;padding:3px;gap:2px;}
+.kd-segbtn{border:none;background:transparent;color:var(--muted);font:inherit;font-weight:600;font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;min-height:36px;white-space:nowrap;}
+.kd-segbtn.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.13);}
+.kd-pernav{display:flex;align-items:center;gap:10px;}
+.kd-perlabel{font-weight:700;font-size:14px;min-width:130px;text-align:center;}
+.kd-arrow{border:1px solid var(--line);background:var(--surface);width:36px;height:36px;border-radius:9px;cursor:pointer;font-size:18px;color:var(--ink);}
+.kd-arrow:disabled{opacity:.4;cursor:not-allowed;}
+.kd-twocol{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.kd-twoval{display:flex;flex-direction:column;align-items:flex-end;gap:1px;text-align:right;}
+.kd-twoval em{font-style:normal;font-size:12px;color:var(--muted);}
+.kd-weekrow{display:grid;grid-template-columns:34px 1fr 64px 96px;gap:11px;align-items:center;padding:7px 0;font-size:14px;}
+.kd-weekday{font-weight:700;color:var(--muted);}
+.kd-weekbar{height:9px;background:#EEF1ED;border-radius:999px;overflow:hidden;}
+.kd-weekfill{height:100%;background:var(--primary);border-radius:999px;min-width:2px;}
+.kd-weekcount{font-size:12.5px;color:var(--muted);text-align:right;}
+.kd-weeksum{text-align:right;}
+.kd-card.low{border-left:3px solid #D9342B;background:#FEF6F5;}
+.kd-lowtag{font-size:11px;font-weight:700;color:#B42318;background:#FCE6E4;border-radius:6px;padding:2px 7px;margin-left:8px;}
+.kd-stockgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:6px 0 13px;}
+.kd-stockgrid>div{display:flex;flex-direction:column;gap:2px;}
+.kd-stockgrid span{font-size:12px;color:var(--muted);}
+.kd-stockgrid strong{font-size:15px;}
+
 @media (max-width:720px){
   .kd-grid2,.kd-grid3{grid-template-columns:1fr;}
   .kd-logrow{grid-template-columns:1fr 1fr;gap:4px 10px;}
   .kd-logsum{grid-column:1 / -1;}
+  .kd-twocol{grid-template-columns:1fr;}
+  .kd-stockgrid{grid-template-columns:1fr 1fr;}
+  .kd-seg{width:100%;}
+  .kd-segbtn{flex:1;text-align:center;}
 }
