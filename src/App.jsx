@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import * as XLSX from "xlsx";
 
 // ----------------------------- helpers -----------------------------
 const fmt = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
@@ -230,6 +231,53 @@ function Dashboard({ session, profile }) {
     showToast("Препарат удалён"); load();
   }
 
+  function exportExcel() {
+    try {
+      const wb = XLSX.utils.book_new();
+      const jobsRows = jobs.map((j) => ({
+        "Дата": isoToRu(j.scheduled_date), "Время": j.scheduled_time, "Тип": j.type, "Вид": j.pest,
+        "Адрес": j.address, "Этаж": j.floor, "Метраж (м²)": j.area, "Источник": j.source,
+        "Телефон": j.client_phone, "Гарантия (мес)": j.guarantee_months,
+        "Дезинфектор": techById(j.assigned_to)?.full_name || "",
+        "Статус": (STATUS[j.status] && STATUS[j.status].label) || j.status,
+        "Цена (варианты)": (j.price_options || []).map((p) => `${p.amount}${p.label ? " " + p.label : ""}`).join("; "),
+        "Оплачено": j.report_paid ?? "", "Наличными": j.report_cash ?? "", "QR": j.report_qr ?? "", "Способ": j.report_method ?? "",
+        "Себестоимость преп.": j.status === "done" ? Math.round(jobChemCost(j)) : "",
+        "Прибыль": j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j)) : "",
+        "Препараты": (j.chemicals || []).map((c) => `${c.name} ${c.ml}мл`).join("; "),
+        "Примечание": j.report_note ?? "",
+        "Повторный": j.followup_wanted ? `${j.followup_date || "да"}${j.followup_note ? " — " + j.followup_note : ""}` : "",
+        "Документы": j.docs_needed ? `${[j.docs_avr && "АВР", j.docs_dogovor && "Договор"].filter(Boolean).join(", ") || "да"}${j.docs_done ? " (готовы)" : " (ожидают)"}` : "",
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(jobsRows.length ? jobsRows : [{}]), "Заявки");
+
+      const stockRows = chemicals.map((c) => {
+        const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => norm(x.name) === norm(c.name)).reduce((a, x) => a + (Number(x.ml) || 0), 0), 0);
+        const remaining = (Number(c.purchased_ml) || 0) - used;
+        return { "Препарат": c.name, "Куплено (л)": ml2l(c.purchased_ml), "Ушло (мл)": used, "Остаток (л)": ml2l(remaining), "Цена (₸/л)": c.price_per_liter, "Стоимость остатка (₸)": Math.round(remaining * ((Number(c.price_per_liter) || 0) / 1000)) };
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stockRows.length ? stockRows : [{}]), "Склад");
+
+      const techRows = techs.map((t) => ({ "Имя": t.full_name, "Телефон": t.phone, "Заявок": jobs.filter((j) => j.assigned_to === t.id).length }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(techRows.length ? techRows : [{}]), "Дезинфекторы");
+
+      const logRows = audit.map((a) => ({ "Когда": fmtTs(a.ts), "Кто": a.actor, "Действие": a.action, "Детали": a.summary }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(logRows.length ? logRows : [{}]), "Журнал");
+
+      const trashRows = trash.map((t) => ({ "Удалено": fmtTs(t.deleted_at), "Кем": t.deleted_by, "Вид": t.job.pest, "Адрес": t.job.address, "Было оплачено": t.job.report_paid ?? "" }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(trashRows.length ? trashRows : [{}]), "Корзина");
+
+      const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([out], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `KazDez_база_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+      showToast("Файл Excel выгружен");
+    } catch (e) { showToast("Ошибка выгрузки"); }
+  }
+
   // ---- финансы за период ----
   const range = periodRange(pMode, pOff);
   const fin = (() => {
@@ -290,8 +338,11 @@ function Dashboard({ session, profile }) {
           <div className="kd-tabs">
             {tabs.map((t) => (<button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => setTab(t.id)}>{t.label}</button>))}
           </div>
-          {tab === "jobs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}>+ Новая заявка</button>}
-          {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}>+ Препарат</button>}
+          <div className="kd-tabactions">
+            {tab === "jobs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}>+ Новая заявка</button>}
+            {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}>+ Препарат</button>}
+            {isAdmin && <button className="kd-btn ghost" onClick={exportExcel}>Выгрузить в Excel</button>}
+          </div>
         </div>
 
         {loading && <div className="kd-empty">Загрузка…</div>}
