@@ -81,6 +81,7 @@ body{
 .kd-tabs{display:flex;gap:6px;flex-wrap:wrap;}
 .kd-tab{border:none;background:transparent;color:var(--muted);font:inherit;font-weight:600;font-size:14px;padding:8px 13px;border-radius:9px;cursor:pointer;min-height:38px;}
 .kd-tab.on{background:#E4F3EE;color:var(--primary-d);}
+.kd-tabactions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 
 /* buttons extra */
 .kd-btn.sm{min-height:38px;padding:7px 11px;font-size:13px;}
