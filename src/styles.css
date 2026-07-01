@@ -88,6 +88,8 @@ body{
 .kd-btn.ghost.danger{color:#B42318;}
 .kd-muted.paid{color:var(--primary);font-weight:700;}
 .kd-doctag{font-size:12px;font-weight:700;color:#7C3AED;background:#F1ECFE;border-radius:8px;padding:5px 9px;}
+.kd-repeattag{font-size:12px;font-weight:700;color:#B45309;background:#FCF1E2;border-radius:8px;padding:5px 9px;}
+.kd-textarea{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:64px;width:100%;resize:vertical;}
 
 /* rows / sections */
 .kd-section{font-weight:750;font-size:15px;margin:6px 0 10px;}
