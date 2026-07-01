@@ -138,6 +138,7 @@ function Dashboard({ session, profile }) {
   const [jobs, setJobs] = useState([]);
   const [chemicals, setChemicals] = useState([]);
   const [techs, setTechs] = useState([]);
+  const [handouts, setHandouts] = useState([]);
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -153,13 +154,14 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
       supabase.from("audit_log").select("*").order("ts", { ascending: false }),
       supabase.from("trash").select("*").order("deleted_at", { ascending: false }),
       supabase.from("profiles").select("id, full_name, phone, role"),
+      supabase.from("handouts").select("*"),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -167,6 +169,7 @@ function Dashboard({ session, profile }) {
     setAudit(ar.data || []);
     setTrash(tr.data || []);
     setTechs((pr.data || []).filter((p) => p.role === "tech"));
+    setHandouts(hr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -177,6 +180,13 @@ function Dashboard({ session, profile }) {
   const chemById = (id) => chemicals.find((x) => x.id === id);
   const lineChem = (l) => (l.chemical_id ? chemById(l.chemical_id) : chemicals.find((x) => norm(x.name) === norm(l.name)));
   const jobChemCost = (job) => (job.chemicals || []).reduce((s, l) => { const c = lineChem(l); return s + lineAmount(l) * (c ? (Number(c.price_per_liter) || 0) / 1000 : 0); }, 0);
+  function techLedger(techId) {
+    const m = {};
+    const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0 });
+    handouts.filter((h) => h.tech_id === techId).forEach((h) => { const g = get(h.chemical_id); if (h.kind === "opening") g.opening += Number(h.amount) || 0; else g.issued += Number(h.amount) || 0; });
+    jobs.filter((j) => j.assigned_to === techId).forEach((j) => (j.chemicals || []).forEach((l) => { if (l.chemical_id) get(l.chemical_id).consumed += lineAmount(l); }));
+    return Object.entries(m).map(([cid, v]) => { const c = chemById(cid); const received = v.issued + v.opening; return c ? { chem: c, ...v, received, balance: received - v.consumed } : null; }).filter(Boolean);
+  }
 
   const techById = (id) => techs.find((t) => t.id === id);
 
@@ -279,6 +289,14 @@ function Dashboard({ session, profile }) {
     await logAction("Склад", `Удалён препарат: ${chem.name}`);
     showToast("Препарат удалён"); load();
   }
+  async function addHandout(payload) {
+    const { error } = await supabase.from("handouts").insert({ ...payload, created_by: session.user.id });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    const t = techById(payload.tech_id); const c = chemById(payload.chemical_id);
+    const kindLabel = payload.kind === "opening" ? "стартовый остаток" : "выдача";
+    await logAction("Выдача", `${t?.full_name || "?"} · ${c?.name || "?"} +${fmtAmount(payload.amount, c?.unit_kind)} (${kindLabel})`);
+    setModal(null); showToast("Записано"); load();
+  }
 
   function exportExcel() {
     try {
@@ -310,6 +328,14 @@ function Dashboard({ session, profile }) {
 
       const techRows = techs.map((t) => ({ "Имя": t.full_name, "Телефон": t.phone, "Заявок": jobs.filter((j) => j.assigned_to === t.id).length }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(techRows.length ? techRows : [{}]), "Дезинфекторы");
+
+      const ledgerRows = [];
+      techs.forEach((t) => techLedger(t.id).forEach((r) => ledgerRows.push({
+        "Сотрудник": t.full_name, "Препарат": r.chem.name,
+        "Выдано": fmtAmount(r.issued, r.chem.unit_kind), "Стартовый остаток": fmtAmount(r.opening, r.chem.unit_kind),
+        "Расход": fmtAmount(r.consumed, r.chem.unit_kind), "На руках": fmtAmount(r.balance, r.chem.unit_kind),
+      })));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ledgerRows.length ? ledgerRows : [{}]), "Учёт по сотрудникам");
 
       const logRows = audit.map((a) => ({ "Когда": fmtTs(a.ts), "Кто": a.actor, "Действие": a.action, "Детали": a.summary }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(logRows.length ? logRows : [{}]), "Журнал");
@@ -508,17 +534,38 @@ function Dashboard({ session, profile }) {
           <div className="kd-list">
             <div className="kd-empty" style={{ textAlign: "left" }}>
               Чтобы добавить дезинфектора: в Supabase → Authentication → Add user (как создавал свой аккаунт, с галочкой Auto Confirm).
-              Новый пользователь сам появится здесь как дезинфектор, и его можно будет назначать на заявки.
+              Новый пользователь сам появится здесь как дезинфектор.
             </div>
             {techs.map((t) => {
               const cnt = jobs.filter((j) => j.assigned_to === t.id).length;
+              const ledger = techLedger(t.id);
               return (
-                <div key={t.id} className="kd-card tech">
-                  <div className="kd-tech-avatar">{(t.full_name || "?").slice(0, 1)}</div>
-                  <div style={{ flex: 1 }}>
-                    <div className="kd-tech-name">{t.full_name || "(без имени)"}</div>
-                    <div className="kd-muted">{t.phone || "—"} · заявок: {cnt}</div>
+                <div key={t.id} className="kd-card">
+                  <div className="kd-card-head">
+                    <div className="kd-tech-row">
+                      <div className="kd-tech-avatar">{(t.full_name || "?").slice(0, 1)}</div>
+                      <div>
+                        <div className="kd-tech-name">{t.full_name || "(без имени)"}</div>
+                        <div className="kd-muted">{t.phone || "—"} · заявок: {cnt}</div>
+                      </div>
+                    </div>
+                    <button className="kd-btn primary sm" onClick={() => setModal({ kind: "handout", tech: t })}>Выдать / остаток</button>
                   </div>
+                  {ledger.length === 0
+                    ? <div className="kd-muted" style={{ marginTop: 8 }}>Препараты этому сотруднику ещё не выдавались.</div>
+                    : (
+                      <div className="kd-ledger">
+                        <div className="kd-ledgerhead"><span>Препарат</span><span>Выдано</span><span>Расход</span><span>На руках</span></div>
+                        {ledger.map((r) => (
+                          <div className="kd-ledgerrow" key={r.chem.id}>
+                            <span className="kd-ledgername">{r.chem.name}</span>
+                            <span>{fmtAmount(r.received, r.chem.unit_kind)}</span>
+                            <span>{fmtAmount(r.consumed, r.chem.unit_kind)}</span>
+                            <strong style={{ color: r.balance < 0 ? "#B42318" : "var(--primary)" }}>{fmtAmount(r.balance, r.chem.unit_kind)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                 </div>
               );
             })}
@@ -565,6 +612,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
+      {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
       {toast && <div className="kd-toast">{toast}</div>}
     </div>
   );
@@ -862,6 +910,49 @@ function StockInModal({ chem, onClose, onSave }) {
       <div className="kd-muted" style={{ marginBottom: 12 }}>Текущая цена: {fmt(chem.price_per_liter)} ₸/{u.big}</div>
       <Field label={`Докуплено (${u.big})`}><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
       <Field label={`Новая цена за ${u.big} (если изменилась)`}><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="оставь пустым, если та же" /></Field>
+    </ModalShell>
+  );
+}
+
+function HandoutModal({ tech, chemicals, onClose, onSave }) {
+  const [chemId, setChemId] = useState(""); const [amount, setAmount] = useState(""); const [unit, setUnit] = useState("small");
+  const [kind, setKind] = useState("issue"); const [note, setNote] = useState(""); const [saving, setSaving] = useState(false);
+  const ch = chemicals.find((x) => x.id === chemId); const u = chemUnit(ch?.unit_kind);
+  const ok = chemId && Number(amount) > 0;
+  async function save() {
+    setSaving(true);
+    const base = unit === "big" ? (Number(amount) || 0) * 1000 : (Number(amount) || 0);
+    await onSave({ tech_id: tech.id, chemical_id: chemId, amount: base, kind, note });
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={`Выдать препарат — ${tech.full_name || "сотрудник"}`} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Записать"}</button>
+    </>}>
+      {chemicals.length === 0 && <div className="kd-muted" style={{ marginBottom: 10 }}>Сначала добавь препараты на склад.</div>}
+      <Field label="Тип записи">
+        <select value={kind} onChange={(e) => setKind(e.target.value)}>
+          <option value="issue">Выдача на руки</option>
+          <option value="opening">Стартовый остаток (что уже было у сотрудника)</option>
+        </select>
+      </Field>
+      <Field label="Препарат">
+        <select value={chemId} onChange={(e) => { setChemId(e.target.value); setUnit("small"); }}>
+          <option value="">— выбери —</option>
+          {chemicals.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      </Field>
+      <div className="kd-grid2">
+        <Field label="Количество"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="4" /></Field>
+        <Field label="Единица">
+          <select value={unit} onChange={(e) => setUnit(e.target.value)}>
+            <option value="small">{u.small}</option>
+            <option value="big">{u.big}</option>
+          </select>
+        </Field>
+      </div>
+      <Field label="Заметка (необязательно)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="выдал на объект ..." /></Field>
     </ModalShell>
   );
 }
