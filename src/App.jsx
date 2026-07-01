@@ -6,6 +6,13 @@ import * as XLSX from "xlsx";
 const fmt = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 const ml2l = (ml) => Math.round(((Number(ml) || 0) / 1000) * 100) / 100;
 const norm = (s) => (s || "").trim().toLowerCase();
+const chemUnit = (kind) => (kind === "weight" ? { big: "кг", small: "г" } : { big: "л", small: "мл" });
+function fmtAmount(amount, kind) {
+  const u = chemUnit(kind); const a = Number(amount) || 0;
+  if (a >= 1000) return `${Math.round((a / 1000) * 100) / 100} ${u.big}`;
+  return `${Math.round(a)} ${u.small}`;
+}
+const lineAmount = (l) => Number(l.amount ?? l.ml) || 0;
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -167,8 +174,9 @@ function Dashboard({ session, profile }) {
   async function logAction(action, summary) {
     await supabase.from("audit_log").insert({ actor: actorName, actor_id: session.user.id, action, summary });
   }
-  const pricePerMl = (name) => { const c = chemicals.find((x) => norm(x.name) === norm(name)); return c ? (Number(c.price_per_liter) || 0) / 1000 : 0; };
-  const jobChemCost = (job) => (job.chemicals || []).reduce((s, c) => s + (Number(c.ml) || 0) * pricePerMl(c.name), 0);
+  const chemById = (id) => chemicals.find((x) => x.id === id);
+  const lineChem = (l) => (l.chemical_id ? chemById(l.chemical_id) : chemicals.find((x) => norm(x.name) === norm(l.name)));
+  const jobChemCost = (job) => (job.chemicals || []).reduce((s, l) => { const c = lineChem(l); return s + lineAmount(l) * (c ? (Number(c.price_per_liter) || 0) / 1000 : 0); }, 0);
 
   const techById = (id) => techs.find((t) => t.id === id);
 
@@ -224,7 +232,7 @@ function Dashboard({ session, profile }) {
   async function submitReport(job, report, chems, docs) {
     const { error } = await supabase.rpc("submit_report", {
       p_job: job.id, p_cash: report.cash, p_qr: report.qr, p_note: report.note,
-      p_chems: chems.filter((c) => c.name).map((c) => ({ name: c.name, ml: Number(c.ml) || 0 })),
+      p_chems: chems,
       p_fu_wanted: report.followUp.wanted, p_fu_date: report.followUp.date, p_fu_note: report.followUp.note,
       p_docs_needed: docs.needed, p_docs_avr: docs.avr, p_docs_dogovor: docs.dogovor, p_docs_note: docs.note,
     });
@@ -242,7 +250,7 @@ function Dashboard({ session, profile }) {
     const j = row.job; const chems = j.chemicals || []; const { chemicals: _c, ...jobRow } = j;
     const { error } = await supabase.from("jobs").insert(jobRow);
     if (error) { showToast("Ошибка: " + error.message); return; }
-    if (chems.length) await supabase.from("report_chemicals").insert(chems.map((c) => ({ job_id: j.id, name: c.name, ml: c.ml })));
+    if (chems.length) await supabase.from("report_chemicals").insert(chems.map((c) => ({ job_id: j.id, chemical_id: c.chemical_id || null, name: c.name, amount: c.amount ?? c.ml, ml: c.ml ?? c.amount })));
     await supabase.from("trash").delete().eq("id", row.id);
     await logAction("Восстановление", `${j.pest} · ${j.address}`);
     showToast("Заявка восстановлена"); load();
@@ -255,7 +263,7 @@ function Dashboard({ session, profile }) {
   async function addChem(c) {
     const { error } = await supabase.from("chemicals").insert(c);
     if (error) { showToast("Ошибка: " + error.message); return; }
-    await logAction("Склад", `Новый препарат: ${c.name} (${ml2l(c.purchased_ml)} л)`);
+    await logAction("Склад", `Новый препарат: ${c.name} (${fmtAmount(c.purchased_ml, c.unit_kind)})`);
     setModal(null); showToast("Препарат добавлен"); load();
   }
   async function stockIn(chem, addMl, newPrice) {
@@ -263,7 +271,7 @@ function Dashboard({ session, profile }) {
     if (newPrice != null) patch.price_per_liter = newPrice;
     const { error } = await supabase.from("chemicals").update(patch).eq("id", chem.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
-    await logAction("Склад", `Приход: ${chem.name} +${ml2l(addMl)} л`);
+    await logAction("Склад", `Приход: ${chem.name} +${fmtAmount(addMl, chem.unit_kind)}`);
     setModal(null); showToast("Приход оформлен"); load();
   }
   async function removeChem(chem) {
@@ -285,7 +293,7 @@ function Dashboard({ session, profile }) {
         "Оплачено": j.report_paid ?? "", "Наличными": j.report_cash ?? "", "QR": j.report_qr ?? "", "Способ": j.report_method ?? "",
         "Себестоимость преп.": j.status === "done" ? Math.round(jobChemCost(j)) : "",
         "Прибыль": j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j)) : "",
-        "Препараты": (j.chemicals || []).map((c) => `${c.name} ${c.ml}мл`).join("; "),
+        "Препараты": (j.chemicals || []).map((l) => { const c = lineChem(l); return `${l.name || (c && c.name) || ""} ${fmtAmount(lineAmount(l), c && c.unit_kind)}`; }).join("; "),
         "Примечание": j.report_note ?? "",
         "Повторный": j.followup_wanted ? `${j.followup_date || "да"}${j.followup_note ? " — " + j.followup_note : ""}` : "",
         "Документы": j.docs_needed ? `${[j.docs_avr && "АВР", j.docs_dogovor && "Договор"].filter(Boolean).join(", ") || "да"}${j.docs_done ? " (готовы)" : " (ожидают)"}` : "",
@@ -293,9 +301,10 @@ function Dashboard({ session, profile }) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(jobsRows.length ? jobsRows : [{}]), "Заявки");
 
       const stockRows = chemicals.map((c) => {
-        const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => norm(x.name) === norm(c.name)).reduce((a, x) => a + (Number(x.ml) || 0), 0), 0);
+        const u = chemUnit(c.unit_kind);
+        const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => (x.chemical_id ? x.chemical_id === c.id : norm(x.name) === norm(c.name))).reduce((a, x) => a + lineAmount(x), 0), 0);
         const remaining = (Number(c.purchased_ml) || 0) - used;
-        return { "Препарат": c.name, "Куплено (л)": ml2l(c.purchased_ml), "Ушло (мл)": used, "Остаток (л)": ml2l(remaining), "Цена (₸/л)": c.price_per_liter, "Стоимость остатка (₸)": Math.round(remaining * ((Number(c.price_per_liter) || 0) / 1000)) };
+        return { "Препарат": c.name, "Единица": u.big + "/" + u.small, "Куплено": fmtAmount(c.purchased_ml, c.unit_kind), "Ушло": fmtAmount(used, c.unit_kind), "Остаток": fmtAmount(remaining, c.unit_kind), ["Цена (₸/" + u.big + ")"]: c.price_per_liter, "Стоимость остатка (₸)": Math.round(remaining * ((Number(c.price_per_liter) || 0) / 1000)) };
       });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stockRows.length ? stockRows : [{}]), "Склад");
 
@@ -345,7 +354,7 @@ function Dashboard({ session, profile }) {
 
   // ---- склад ----
   const inventory = chemicals.map((c) => {
-    const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => norm(x.name) === norm(c.name)).reduce((a, x) => a + (Number(x.ml) || 0), 0), 0);
+    const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => (x.chemical_id ? x.chemical_id === c.id : norm(x.name) === norm(c.name))).reduce((a, x) => a + lineAmount(x), 0), 0);
     const remaining = (Number(c.purchased_ml) || 0) - used;
     return { ...c, used, remaining, low: remaining <= (Number(c.min_ml) || 0), stockValue: remaining * ((Number(c.price_per_liter) || 0) / 1000) };
   });
@@ -476,12 +485,12 @@ function Dashboard({ session, profile }) {
               <div key={c.id} className={`kd-card ${c.low ? "low" : ""}`}>
                 <div className="kd-card-head">
                   <div className="kd-pest">{c.name}{c.low && <span className="kd-lowtag">мало</span>}</div>
-                  <span className="kd-muted">{fmt(c.price_per_liter)} ₸/л</span>
+                  <span className="kd-muted">{fmt(c.price_per_liter)} ₸/{chemUnit(c.unit_kind).big}</span>
                 </div>
                 <div className="kd-stockgrid">
-                  <div><span>Куплено</span><strong>{ml2l(c.purchased_ml)} л</strong></div>
-                  <div><span>Ушло</span><strong>{fmt(c.used)} мл</strong></div>
-                  <div><span>Остаток</span><strong style={{ color: c.low ? "#B42318" : "var(--primary)" }}>{ml2l(c.remaining)} л</strong></div>
+                  <div><span>Куплено</span><strong>{fmtAmount(c.purchased_ml, c.unit_kind)}</strong></div>
+                  <div><span>Ушло</span><strong>{fmtAmount(c.used, c.unit_kind)}</strong></div>
+                  <div><span>Остаток</span><strong style={{ color: c.low ? "#B42318" : "var(--primary)" }}>{fmtAmount(c.remaining, c.unit_kind)}</strong></div>
                   <div><span>Стоимость остатка</span><strong>{fmt(c.stockValue)} ₸</strong></div>
                 </div>
                 {isAdmin && (
@@ -553,7 +562,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} />}
       {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
-      {modal?.kind === "view" && <ViewModal job={modal.job} onClose={() => setModal(null)} />}
+      {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {toast && <div className="kd-toast">{toast}</div>}
@@ -718,7 +727,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, onClose, onSave
 
 function ReportModal({ job, chemicals, onClose, onSave }) {
   const [cash, setCash] = useState(""); const [qr, setQr] = useState(""); const [note, setNote] = useState("");
-  const [chems, setChems] = useState([{ name: "", ml: "" }, { name: "", ml: "" }]);
+  const [chems, setChems] = useState([{ chemical_id: "", amount: "", unit: "small" }, { chemical_id: "", amount: "", unit: "small" }]);
   const [fuWanted, setFuWanted] = useState(false); const [fuDate, setFuDate] = useState(""); const [fuNote, setFuNote] = useState("");
   const [docNeeded, setDocNeeded] = useState(false); const [avr, setAvr] = useState(false); const [dogovor, setDogovor] = useState(false); const [docNote, setDocNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -727,7 +736,12 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
   function methodLabel() { const c = Number(cash) || 0, q = Number(qr) || 0; if (c > 0 && q > 0) return "Наличные + QR"; if (q > 0) return "QR"; return "Наличные"; }
   async function save() {
     setSaving(true);
-    await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote } }, chems, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
+    const lines = chems.filter((c) => c.chemical_id && Number(c.amount) > 0).map((c) => {
+      const ch = chemicals.find((x) => x.id === c.chemical_id);
+      const base = c.unit === "big" ? (Number(c.amount) || 0) * 1000 : (Number(c.amount) || 0);
+      return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
+    });
+    await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote } }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
     setSaving(false);
   }
   return (
@@ -735,7 +749,6 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={total <= 0 || saving} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
     </>}>
-      <datalist id="kd-chemlist">{(chemicals || []).map((c) => <option key={c.id} value={c.name} />)}</datalist>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
       <div className="kd-section">Оплата</div>
       <div className="kd-grid2">
@@ -745,13 +758,24 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
       <div className="kd-paytotal"><span>Итого получено</span><strong>{fmt(total)} ₸</strong></div>
       <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Было поднятие" /></Field>
       <div className="kd-section">Расход препаратов</div>
-      {chems.map((c, i) => (
-        <div className="kd-chemrow" key={i}>
-          <input list="kd-chemlist" placeholder="Препарат (Культ)" value={c.name} onChange={setChem(i, "name")} />
-          <input placeholder="мл" inputMode="numeric" value={c.ml} onChange={setChem(i, "ml")} />
-        </div>
-      ))}
-      <button className="kd-btn ghost sm" onClick={() => setChems([...chems, { name: "", ml: "" }])}>+ ещё препарат</button>
+      {chemicals.length === 0 && <div className="kd-muted" style={{ marginBottom: 8 }}>Сначала добавь препараты на склад — тогда их можно будет выбирать здесь.</div>}
+      {chems.map((c, i) => {
+        const ch = chemicals.find((x) => x.id === c.chemical_id); const u = chemUnit(ch?.unit_kind);
+        return (
+          <div className="kd-chemrow3" key={i}>
+            <select value={c.chemical_id} onChange={setChem(i, "chemical_id")}>
+              <option value="">— препарат —</option>
+              {chemicals.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+            <input placeholder="кол-во" inputMode="decimal" value={c.amount} onChange={setChem(i, "amount")} />
+            <select value={c.unit} onChange={setChem(i, "unit")}>
+              <option value="small">{u.small}</option>
+              <option value="big">{u.big}</option>
+            </select>
+          </div>
+        );
+      })}
+      <button className="kd-btn ghost sm" onClick={() => setChems([...chems, { chemical_id: "", amount: "", unit: "small" }])}>+ ещё препарат</button>
       <label className="kd-check"><input type="checkbox" checked={fuWanted} onChange={(e) => setFuWanted(e.target.checked)} /><span>Клиент просит повторный выезд</span></label>
       {fuWanted && (<div className="kd-grid2">
         <Field label="Когда"><input value={fuDate} onChange={(e) => setFuDate(e.target.value)} placeholder="27.06.2026" /></Field>
@@ -769,8 +793,9 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
   );
 }
 
-function ViewModal({ job, onClose }) {
+function ViewModal({ job, chemicals, onClose }) {
   const hasSplit = (job.report_cash || 0) > 0 && (job.report_qr || 0) > 0;
+  const chemOf = (l) => (l.chemical_id ? (chemicals || []).find((x) => x.id === l.chemical_id) : (chemicals || []).find((x) => norm(x.name) === norm(l.name)));
   return (
     <ModalShell title="Отчёт по заявке" onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
@@ -785,7 +810,7 @@ function ViewModal({ job, onClose }) {
       {job.report_note && <div className="kd-row"><span>Примечание</span><strong>{job.report_note}</strong></div>}
       <div className="kd-section" style={{ marginTop: 10 }}>Расход</div>
       {(job.chemicals || []).length === 0 && <div className="kd-muted">Не указан.</div>}
-      {(job.chemicals || []).map((c) => (<div className="kd-row" key={c.id}><span>{c.name}</span><strong>{fmt(c.ml)} мл</strong></div>))}
+      {(job.chemicals || []).map((l) => { const c = chemOf(l); return (<div className="kd-row" key={l.id}><span>{l.name || (c && c.name)}</span><strong>{fmtAmount(lineAmount(l), c && c.unit_kind)}</strong></div>); })}
       {job.followup_wanted && <div className="kd-followbox"><strong>Повторный выезд:</strong> {job.followup_note || "по просьбе клиента"}{job.followup_date ? ` — ${job.followup_date}` : ""}</div>}
       {job.docs_needed && <div className="kd-docbox"><strong>Документы:</strong> {[job.docs_avr && "АВР", job.docs_dogovor && "Договор"].filter(Boolean).join(", ") || "да"}{job.docs_note ? ` — ${job.docs_note}` : ""}{job.docs_done ? " · готовы" : " · ожидают"}</div>}
     </ModalShell>
@@ -793,12 +818,14 @@ function ViewModal({ job, onClose }) {
 }
 
 function AddChemModal({ onClose, onSave }) {
-  const [name, setName] = useState(""); const [liters, setLiters] = useState(""); const [price, setPrice] = useState(""); const [minL, setMinL] = useState("1");
+  const [name, setName] = useState(""); const [unitKind, setUnitKind] = useState("volume");
+  const [qty, setQty] = useState(""); const [price, setPrice] = useState(""); const [minQ, setMinQ] = useState("1");
   const [saving, setSaving] = useState(false);
-  const ok = name && liters && price;
+  const u = chemUnit(unitKind);
+  const ok = name && qty && price;
   async function save() {
     setSaving(true);
-    await onSave({ name, purchased_ml: (Number(liters) || 0) * 1000, price_per_liter: Number(price) || 0, min_ml: (Number(minL) || 0) * 1000 });
+    await onSave({ name, unit_kind: unitKind, purchased_ml: (Number(qty) || 0) * 1000, price_per_liter: Number(price) || 0, min_ml: (Number(minQ) || 0) * 1000 });
     setSaving(false);
   }
   return (
@@ -806,31 +833,35 @@ function AddChemModal({ onClose, onSave }) {
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Добавить"}</button>
     </>}>
-      <Field label="Название"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Культ" /></Field>
       <div className="kd-grid2">
-        <Field label="Куплено (литров)"><input value={liters} onChange={(e) => setLiters(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
-        <Field label="Цена (₸ за литр)"><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="18000" /></Field>
+        <Field label="Название"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Культ / Крысогон" /></Field>
+        <Field label="Измеряется в"><select value={unitKind} onChange={(e) => setUnitKind(e.target.value)}><option value="volume">Объём (мл/л)</option><option value="weight">Вес (г/кг)</option></select></Field>
       </div>
-      <Field label="Сигнал «мало» при остатке (литров)"><input value={minL} onChange={(e) => setMinL(e.target.value)} inputMode="decimal" placeholder="1" /></Field>
+      <div className="kd-grid2">
+        <Field label={`Куплено (${u.big})`}><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
+        <Field label={`Цена (₸ за ${u.big})`}><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="18000" /></Field>
+      </div>
+      <Field label={`Сигнал «мало» при остатке (${u.big})`}><input value={minQ} onChange={(e) => setMinQ(e.target.value)} inputMode="decimal" placeholder="1" /></Field>
     </ModalShell>
   );
 }
 
 function StockInModal({ chem, onClose, onSave }) {
-  const [liters, setLiters] = useState(""); const [price, setPrice] = useState(""); const [saving, setSaving] = useState(false);
+  const [qty, setQty] = useState(""); const [price, setPrice] = useState(""); const [saving, setSaving] = useState(false);
+  const u = chemUnit(chem.unit_kind);
   async function save() {
     setSaving(true);
-    await onSave(chem, (Number(liters) || 0) * 1000, price ? Number(price) : null);
+    await onSave(chem, (Number(qty) || 0) * 1000, price ? Number(price) : null);
     setSaving(false);
   }
   return (
     <ModalShell title={`Приход: ${chem.name}`} onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={!liters || saving} onClick={save}>{saving ? "…" : "Оформить"}</button>
+      <button className="kd-btn primary" disabled={!qty || saving} onClick={save}>{saving ? "…" : "Оформить"}</button>
     </>}>
-      <div className="kd-muted" style={{ marginBottom: 12 }}>Текущая цена: {fmt(chem.price_per_liter)} ₸/л</div>
-      <Field label="Докуплено (литров)"><input value={liters} onChange={(e) => setLiters(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
-      <Field label="Новая цена за литр (если изменилась)"><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="оставь пустым, если та же" /></Field>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Текущая цена: {fmt(chem.price_per_liter)} ₸/{u.big}</div>
+      <Field label={`Докуплено (${u.big})`}><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
+      <Field label={`Новая цена за ${u.big} (если изменилась)`}><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="оставь пустым, если та же" /></Field>
     </ModalShell>
   );
 }
