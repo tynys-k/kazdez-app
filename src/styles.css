@@ -144,6 +144,14 @@ body{
 .kd-card.tech{display:flex;align-items:center;gap:13px;}
 .kd-tech-avatar{width:42px;height:42px;border-radius:50%;background:#E4F3EE;color:var(--primary-d);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;flex-shrink:0;}
 .kd-tech-name{font-weight:700;font-size:15px;}
+.kd-tech-row{display:flex;align-items:center;gap:13px;}
+.kd-ledger{margin-top:12px;border-top:1px solid var(--line);padding-top:6px;}
+.kd-ledgerhead,.kd-ledgerrow{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:8px;align-items:center;padding:7px 0;font-size:13.5px;}
+.kd-ledgerhead{color:var(--muted);font-size:12px;font-weight:600;border-bottom:1px solid var(--line);}
+.kd-ledgerrow{border-bottom:1px solid var(--line);}
+.kd-ledgerrow:last-child{border-bottom:none;}
+.kd-ledgername{font-weight:650;}
+.kd-ledgerhead span:not(:first-child),.kd-ledgerrow span:not(.kd-ledgername),.kd-ledgerrow strong{text-align:right;}
 
 @media (max-width:720px){
   .kd-grid2,.kd-grid3{grid-template-columns:1fr;}
