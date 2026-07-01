@@ -16,6 +16,7 @@ function fmtTs(ts) {
   const d = new Date(ts), p = (n) => String(n).padStart(2, "0");
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+const daysSince = (ts) => (ts ? Math.floor((Date.now() - new Date(ts).getTime()) / 86400000) : 0);
 function parseIso(iso) {
   if (!iso) return null;
   const [y, m, d] = iso.split("-").map(Number);
@@ -64,12 +65,18 @@ function groupByDate(jobs) {
   return groups;
 }
 function buildMsg(job) {
-  const lines = ["Наша заявка", `${job.type || "Первичная"} обработка`, `Дата: ${isoToRu(job.scheduled_date)}`, `Время: ${job.scheduled_time || ""}`, `Адрес: ${job.address || ""}`];
+  const head = job.type === "Осмотр" ? "Осмотр объекта" : `${job.type || "Первичная"} обработка`;
+  const lines = ["Наша заявка", head, `Дата: ${isoToRu(job.scheduled_date)}`, `Время: ${job.scheduled_time || ""}`, `Адрес: ${job.address || ""}`];
   if (job.floor) lines.push(`Этаж: ${job.floor}`);
   if (job.area) lines.push(`Метраж: ${job.area} м²`);
-  lines.push(`Вид: ${job.pest || ""}`, "Цена:");
-  (job.price_options || []).forEach((p) => { if (p.amount) lines.push(`${fmt(p.amount)} теңге${p.label ? " - " + p.label : ""}`); });
-  lines.push(`Номер телефона: ${job.client_phone || ""}`, `Гарантия ${job.guarantee_months || 6} месяцев после вторичной (повторной обработки)`);
+  lines.push(`Вид: ${job.pest || ""}`);
+  const prices = (job.price_options || []).filter((p) => p.amount);
+  if (prices.length) {
+    lines.push("Цена:");
+    prices.forEach((p) => lines.push(`${fmt(p.amount)} теңге${p.label ? " - " + p.label : ""}`));
+  }
+  lines.push(`Номер телефона: ${job.client_phone || ""}`);
+  if (job.type !== "Осмотр") lines.push(`Гарантия ${job.guarantee_months || 6} месяцев после вторичной (повторной обработки)`);
   return lines.join("\n");
 }
 function copyText(text, onDone) {
@@ -170,6 +177,40 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
     setModal(null); showToast("Заявка создана"); load();
+  }
+  async function editJob(job, payload) {
+    const { error } = await supabase.from("jobs").update(payload).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Редактирование", `${payload.pest || job.pest} · ${payload.address || job.address}`);
+    setModal(null); showToast("Заявка обновлена"); load();
+  }
+  async function putOnRepeat(job) {
+    const { error } = await supabase.from("jobs").update({ repeat_state: "on_repeat", repeat_since: new Date().toISOString() }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Повтор", `На повтор · ${job.pest} · ${job.address}`);
+    showToast("Заявка на повторе"); load();
+  }
+  async function saveRepeatNote(job, note) {
+    const { error } = await supabase.from("jobs").update({ repeat_note: note }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    showToast("Заметка сохранена"); load();
+  }
+  async function finishRepeat(job) {
+    const { error } = await supabase.from("jobs").update({ repeat_state: "finished" }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Повтор", `Завершена (отказ от повтора) · ${job.pest} · ${job.address}`);
+    showToast("Заявка завершена"); load();
+  }
+  async function createRepeatJob(job) {
+    const ins = await supabase.from("jobs").insert({
+      type: "Вторичная", scheduled_date: null, scheduled_time: "", address: job.address, floor: job.floor,
+      area: job.area, source: job.source, pest: job.pest, price_options: job.price_options,
+      client_phone: job.client_phone, guarantee_months: job.guarantee_months, status: "new", created_by: session.user.id,
+    });
+    if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
+    await supabase.from("jobs").update({ repeat_state: "finished" }).eq("id", job.id);
+    await logAction("Повтор", `Создана повторная заявка · ${job.pest} · ${job.address}`);
+    showToast("Повторная заявка создана"); load();
   }
   async function assignJob(job, techId) {
     const newStatus = job.status === "done" ? "done" : (techId ? "assigned" : "new");
@@ -314,6 +355,7 @@ function Dashboard({ session, profile }) {
   const groups = groupByDate(sorted);
   const tabs = isAdmin ? [
     { id: "jobs", label: "Заявки" },
+    { id: "repeats", label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "finance", label: "Финансы" },
     { id: "stock", label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
     { id: "team", label: "Дезинфекторы" },
@@ -359,11 +401,25 @@ function Dashboard({ session, profile }) {
                       onReport={() => setModal({ kind: "report", job: j })}
                       onAssign={() => setModal({ kind: "assign", job: j })}
                       onView={() => setModal({ kind: "view", job: j })}
+                      onEdit={() => setModal({ kind: "edit", job: j })}
+                      onRepeat={() => putOnRepeat(j)}
                       onDelete={() => deleteJob(j)} />
                   ))}
                 </div>
               </div>
             ))
+        )}
+
+        {!loading && tab === "repeats" && (
+          <div className="kd-list">
+            {jobs.filter((j) => j.repeat_state === "on_repeat").length === 0 &&
+              <div className="kd-empty">На повторе пока никого нет. Выполненную заявку можно отправить сюда кнопкой «На повтор».</div>}
+            {jobs.filter((j) => j.repeat_state === "on_repeat")
+              .sort((a, b) => new Date(a.repeat_since || 0) - new Date(b.repeat_since || 0))
+              .map((j) => (
+                <RepeatCard key={j.id} job={j} onSaveNote={saveRepeatNote} onCreate={createRepeatJob} onFinish={finishRepeat} />
+              ))}
+          </div>
         )}
 
         {!loading && tab === "finance" && (
@@ -493,7 +549,8 @@ function Dashboard({ session, profile }) {
         )}
       </main>
 
-      {modal?.kind === "new" && <NewJobModal onClose={() => setModal(null)} onSave={createJob} />}
+      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" onClose={() => setModal(null)} onSave={createJob} />}
+      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} />}
       {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "view" && <ViewModal job={modal.job} onClose={() => setModal(null)} />}
@@ -504,7 +561,7 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, onCopy, onReport, onAssign, onView, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   return (
     <div className="kd-card">
@@ -519,6 +576,8 @@ function JobCard({ job, isAdmin, assignedName, onCopy, onReport, onAssign, onVie
         {(job.price_options || []).map((p, i) => (<span className="kd-price" key={i}>{fmt(p.amount)} ₸{p.label ? <em> · {p.label}</em> : null}</span>))}
         {job.source && <span className="kd-srctag">{job.source}</span>}
         {job.docs_needed && <span className="kd-doctag">{job.docs_done ? "Документы готовы" : "Нужны документы"}</span>}
+        {job.repeat_state === "on_repeat" && <span className="kd-repeattag">на повторе</span>}
+        {job.repeat_state === "finished" && <span className="kd-muted">завершена</span>}
       </div>
       <div className="kd-card-foot">
         <span className="kd-muted">Клиент: {job.client_phone}</span>
@@ -529,8 +588,36 @@ function JobCard({ job, isAdmin, assignedName, onCopy, onReport, onAssign, onVie
         <button className="kd-btn wa" onClick={onCopy}>Скопировать для WhatsApp</button>
         {job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
         {isAdmin && job.status !== "done" && <button className="kd-btn ghost" onClick={onAssign}>{assignedName ? "Переназначить" : "Назначить"}</button>}
+        {isAdmin && <button className="kd-btn ghost" onClick={onEdit}>Изменить</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
+        {isAdmin && job.status === "done" && !job.repeat_state && <button className="kd-btn ghost" onClick={onRepeat}>На повтор</button>}
         {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить">✕</button>}
+      </div>
+    </div>
+  );
+}
+
+function RepeatCard({ job, onSaveNote, onCreate, onFinish }) {
+  const [note, setNote] = useState(job.repeat_note || "");
+  const days = daysSince(job.repeat_since);
+  const due = days >= 5;
+  return (
+    <div className={`kd-card ${due ? "low" : ""}`}>
+      <div className="kd-card-head">
+        <div className="kd-pest">{job.pest}</div>
+        <span className="kd-badge" style={due ? { color: "#B42318", background: "#FCE6E4" } : { color: "#B45309", background: "#FCF1E2" }}>
+          {due ? "пора связаться" : `${days} дн. назад`}
+        </span>
+      </div>
+      <div className="kd-addr">{job.address}</div>
+      <div className="kd-card-foot"><span className="kd-muted">Клиент: {job.client_phone}</span></div>
+      <Field label="Как прошёл созвон / заметка">
+        <textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Напр.: созвонился, согласен на субботу" />
+      </Field>
+      <div className="kd-actions">
+        <button className="kd-btn ghost sm" onClick={() => onSaveNote(job, note)}>Сохранить заметку</button>
+        <button className="kd-btn primary sm" onClick={() => onCreate(job)}>Создать повторную заявку</button>
+        <button className="kd-btn ghost danger sm" onClick={() => onFinish(job)}>Отказался — завершить</button>
       </div>
     </div>
   );
@@ -571,26 +658,39 @@ function AssignModal({ job, techs, onClose, onSave }) {
   );
 }
 
-function NewJobModal({ onClose, onSave }) {
-  const [f, setF] = useState({ type: "Первичная", scheduled_date: "", scheduled_time: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6 });
+function jobToForm(job) {
+  const po = job.price_options || [];
+  return {
+    type: job.type || "Первичная", scheduled_date: job.scheduled_date || "", scheduled_time: job.scheduled_time || "",
+    address: job.address || "", floor: job.floor || "", area: job.area ?? "", source: job.source || "", pest: job.pest || "",
+    p1label: po[0]?.label || "С запахом", p1amount: po[0]?.amount ?? "",
+    p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
+    client_phone: job.client_phone || "+7 ", guarantee_months: job.guarantee_months ?? 6,
+  };
+}
+
+function JobFormModal({ initial, title, submitLabel, keepStatus, onClose, onSave }) {
+  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", scheduled_time: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6 });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const ok = f.address && f.pest && (f.p1amount || f.p2amount);
+  const ok = f.address && f.pest && (f.p1amount || f.p2amount || f.type === "Осмотр");
   const [saving, setSaving] = useState(false);
   async function save() {
     setSaving(true);
     const price_options = [];
     if (f.p1amount) price_options.push({ label: f.p1label, amount: Number(f.p1amount) });
     if (f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
-    await onSave({ type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time: f.scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, status: "new" });
+    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time: f.scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6 };
+    if (!keepStatus) payload.status = "new";
+    await onSave(payload);
     setSaving(false);
   }
   return (
-    <ModalShell title="Новая заявка" onClose={onClose} footer={<>
+    <ModalShell title={title} onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : "Создать"}</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : submitLabel}</button>
     </>}>
       <div className="kd-grid2">
-        <Field label="Тип обработки"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Гарантийная</option></select></Field>
+        <Field label="Тип"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Гарантийная</option><option>Осмотр</option></select></Field>
         <Field label="Вид (вредитель)"><input value={f.pest} onChange={set("pest")} placeholder="Тараканы" /></Field>
         <Field label="Дата"><input type="date" value={f.scheduled_date} onChange={set("scheduled_date")} /></Field>
         <Field label="Время"><input value={f.scheduled_time} onChange={set("scheduled_time")} placeholder="12:00" /></Field>
@@ -601,6 +701,7 @@ function NewJobModal({ onClose, onSave }) {
         <Field label="Метраж (м²)"><input value={f.area} onChange={set("area")} inputMode="numeric" placeholder="45" /></Field>
         <Field label="Источник"><input value={f.source} onChange={set("source")} placeholder="OLX" /></Field>
       </div>
+      {f.type === "Осмотр" && <div className="kd-muted" style={{ marginBottom: 10 }}>Для осмотра цену можно не заполнять.</div>}
       <div className="kd-grid2">
         <Field label="Цена 1 — подпись"><input value={f.p1label} onChange={set("p1label")} /></Field>
         <Field label="Цена 1 — сумма (₸)"><input value={f.p1amount} onChange={set("p1amount")} inputMode="numeric" placeholder="15000" /></Field>
