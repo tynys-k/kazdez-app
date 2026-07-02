@@ -158,6 +158,7 @@ function Dashboard({ session, profile }) {
   const [tab, setTab] = useState("jobs");
   const [modal, setModal] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [search, setSearch] = useState("");
   const [toast, setToast] = useState("");
   const [pMode, setPMode] = useState("all");
   const [pOff, setPOff] = useState(0);
@@ -460,10 +461,20 @@ function Dashboard({ session, profile }) {
 
   const activeJobs = jobs.filter((j) => j.status !== "done");
   const doneJobs = jobs.filter((j) => j.status === "done");
-  const filteredActive = statusFilter === "all" ? activeJobs : activeJobs.filter((j) => j.status === statusFilter);
+  const q = search.trim().toLowerCase();
+  const qDigits = q.replace(/\D/g, "");
+  function matchSearch(j) {
+    if (!q) return true;
+    const phoneDigits = (j.client_phone || "").replace(/\D/g, "");
+    if (qDigits && phoneDigits.includes(qDigits)) return true;
+    return norm(j.address).includes(q) || norm(j.pest).includes(q) || norm(j.client_phone).includes(q);
+  }
+  const statusMatched = statusFilter === "all" ? activeJobs : activeJobs.filter((j) => j.status === statusFilter);
+  const filteredActive = statusMatched.filter(matchSearch);
   const sorted = [...filteredActive].sort((a, b) => jobTime(a) - jobTime(b));
   const groups = groupByDate(sorted);
-  const doneSorted = [...doneJobs].sort((a, b) => new Date(b.reported_at || b.scheduled_date || 0) - new Date(a.reported_at || a.scheduled_date || 0));
+  const doneFiltered = doneJobs.filter(matchSearch);
+  const doneSorted = [...doneFiltered].sort((a, b) => new Date(b.reported_at || b.scheduled_date || 0) - new Date(a.reported_at || a.scheduled_date || 0));
   const doneGroups = groupByDate(doneSorted);
   const tabs = isAdmin ? [
     { id: "jobs", label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
@@ -507,6 +518,13 @@ function Dashboard({ session, profile }) {
 
         {loading && <div className="kd-empty">Загрузка…</div>}
 
+        {!loading && (tab === "jobs" || tab === "done") && (
+          <div className="kd-searchbar">
+            <input className="kd-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по телефону, адресу или виду вредителя…" />
+            {search && <button className="kd-x" onClick={() => setSearch("")}>✕</button>}
+          </div>
+        )}
+
         {!loading && tab === "jobs" && (
           <>
             <div className="kd-seg" style={{ marginBottom: 14 }}>
@@ -514,7 +532,7 @@ function Dashboard({ session, profile }) {
                 <button key={s.id} className={`kd-segbtn ${statusFilter === s.id ? "on" : ""}`} onClick={() => setStatusFilter(s.id)}>{s.label}</button>
               ))}
             </div>
-            {filteredActive.length === 0 ? <div className="kd-empty">{activeJobs.length === 0 ? "Активных заявок нет — все выполнены. Загляни во вкладку «Выполненные»." : "По этому фильтру заявок нет."}</div> :
+            {filteredActive.length === 0 ? <div className="kd-empty">{activeJobs.length === 0 ? "Активных заявок нет — все выполнены. Загляни во вкладку «Выполненные»." : "По этому фильтру ничего не найдено."}</div> :
               groups.map((g) => (
                 <div key={g.key} className="kd-group">
                   <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
@@ -528,6 +546,7 @@ function Dashboard({ session, profile }) {
                         onEdit={() => setModal({ kind: "edit", job: j })}
                         onRepeat={() => putOnRepeat(j)}
                         onPayPartner={(paid) => markPartnerPaid(j, paid)}
+                        onHistory={() => setModal({ kind: "history", job: j })}
                         onDelete={() => deleteJob(j)} />
                     ))}
                   </div>
@@ -537,7 +556,7 @@ function Dashboard({ session, profile }) {
         )}
 
         {!loading && tab === "done" && (
-          doneJobs.length === 0 ? <div className="kd-empty">Выполненных заявок пока нет.</div> :
+          doneFiltered.length === 0 ? <div className="kd-empty">{doneJobs.length === 0 ? "Выполненных заявок пока нет." : "По этому поиску ничего не найдено."}</div> :
             doneGroups.map((g) => (
               <div key={g.key} className="kd-group">
                 <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
@@ -551,6 +570,7 @@ function Dashboard({ session, profile }) {
                       onEdit={() => setModal({ kind: "edit", job: j })}
                       onRepeat={() => putOnRepeat(j)}
                       onPayPartner={(paid) => markPartnerPaid(j, paid)}
+                      onHistory={() => setModal({ kind: "history", job: j })}
                       onDelete={() => deleteJob(j)} />
                   ))}
                 </div>
@@ -801,6 +821,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} />}
       {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} />}
+      {modal?.kind === "history" && <HistoryModal job={modal.job} jobs={jobs} onClose={() => setModal(null)} onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : { kind: "edit", job: j })} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
@@ -811,7 +832,7 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onHistory, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const share = job.partner_id && job.status === "done" ? Math.round((Number(job.report_paid) || 0) * (Number(job.partner_share) || 0) / 100) : 0;
@@ -834,7 +855,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
         {job.repeat_state === "finished" && <span className="kd-muted">завершена</span>}
       </div>
       <div className="kd-card-foot">
-        <span className="kd-muted">Клиент: {job.client_phone}</span>
+        <button className="kd-clientlink" onClick={onHistory} title="Показать все заявки этого клиента">Клиент: {job.client_phone}</button>
         {isAdmin && job.partner_id && <span className="kd-muted">Партнёр: {partnerName || "?"} · доля {job.partner_share ?? 0}%</span>}
         {isAdmin && job.brand === "partner" && partnerRepeat && <span className="kd-muted">Повтор: {partnerRepeat}</span>}
         {isAdmin && share > 0 && <span className={job.partner_paid ? "kd-muted paid" : "kd-muted"}>Доля партнёру: {fmt(share)} ₸ · {job.partner_paid ? "выплачено" : "к выплате"}</span>}
@@ -1151,6 +1172,35 @@ function ViewModal({ job, chemicals, onClose }) {
       {(job.chemicals || []).map((l) => { const c = chemOf(l); return (<div className="kd-row" key={l.id}><span>{l.name || (c && c.name)}</span><strong>{fmtAmount(lineAmount(l), c && c.unit_kind)}</strong></div>); })}
       {job.followup_wanted && <div className="kd-followbox"><strong>Повторный выезд:</strong> {job.followup_note || "по просьбе клиента"}{job.followup_date ? ` — ${job.followup_date}` : ""}</div>}
       {job.docs_needed && <div className="kd-docbox"><strong>Документы:</strong> {[job.docs_avr && "АВР", job.docs_dogovor && "Договор"].filter(Boolean).join(", ") || "да"}{job.docs_note ? ` — ${job.docs_note}` : ""}{job.docs_done ? " · готовы" : " · ожидают"}</div>}
+    </ModalShell>
+  );
+}
+
+function HistoryModal({ job, jobs, onClose, onOpen }) {
+  const digits = (job.client_phone || "").replace(/\D/g, "");
+  const list = jobs
+    .filter((j) => (j.client_phone || "").replace(/\D/g, "") === digits && digits)
+    .sort((a, b) => new Date(b.scheduled_date || b.created_at || 0) - new Date(a.scheduled_date || a.created_at || 0));
+  const doneCount = list.filter((j) => j.status === "done").length;
+  return (
+    <ModalShell title={`История клиента · ${job.client_phone}`} onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Всего заявок: {list.length}{doneCount ? ` · выполнено: ${doneCount}` : ""}</div>
+      {list.length <= 1 && <div className="kd-empty">Других заявок этого клиента не найдено — похоже, это новый клиент.</div>}
+      {list.length > 1 && list.map((j) => {
+        const st = STATUS[j.status] || STATUS.new;
+        return (
+          <div key={j.id} className="kd-histrow" onClick={() => onOpen(j)}>
+            <div>
+              <div className="kd-histmain">{j.type} · {j.pest}</div>
+              <div className="kd-muted">{isoToRu(j.scheduled_date) || "без даты"} · {j.address}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+              {j.report_paid != null && <div className="kd-muted" style={{ marginTop: 4 }}>{fmt(j.report_paid)} ₸</div>}
+            </div>
+          </div>
+        );
+      })}
     </ModalShell>
   );
 }
