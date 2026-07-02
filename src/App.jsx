@@ -30,6 +30,7 @@ const REPEAT_POLICIES = [
 const repeatLabel = (code) => (REPEAT_POLICIES.find((p) => p.code === code) || {}).label || "";
 const DOC_TYPES = ["Договор", "Акт о дезработах", "Провести через фирму (АВР+ЭСФ)", "КП"];
 const DOC_STATUS = { todo: { label: "В работе", color: "#2563EB", bg: "#EAF1FE" }, done: { label: "Сделано", color: "#B45309", bg: "#FCF1E2" }, paid: { label: "Оплачено", color: "#0E7C66", bg: "#E4F3EE" } };
+const EXPENSE_TYPES = { salary: "Зарплата", travel: "Дорожные", other: "Другое" };
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -160,6 +161,7 @@ function Dashboard({ session, profile }) {
   const [handouts, setHandouts] = useState([]);
   const [partners, setPartners] = useState([]);
   const [docs, setDocs] = useState([]);
+  const [expenses, setExpenses] = useState([]);
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -179,7 +181,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -189,6 +191,7 @@ function Dashboard({ session, profile }) {
       supabase.from("handouts").select("*"),
       supabase.from("partners").select("*"),
       supabase.from("doc_services").select("*").order("created_at", { ascending: false }),
+      supabase.from("tech_expenses").select("*").order("created_at", { ascending: false }),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -200,6 +203,7 @@ function Dashboard({ session, profile }) {
     setHandouts(hr.data || []);
     setPartners(ptr.data || []);
     setDocs(dsr.data || []);
+    setExpenses(exr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -371,6 +375,24 @@ function Dashboard({ session, profile }) {
     await logAction("Документы", `Удалено: ${d.type} · ${fmt(d.amount)} ₸`);
     showToast("Удалено"); load();
   }
+  async function saveExpense(payload, existing) {
+    const res = existing ? await supabase.from("tech_expenses").update(payload).eq("id", existing.id) : await supabase.from("tech_expenses").insert({ ...payload, created_by: session.user.id });
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    const t = techById(payload.tech_id);
+    await logAction("Выплата", `${t?.full_name || "?"} · ${EXPENSE_TYPES[payload.type] || payload.type} · ${fmt(payload.amount)} ₸`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function setExpenseStatus(e, status) {
+    const { error } = await supabase.from("tech_expenses").update({ status }).eq("id", e.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Выплата", `${techById(e.tech_id)?.full_name || "?"} · ${status === "paid" ? "выплачено" : "отменено"}`);
+    showToast("Обновлено"); load();
+  }
+  async function removeExpense(e) {
+    await supabase.from("tech_expenses").delete().eq("id", e.id);
+    await logAction("Выплата", `Удалено: ${techById(e.tech_id)?.full_name || "?"} · ${fmt(e.amount)} ₸`);
+    showToast("Удалено"); load();
+  }
 
   function exportExcel() {
     try {
@@ -428,6 +450,12 @@ function Dashboard({ session, profile }) {
       }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(docRows.length ? docRows : [{}]), "Документы");
 
+      const expenseRows = expenses.map((e) => ({
+        "Сотрудник": techById(e.tech_id)?.full_name || "", "Тип": EXPENSE_TYPES[e.type] || e.type,
+        "Сумма ₸": e.amount, "Дата": e.expense_date ? isoToRu(e.expense_date) : "", "Статус": e.status === "paid" ? "Выплачено" : "К выплате", "Заметка": e.note || "",
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(expenseRows.length ? expenseRows : [{}]), "Выплаты сотрудникам");
+
       const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       const blob = new Blob([out], { type: "application/octet-stream" });
       const url = URL.createObjectURL(blob);
@@ -444,7 +472,7 @@ function Dashboard({ session, profile }) {
   const fin = (() => {
     const weekIdx = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
     const week = [1, 2, 3, 4, 5, 6, 0].map((dow) => ({ dow, label: WEEKDAYS[dow].slice(0, 2), count: 0, revenue: 0 }));
-    let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, qrFees = 0; const bySource = {};
+    let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, qrFees = 0; const bySource = {}; const byTech = {};
     jobs.forEach((j) => {
       const dt = parseIso(j.scheduled_date);
       const inR = pMode === "all" || (dt && dt.getTime() >= range.start && dt.getTime() < range.end);
@@ -455,16 +483,29 @@ function Dashboard({ session, profile }) {
       if (j.status === "done") {
         const paid = Number(j.report_paid) || 0;
         const jqr = Number(j.report_qr) || 0;
-        revenue += paid; cost += jobChemCost(j); cash += Number(j.report_cash) || 0; qr += jqr;
+        const jcost = jobChemCost(j);
+        revenue += paid; cost += jcost; cash += Number(j.report_cash) || 0; qr += jqr;
         qrFees += jqr * QR_FEE_RATE;
         partnerShares += partnerShareAmt(j);
         bySource[src].revenue += paid;
         if (dt) { const wi = weekIdx[dt.getDay()]; week[wi].count++; week[wi].revenue += paid; }
+        if (j.assigned_to) {
+          if (!byTech[j.assigned_to]) byTech[j.assigned_to] = { count: 0, revenue: 0, cost: 0 };
+          byTech[j.assigned_to].count++; byTech[j.assigned_to].revenue += paid; byTech[j.assigned_to].cost += jcost;
+        }
       }
     });
     const weekMax = Math.max(1, ...week.map((w) => w.revenue));
-    return { revenue, cost, partnerShares, qrFees, profit: revenue - cost - partnerShares - qrFees, cash, qr, bySource, week, weekMax };
+    return { revenue, cost, partnerShares, qrFees, profit: revenue - cost - partnerShares - qrFees, cash, qr, bySource, byTech, week, weekMax };
   })();
+
+  const expensesInRange = expenses.filter((e) => {
+    if (pMode === "all") return true;
+    if (!e.expense_date) return false;
+    const t = new Date(e.expense_date).getTime();
+    return t >= range.start && t < range.end;
+  }).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const netProfit = fin.profit - expensesInRange;
 
   // ---- склад ----
   const inventory = chemicals.map((c) => {
@@ -652,7 +693,9 @@ function Dashboard({ session, profile }) {
                 <div className="kd-row"><span>Себестоимость препаратов</span><strong style={{ color: "#B42318" }}>− {fmt(fin.cost)} ₸</strong></div>
                 <div className="kd-row"><span>Доли партнёров</span><strong style={{ color: "#B42318" }}>− {fmt(fin.partnerShares)} ₸</strong></div>
                 <div className="kd-row"><span>Комиссия банка по QR (0.95%)</span><strong style={{ color: "#B42318" }}>− {fmt(fin.qrFees)} ₸</strong></div>
-                <div className="kd-row total"><span>Прибыль</span><strong style={{ color: "#0E7C66" }}>{fmt(fin.profit)} ₸</strong></div>
+                <div className="kd-row"><span>Прибыль по заявкам</span><strong>{fmt(fin.profit)} ₸</strong></div>
+                <div className="kd-row"><span>Выплаты сотрудникам (зарплата/дорожные)</span><strong style={{ color: "#B42318" }}>− {fmt(expensesInRange)} ₸</strong></div>
+                <div className="kd-row total"><span>Итоговая прибыль</span><strong style={{ color: netProfit >= 0 ? "#0E7C66" : "#B42318" }}>{fmt(netProfit)} ₸</strong></div>
               </div>
               <div className="kd-card">
                 <div className="kd-section">Источники клиентов</div>
@@ -672,6 +715,27 @@ function Dashboard({ session, profile }) {
                   <strong className="kd-weeksum">{fmt(w.revenue)} ₸</strong>
                 </div>
               ))}
+            </div>
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">По дезинфекторам · {range.label}</div>
+              {techs.length === 0 && <div className="kd-muted">Дезинфекторов пока нет.</div>}
+              {techs.length > 0 && Object.keys(fin.byTech).length === 0 && <div className="kd-muted">За период выполненных заявок нет.</div>}
+              {techs.length > 0 && Object.keys(fin.byTech).length > 0 && (
+                <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1fr" }}><span>Сотрудник</span><span>Заявок</span><span>Выручка</span><span>Прибыль</span></div>
+              )}
+              {techs.map((t) => {
+                const v = fin.byTech[t.id];
+                if (!v) return null;
+                const techProfit = v.revenue - v.cost;
+                return (
+                  <div className="kd-ledgerrow" key={t.id} style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1fr" }}>
+                    <span className="kd-ledgername">{t.full_name || "?"}</span>
+                    <span>{v.count} зав.</span>
+                    <span>{fmt(v.revenue)} ₸</span>
+                    <strong style={{ color: "#0E7C66" }}>{fmt(techProfit)} ₸</strong>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
@@ -721,7 +785,10 @@ function Dashboard({ session, profile }) {
                         <div className="kd-muted">{t.phone || "—"} · заявок: {cnt}</div>
                       </div>
                     </div>
-                    <button className="kd-btn primary sm" onClick={() => setModal({ kind: "handout", tech: t })}>Выдать / остаток</button>
+                    <div className="kd-actions" style={{ marginBottom: 0 }}>
+                      <button className="kd-btn primary sm" onClick={() => setModal({ kind: "handout", tech: t })}>Выдать / остаток</button>
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "expense", tech: t })}>+ Выплата</button>
+                    </div>
                   </div>
                   {ledger.length === 0
                     ? <div className="kd-muted" style={{ marginTop: 8 }}>Препараты этому сотруднику ещё не выдавались.</div>
@@ -738,6 +805,28 @@ function Dashboard({ session, profile }) {
                         ))}
                       </div>
                     )}
+                  {(() => {
+                    const techExp = expenses.filter((e) => e.tech_id === t.id);
+                    if (techExp.length === 0) return null;
+                    const owed = techExp.filter((e) => e.status !== "paid").reduce((s, e) => s + (Number(e.amount) || 0), 0);
+                    return (
+                      <div className="kd-ledger">
+                        <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1fr" }}><span>Выплата</span><span>Сумма</span><span>Статус</span><span></span></div>
+                        {techExp.map((e) => (
+                          <div className="kd-ledgerrow" key={e.id} style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1fr" }}>
+                            <span className="kd-ledgername">{EXPENSE_TYPES[e.type] || e.type}{e.note ? " · " + e.note : ""}</span>
+                            <span>{fmt(e.amount)} ₸</span>
+                            <span style={{ color: e.status === "paid" ? "#0E7C66" : "#B42318", fontWeight: 700 }}>{e.status === "paid" ? "выплачено" : "к выплате"}</span>
+                            <span style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                              <button className="kd-btn ghost sm" onClick={() => setExpenseStatus(e, e.status === "paid" ? "unpaid" : "paid")}>{e.status === "paid" ? "Отменить" : "Выплатить"}</button>
+                              <button className="kd-btn ghost danger sm" onClick={() => removeExpense(e)}>✕</button>
+                            </span>
+                          </div>
+                        ))}
+                        {owed > 0 && <div className="kd-muted" style={{ marginTop: 6, fontWeight: 700, color: "#B42318" }}>К выплате всего: {fmt(owed)} ₸</div>}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -863,6 +952,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
+      {modal?.kind === "expense" && <ExpenseModal tech={modal.tech} onClose={() => setModal(null)} onSave={saveExpense} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
@@ -1375,6 +1465,37 @@ function HandoutModal({ tech, chemicals, onClose, onSave }) {
         </Field>
       </div>
       <Field label="Заметка (необязательно)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="выдал на объект ..." /></Field>
+    </ModalShell>
+  );
+}
+
+function ExpenseModal({ tech, onClose, onSave }) {
+  const [type, setType] = useState("salary");
+  const [amount, setAmount] = useState("");
+  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState("");
+  const [status, setStatus] = useState("unpaid");
+  const [saving, setSaving] = useState(false);
+  const ok = Number(amount) > 0;
+  async function save() {
+    setSaving(true);
+    await onSave({ tech_id: tech.id, type, amount: Number(amount) || 0, expense_date: expenseDate || null, note, status });
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={`Выплата — ${tech.full_name || "сотрудник"}`} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <div className="kd-grid2">
+        <Field label="Тип"><select value={type} onChange={(e) => setType(e.target.value)}><option value="salary">Зарплата</option><option value="travel">Дорожные</option><option value="other">Другое</option></select></Field>
+        <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="30000" /></Field>
+      </div>
+      <div className="kd-grid2">
+        <Field label="Дата"><input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} /></Field>
+        <Field label="Статус"><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="unpaid">К выплате</option><option value="paid">Выплачено</option></select></Field>
+      </div>
+      <Field label="Заметка"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за какой период / комментарий" /></Field>
     </ModalShell>
   );
 }
