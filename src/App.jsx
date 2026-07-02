@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -35,6 +35,8 @@ const repeatLabel = (code) => (REPEAT_POLICIES.find((p) => p.code === code) || {
 const DOC_TYPES = ["Договор", "Акт о дезработах", "Провести через фирму (АВР+ЭСФ)", "КП"];
 const DOC_STATUS = { todo: { label: "В работе", color: "#2563EB", bg: "#EAF1FE" }, done: { label: "Сделано", color: "#B45309", bg: "#FCF1E2" }, paid: { label: "Оплачено", color: "#0E7C66", bg: "#E4F3EE" } };
 const EXPENSE_TYPES = { salary: "Зарплата", travel: "Дорожные", other: "Другое" };
+const EQUIP_CATEGORIES = { equipment: "Оборудование", siz: "СИЗ", container: "Тара", other: "Другое" };
+const EQUIP_STATUS = { with_tech: { label: "У сотрудника", color: "#0E7C66", bg: "#E4F3EE" }, returned: { label: "Возврат на склад", color: "#6E7871", bg: "#F7F9F6" }, broken: { label: "Сломано", color: "#B3261E", bg: "#FBE7E5" }, lost: { label: "Утеряно", color: "#B3261E", bg: "#FBE7E5" }, transferred: { label: "Передано", color: "#B4650B", bg: "#FBEDD9" } };
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -167,6 +169,8 @@ function Dashboard({ session, profile }) {
   const [partners, setPartners] = useState([]);
   const [docs, setDocs] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [equipment, setEquipment] = useState([]);
+  const [equipHandouts, setEquipHandouts] = useState([]);
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -186,7 +190,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -197,6 +201,8 @@ function Dashboard({ session, profile }) {
       supabase.from("partners").select("*"),
       supabase.from("doc_services").select("*").order("created_at", { ascending: false }),
       supabase.from("tech_expenses").select("*").order("created_at", { ascending: false }),
+      supabase.from("equipment").select("*"),
+      supabase.from("equipment_handouts").select("*"),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -209,6 +215,8 @@ function Dashboard({ session, profile }) {
     setPartners(ptr.data || []);
     setDocs(dsr.data || []);
     setExpenses(exr.data || []);
+    setEquipment(eqr.data || []);
+    setEquipHandouts(ehr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -229,6 +237,8 @@ function Dashboard({ session, profile }) {
 
   const techById = (id) => techs.find((t) => t.id === id);
   const profileById = (id) => allProfiles.find((p) => p.id === id);
+  const equipById = (id) => equipment.find((e) => e.id === id);
+  const techEquipment = (techId) => equipHandouts.filter((h) => h.tech_id === techId && h.status === "with_tech").map((h) => ({ handout: h, equip: equipById(h.equipment_id) })).filter((r) => r.equip);
 
   async function createJob(payload) {
     const { error } = await supabase.from("jobs").insert({ ...payload, created_by: session.user.id });
@@ -404,6 +414,49 @@ function Dashboard({ session, profile }) {
     await logAction("Дезинфектор", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
     setModal(null); showToast("Сохранено"); load();
   }
+  async function saveEquipment(payload, existing) {
+    const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Оборудование", `${existing ? "Изменено" : "Добавлено на склад"}: ${payload.name}`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function removeEquipment(item) {
+    const { error } = await supabase.from("equipment").delete().eq("id", item.id);
+    if (error) { showToast("Ошибка: нельзя удалить — есть история выдач этой позиции"); return; }
+    await logAction("Оборудование", `Удалено из справочника: ${item.name}`);
+    showToast("Удалено"); load();
+  }
+  async function issueEquipment(payload) {
+    const { error } = await supabase.from("equipment_handouts").insert({ ...payload, created_by: session.user.id });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    const t = techById(payload.tech_id); const e = equipById(payload.equipment_id);
+    await logAction("Оборудование", `Выдано: ${t?.full_name || "?"} · ${e?.name || "?"} — ${payload.qty} ${e?.unit || "шт"}`);
+    setModal(null); showToast("Выдано"); load();
+  }
+  async function setEquipStatus(h, status) {
+    const { error } = await supabase.from("equipment_handouts").update({ status }).eq("id", h.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    const t = techById(h.tech_id); const e = equipById(h.equipment_id);
+    await logAction("Оборудование", `${t?.full_name || "?"} · ${e?.name || "?"} · ${(EQUIP_STATUS[status] || {}).label || status}`);
+    showToast("Обновлено"); load();
+  }
+  async function reportEquipIssue(h, status, note) {
+    const { error } = await supabase.rpc("report_equipment_issue", { p_handout: h.id, p_status: status, p_note: note || null });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    setModal(null); showToast("Сообщение отправлено"); load();
+  }
+  async function transferEquipment(h, newTechId, note) {
+    const upd = await supabase.from("equipment_handouts").update({ status: "transferred", note: note || h.note }).eq("id", h.id);
+    if (upd.error) { showToast("Ошибка: " + upd.error.message); return; }
+    const ins = await supabase.from("equipment_handouts").insert({
+      tech_id: newTechId, equipment_id: h.equipment_id, qty: h.qty, handout_date: new Date().toISOString().slice(0, 10),
+      status: "with_tech", note: `Передано от ${techById(h.tech_id)?.full_name || "?"}${note ? " — " + note : ""}`, created_by: session.user.id,
+    });
+    if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
+    const e = equipById(h.equipment_id);
+    await logAction("Оборудование", `Передано: ${e?.name || "?"} · ${techById(h.tech_id)?.full_name || "?"} → ${techById(newTechId)?.full_name || "?"}`);
+    setModal(null); showToast("Оборудование передано"); load();
+  }
 
   async function exportExcel() {
     try {
@@ -522,6 +575,27 @@ function Dashboard({ session, profile }) {
         amount: e.amount, date: e.expense_date ? isoToRu(e.expense_date) : "", status: e.status === "paid" ? "Выплачено" : "К выплате", note: e.note || "",
       })));
 
+      await addSheet("Оборудование и СИЗ", [
+        { header: "Название", key: "name", width: 26 }, { header: "Категория", key: "category", width: 16 },
+        { header: "Единица", key: "unit", width: 10 }, { header: "Цена за ед.", key: "price", width: 14, money: true },
+        { header: "На руках (кол-во)", key: "issued", width: 16 }, { header: "Стоимость на руках", key: "value", width: 18, money: true },
+      ], equipment.map((e) => ({
+        name: e.name, category: EQUIP_CATEGORIES[e.category] || e.category, unit: e.unit, price: e.price,
+        issued: equipIssuedQty(e.id), value: Math.round(equipIssuedQty(e.id) * (Number(e.price) || 0)),
+      })));
+
+      await addSheet("Выдачи оборудования", [
+        { header: "Сотрудник", key: "tech", width: 18 }, { header: "Позиция", key: "equip", width: 24 },
+        { header: "Кол-во", key: "qty", width: 10 }, { header: "Дата", key: "date", width: 12 },
+        { header: "Статус", key: "status", width: 16 }, { header: "Стоимость", key: "value", width: 14, money: true }, { header: "Заметка", key: "note", width: 26 },
+      ], equipHandouts.map((h) => {
+        const e = equipById(h.equipment_id);
+        return {
+          tech: techById(h.tech_id)?.full_name || "", equip: e?.name || "", qty: h.qty, date: h.handout_date ? isoToRu(h.handout_date) : "",
+          status: (EQUIP_STATUS[h.status] || {}).label || h.status, value: Math.round((Number(h.qty) || 0) * (Number(e?.price) || 0)), note: h.note || "",
+        };
+      }));
+
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
@@ -580,6 +654,9 @@ function Dashboard({ session, profile }) {
     return { ...c, used, remaining, low: remaining <= (Number(c.min_ml) || 0), stockValue: remaining * pricePerBase(c) };
   });
   const lowCount = inventory.filter((i) => i.low).length;
+  const totalStockValue = inventory.reduce((s, c) => s + c.stockValue, 0);
+  const equipIssuedQty = (equipId) => equipHandouts.filter((h) => h.equipment_id === equipId && h.status === "with_tech").reduce((s, h) => s + (Number(h.qty) || 0), 0);
+  const totalEquipValue = equipment.reduce((s, e) => s + equipIssuedQty(e.id) * (Number(e.price) || 0), 0);
 
   const activeJobs = jobs.filter((j) => j.status !== "done");
   const doneJobs = jobs.filter((j) => j.status === "done");
@@ -617,6 +694,7 @@ function Dashboard({ session, profile }) {
   ] : [
     { id: "jobs", icon: ClipboardList, label: `Мои заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
+    { id: "myequip", icon: Wrench, label: "Моё оборудование" },
   ];
 
   return (
@@ -723,6 +801,26 @@ function Dashboard({ session, profile }) {
           </>
         )}
 
+        {!loading && tab === "myequip" && (
+          <div className="kd-list">
+            {techEquipment(session.user.id).length === 0 && <div className="kd-empty">Пока ничего не выдано. Если что-то выдали на объекте — это появится здесь.</div>}
+            {techEquipment(session.user.id).map((r) => (
+              <div key={r.handout.id} className="kd-card">
+                <div className="kd-card-head">
+                  <div className="kd-pest">{r.equip.name}</div>
+                  <span className="kd-badge" style={{ color: "#7C3AED", background: "#F1ECFE" }}>{EQUIP_CATEGORIES[r.equip.category] || r.equip.category}</span>
+                </div>
+                <div className="kd-meta"><span>Кол-во: {r.handout.qty} {r.equip.unit}</span><span>·</span><span>Выдано: {isoToRu(r.handout.handout_date) || "—"}</span></div>
+                {r.handout.note && <div className="kd-notebox">📝 {r.handout.note}</div>}
+                <div className="kd-actions">
+                  <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "reportEquip", handout: r.handout, equip: r.equip, status: "broken" })}>Сообщить о поломке</button>
+                  <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "reportEquip", handout: r.handout, equip: r.equip, status: "lost" })}>Потерял(а)</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {!loading && tab === "repeats" && (
           <div className="kd-list">
             {jobs.filter((j) => j.repeat_state === "on_repeat").length === 0 &&
@@ -810,6 +908,11 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "stock" && (
           <div className="kd-list">
+            <div className="kd-card">
+              <div className="kd-section">Активы</div>
+              <div className="kd-row"><span>Препараты на складе</span><strong>{fmt(totalStockValue)} ₸</strong></div>
+              <div className="kd-row total"><span>Оборудование и СИЗ на руках у сотрудников</span><strong>{fmt(totalEquipValue)} ₸</strong></div>
+            </div>
             {inventory.length === 0 && <div className="kd-empty">Склад пуст. Добавь препарат через «+ Препарат».</div>}
             {inventory.map((c) => (
               <div key={c.id} className={`kd-card ${c.low ? "low" : ""}`}>
@@ -831,6 +934,35 @@ function Dashboard({ session, profile }) {
                 )}
               </div>
             ))}
+
+            <div className="kd-tabbar" style={{ marginTop: 6 }}>
+              <div className="kd-title" style={{ fontSize: 17 }}>Оборудование и СИЗ</div>
+              {isAdmin && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "equip" })}><Plus size={14} />Позиция</button>}
+            </div>
+            {equipment.length === 0 && <div className="kd-empty">Пока ничего не заведено — генераторы, опрыскиватели, канистры, комбинезоны, перчатки и т.п.</div>}
+            {equipment.map((e) => {
+              const issuedQty = equipIssuedQty(e.id);
+              return (
+                <div key={e.id} className="kd-card">
+                  <div className="kd-card-head">
+                    <div className="kd-pest">{e.name}</div>
+                    <span className="kd-badge" style={{ color: "#7C3AED", background: "#F1ECFE" }}>{EQUIP_CATEGORIES[e.category] || e.category}</span>
+                  </div>
+                  <div className="kd-stockgrid">
+                    <div><span>Единица</span><strong>{e.unit}</strong></div>
+                    <div><span>Цена за ед.</span><strong>{fmt(e.price)} ₸</strong></div>
+                    <div><span>Выдано (на руках)</span><strong>{issuedQty} {e.unit}</strong></div>
+                    <div><span>Стоимость на руках</span><strong>{fmt(issuedQty * (Number(e.price) || 0))} ₸</strong></div>
+                  </div>
+                  {isAdmin && (
+                    <div className="kd-actions">
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "equip", item: e })}><Pencil size={13} />Изменить</button>
+                      <button className="kd-btn ghost danger sm" onClick={() => removeEquipment(e)}>Удалить</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -896,6 +1028,30 @@ function Dashboard({ session, profile }) {
                       </div>
                     );
                   })()}
+                  <div className="kd-ledger">
+                    <div className="kd-tabbar" style={{ marginBottom: 8 }}>
+                      <span className="kd-section" style={{ margin: 0 }}>Оборудование</span>
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "issueEquip", tech: t })}><Plus size={13} />Выдать</button>
+                    </div>
+                    {techEquipment(t.id).length === 0
+                      ? <div className="kd-muted">На руках оборудования нет.</div>
+                      : (<>
+                        <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.4fr .7fr 1fr 1fr 1.2fr" }}><span>Позиция</span><span>Кол-во</span><span>Выдано</span><span>Стоимость</span><span></span></div>
+                        {techEquipment(t.id).map((r) => (
+                          <div className="kd-ledgerrow" key={r.handout.id} style={{ gridTemplateColumns: "1.4fr .7fr 1fr 1fr 1.2fr" }}>
+                            <span className="kd-ledgername">{r.equip.name}{r.handout.note ? " · " + r.handout.note : ""}</span>
+                            <span>{r.handout.qty} {r.equip.unit}</span>
+                            <span>{isoToRu(r.handout.handout_date) || "—"}</span>
+                            <strong>{fmt((Number(r.handout.qty) || 0) * (Number(r.equip.price) || 0))} ₸</strong>
+                            <span style={{ display: "flex", gap: 5, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                              <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "transferEquip", handout: r.handout })}>Передать</button>
+                              <button className="kd-btn ghost sm" onClick={() => setEquipStatus(r.handout, "returned")}>Возврат</button>
+                              <button className="kd-btn ghost danger sm" onClick={() => setEquipStatus(r.handout, "broken")}>Сломано</button>
+                            </span>
+                          </div>
+                        ))}
+                      </>)}
+                  </div>
                 </div>
               );
             })}
@@ -1023,6 +1179,10 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
       {modal?.kind === "expense" && <ExpenseModal tech={modal.tech} onClose={() => setModal(null)} onSave={saveExpense} />}
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
+      {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
+      {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
+      {modal?.kind === "transferEquip" && <TransferEquipModal handout={modal.handout} techs={techs.filter((t) => t.id !== modal.handout.tech_id)} onClose={() => setModal(null)} onSave={(newTechId, note) => transferEquipment(modal.handout, newTechId, note)} />}
+      {modal?.kind === "reportEquip" && <ReportEquipModal equip={modal.equip} status={modal.status} onClose={() => setModal(null)} onSave={(note) => reportEquipIssue(modal.handout, modal.status, note)} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
@@ -1584,6 +1744,85 @@ function TechEditModal({ tech, onClose, onSave }) {
       <div className="kd-muted" style={{ marginBottom: 12 }}>Логин и пароль этим не затрагиваются — меняется только отображаемое имя и телефон в приложении.</div>
       <Field label="Имя (как будет видно в приложении)"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Байсеит" /></Field>
       <Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 ..." /></Field>
+    </ModalShell>
+  );
+}
+
+function EquipModal({ item, onClose, onSave }) {
+  const [name, setName] = useState(item?.name || "");
+  const [category, setCategory] = useState(item?.category || "equipment");
+  const [unit, setUnit] = useState(item?.unit || "шт");
+  const [price, setPrice] = useState(item?.price ?? "");
+  const [saving, setSaving] = useState(false);
+  const ok = name.trim();
+  async function save() { setSaving(true); await onSave({ name: name.trim(), category, unit: unit.trim() || "шт", price: Number(price) || 0 }, item); setSaving(false); }
+  return (
+    <ModalShell title={item ? "Изменить позицию" : "Новая позиция на склад"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <Field label="Название"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Генератор холодного тумана" /></Field>
+      <div className="kd-grid2">
+        <Field label="Категория"><select value={category} onChange={(e) => setCategory(e.target.value)}>{Object.entries(EQUIP_CATEGORIES).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></Field>
+        <Field label="Единица"><input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="шт / пара / компл." /></Field>
+      </div>
+      <Field label="Цена за единицу (₸) — видно только админу"><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="450000" /></Field>
+    </ModalShell>
+  );
+}
+
+function IssueEquipModal({ tech, equipment, onClose, onSave }) {
+  const [equipId, setEquipId] = useState("");
+  const [qty, setQty] = useState("1");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = equipId && Number(qty) > 0;
+  async function save() { setSaving(true); await onSave({ tech_id: tech.id, equipment_id: equipId, qty: Number(qty) || 1, handout_date: date || null, note, status: "with_tech" }); setSaving(false); }
+  return (
+    <ModalShell title={`Выдать оборудование — ${tech.full_name || "сотрудник"}`} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Выдать"}</button>
+    </>}>
+      {equipment.length === 0 && <div className="kd-muted" style={{ marginBottom: 10 }}>Сначала заведи позицию на складе (вкладка «Склад» → «Оборудование и СИЗ»).</div>}
+      <Field label="Позиция"><select value={equipId} onChange={(e) => setEquipId(e.target.value)}><option value="">— выбери —</option>{equipment.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
+      <div className="kd-grid2">
+        <Field label="Количество"><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="1" /></Field>
+        <Field label="Дата выдачи"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      </div>
+      <Field label="Заметка (необязательно)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="на какой объект / комментарий" /></Field>
+    </ModalShell>
+  );
+}
+
+function TransferEquipModal({ handout, techs, onClose, onSave }) {
+  const [newTechId, setNewTechId] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function save() { setSaving(true); await onSave(newTechId, note); setSaving(false); }
+  return (
+    <ModalShell title="Передать другому сотруднику" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!newTechId || saving} onClick={save}>{saving ? "…" : "Передать"}</button>
+    </>}>
+      {techs.length === 0 && <div className="kd-muted" style={{ marginBottom: 10 }}>Больше некому передать — нет других дезинфекторов.</div>}
+      <Field label="Кому передать"><select value={newTechId} onChange={(e) => setNewTechId(e.target.value)}><option value="">— выбери —</option>{techs.map((t) => <option key={t.id} value={t.id}>{t.full_name || t.id.slice(0, 6)}</option>)}</select></Field>
+      <Field label="Заметка (необязательно)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="причина передачи" /></Field>
+    </ModalShell>
+  );
+}
+
+function ReportEquipModal({ equip, status, onClose, onSave }) {
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function save() { setSaving(true); await onSave(note); setSaving(false); }
+  return (
+    <ModalShell title={status === "broken" ? "Сообщить о поломке" : "Сообщить о потере"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Отправить"}</button>
+    </>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>{equip?.name}. Админ увидит это в журнале и решит вопрос с заменой.</div>
+      <Field label="Что случилось (по возможности опиши)"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Напр.: не заводится, разбит бак и т.п." /></Field>
     </ModalShell>
   );
 }
