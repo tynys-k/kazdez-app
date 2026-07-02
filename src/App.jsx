@@ -872,7 +872,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
   const share = job.partner_id && job.status === "done" ? Math.round((Number(job.report_paid) || 0) * (Number(job.partner_share) || 0) / 100) : 0;
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
   return (
-    <div className={`kd-card ${needsFollowup ? "low" : ""}`}>
+    <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span></div>
       <div className="kd-meta">
         <span className="kd-brandtag">{brandLabel}</span>
