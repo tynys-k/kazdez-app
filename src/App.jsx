@@ -149,6 +149,7 @@ function Dashboard({ session, profile }) {
   const [jobs, setJobs] = useState([]);
   const [chemicals, setChemicals] = useState([]);
   const [techs, setTechs] = useState([]);
+  const [allProfiles, setAllProfiles] = useState([]);
   const [handouts, setHandouts] = useState([]);
   const [partners, setPartners] = useState([]);
   const [docs, setDocs] = useState([]);
@@ -187,6 +188,7 @@ function Dashboard({ session, profile }) {
     setAudit(ar.data || []);
     setTrash(tr.data || []);
     setTechs((pr.data || []).filter((p) => p.role === "tech"));
+    setAllProfiles(pr.data || []);
     setHandouts(hr.data || []);
     setPartners(ptr.data || []);
     setDocs(dsr.data || []);
@@ -209,6 +211,7 @@ function Dashboard({ session, profile }) {
   }
 
   const techById = (id) => techs.find((t) => t.id === id);
+  const profileById = (id) => allProfiles.find((p) => p.id === id);
 
   async function createJob(payload) {
     const { error } = await supabase.from("jobs").insert({ ...payload, created_by: session.user.id });
@@ -833,7 +836,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} />}
       {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
-      {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} />}
+      {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} />}
       {modal?.kind === "history" && <HistoryModal job={modal.job} jobs={jobs} onClose={() => setModal(null)} onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : { kind: "edit", job: j })} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
@@ -878,7 +881,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
       <div className="kd-actions">
         {isAdmin && <button className="kd-btn wa" onClick={onCopy}>Скопировать для WhatsApp</button>}
         {job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
-        {isAdmin && job.status !== "done" && <button className="kd-btn ghost" onClick={onAssign}>{assignedName ? "Переназначить" : "Назначить"}</button>}
+        {isAdmin && <button className="kd-btn ghost" onClick={onAssign}>{assignedName ? "Переназначить" : "Назначить"}</button>}
         {isAdmin && <button className="kd-btn ghost" onClick={onEdit}>Изменить</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
         {isAdmin && job.status === "done" && !job.repeat_state && <button className="kd-btn ghost" onClick={onRepeat}>На повтор</button>}
@@ -1165,12 +1168,14 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
   );
 }
 
-function ViewModal({ job, chemicals, onClose }) {
+function ViewModal({ job, chemicals, performedBy, onClose }) {
   const hasSplit = (job.report_cash || 0) > 0 && (job.report_qr || 0) > 0;
   const chemOf = (l) => (l.chemical_id ? (chemicals || []).find((x) => x.id === l.chemical_id) : (chemicals || []).find((x) => norm(x.name) === norm(l.name)));
   return (
     <ModalShell title="Отчёт по заявке" onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
+      <div className="kd-row"><span>Выполнил</span><strong>{performedBy || "не указано"}</strong></div>
+      {job.reported_at && <div className="kd-row"><span>Дата отчёта</span><strong>{fmtTs(job.reported_at)}</strong></div>}
       {hasSplit ? (<>
         <div className="kd-row"><span>Наличными</span><strong>{fmt(job.report_cash)} ₸</strong></div>
         <div className="kd-row"><span>QR / переводом</span><strong>{fmt(job.report_qr)} ₸</strong></div>
