@@ -954,7 +954,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
     </>}>
       <div className="kd-grid2">
         <Field label="Бренд"><select value={f.brand} onChange={onBrand}><option value="KazDez">KazDez</option><option value="Sanitex">Sanitex</option><option value="partner">Партнёрская</option></select></Field>
-        <Field label="Тип"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Гарантийная</option><option>Осмотр</option></select></Field>
+        <Field label="Тип"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Плановая</option><option>Гарантийная</option><option>Осмотр</option></select></Field>
       </div>
       {f.brand === "partner" && (
         <div className="kd-grid2">
