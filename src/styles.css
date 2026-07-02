@@ -89,13 +89,18 @@ body{
 .kd-muted.paid{color:var(--primary);font-weight:700;}
 .kd-doctag{font-size:12px;font-weight:700;color:#7C3AED;background:#F1ECFE;border-radius:8px;padding:5px 9px;}
 .kd-repeattag{font-size:12px;font-weight:700;color:#B45309;background:#FCF1E2;border-radius:8px;padding:5px 9px;}
+.kd-followuptag{font-size:12px;font-weight:700;color:#B42318;background:#FCE6E4;border-radius:8px;padding:5px 9px;}
 .kd-brandtag{font-size:11px;font-weight:800;color:#0A5E4D;background:#E4F3EE;border-radius:6px;padding:2px 8px;letter-spacing:.3px;}
 .kd-datetimetag{font-size:12px;font-weight:700;color:#B45309;background:#FCF1E2;border-radius:6px;padding:2px 8px;}
 .kd-hint{background:#FFF7E6;border:1px solid #F5E2B8;border-radius:10px;padding:9px 12px;margin:6px 0 12px;font-size:13.5px;line-height:1.4;}
 .kd-notebox{background:#F1F4F1;border-radius:10px;padding:8px 12px;margin-bottom:11px;font-size:13.5px;line-height:1.4;color:var(--ink);}
 .kd-clientlink{border:none;background:transparent;padding:0;font:inherit;font-size:13px;color:var(--muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;}
 .kd-clientlink:hover{color:var(--primary-d);}
-.kd-searchbar{position:relative;margin-bottom:14px;}
+.kd-partnername{border:none;background:transparent;padding:0;font:inherit;font-weight:750;font-size:16px;color:var(--ink);cursor:pointer;text-decoration:underline;text-underline-offset:3px;}
+.kd-partnername:hover{color:var(--primary-d);}
+.kd-searchrow{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+.kd-searchbar{position:relative;flex:1;min-width:220px;margin-bottom:0;}
+.kd-techselect{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:11px 14px;min-height:44px;min-width:180px;}
 .kd-search{width:100%;font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:11px 40px 11px 14px;min-height:44px;}
 .kd-searchbar .kd-x{position:absolute;right:6px;top:6px;}
 .kd-histrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer;}
