@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
+import {
+  ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight,
+} from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
 const fmt = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
@@ -141,7 +145,8 @@ function Login() {
   return (
     <div className="kd-login">
       <form className="kd-login-card" onSubmit={submit}>
-        <div className="kd-logo-big">KazDez</div>
+        <div className="kd-hazard" />
+        <div className="kd-logo-big"><span className="kd-logo-mark"><Bug size={19} strokeWidth={2.4} /></span>KazDez</div>
         <div className="kd-login-sub">Вход в систему</div>
         <label className="kd-field"><span>Почта</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@mail.kz" autoComplete="username" /></label>
         <label className="kd-field"><span>Пароль</span><input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" autoComplete="current-password" /></label>
@@ -393,71 +398,132 @@ function Dashboard({ session, profile }) {
     await logAction("Выплата", `Удалено: ${techById(e.tech_id)?.full_name || "?"} · ${fmt(e.amount)} ₸`);
     showToast("Удалено"); load();
   }
+  async function editTechProfile(tech, payload) {
+    const { error } = await supabase.from("profiles").update(payload).eq("id", tech.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Дезинфектор", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
+    setModal(null); showToast("Сохранено"); load();
+  }
 
-  function exportExcel() {
+  async function exportExcel() {
     try {
-      const wb = XLSX.utils.book_new();
-      const jobsRows = jobs.map((j) => ({
-        "Дата": isoToRu(j.scheduled_date), "Время": j.scheduled_time, "Бренд": j.brand === "partner" ? "Партнёр" : j.brand, "Тип": j.type, "Вид": j.pest,
-        "Партнёр": j.partner_id ? (partnerById(j.partner_id)?.name || "") : "", "Доля %": j.partner_id ? (j.partner_share ?? "") : "",
-        "Доля ₸": partnerShareAmt(j) || "", "Доля выплачена": j.partner_id && j.status === "done" ? (j.partner_paid ? "да" : "нет") : "",
-        "Адрес": j.address, "Этаж": j.floor, "Метраж (м²)": j.area, "Источник": j.source,
-        "Телефон": j.client_phone, "Гарантия (мес)": j.guarantee_months,
-        "Дезинфектор": techById(j.assigned_to)?.full_name || "",
-        "Статус": (STATUS[j.status] && STATUS[j.status].label) || j.status,
-        "Цена (варианты)": (j.price_options || []).map((p) => `${p.amount}${p.label ? " " + p.label : ""}`).join("; "),
-        "Оплачено": j.report_paid ?? "", "Наличными": j.report_cash ?? "", "QR": j.report_qr ?? "", "Способ": j.report_method ?? "",
-        "Себестоимость преп.": j.status === "done" ? Math.round(jobChemCost(j)) : "",
-        "Комиссия QR": j.status === "done" ? Math.round((Number(j.report_qr) || 0) * QR_FEE_RATE) : "",
-        "Прибыль (за вычетом доли и комиссии)": j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j) - partnerShareAmt(j) - (Number(j.report_qr) || 0) * QR_FEE_RATE) : "",
-        "Препараты": (j.chemicals || []).map((l) => { const c = lineChem(l); return `${l.name || (c && c.name) || ""} ${fmtAmount(lineAmount(l), c && c.unit_kind)}`; }).join("; "),
-        "Комментарий к заявке": j.note ?? "",
-        "Примечание оплаты": j.report_note ?? "",
-        "Повторный": j.followup_wanted ? `${j.followup_date || "да"}${j.followup_note ? " — " + j.followup_note : ""}` : "",
-        "Документы": j.docs_needed ? `${[j.docs_avr && "АВР", j.docs_dogovor && "Договор"].filter(Boolean).join(", ") || "да"}${j.docs_done ? " (готовы)" : " (ожидают)"}` : "",
-      }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(jobsRows.length ? jobsRows : [{}]), "Заявки");
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "KazDez"; wb.created = new Date();
 
-      const stockRows = chemicals.map((c) => {
+      async function addSheet(name, columns, rows) {
+        const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: 1 }] });
+        ws.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width || 16 }));
+        rows.forEach((r) => ws.addRow(r));
+        const header = ws.getRow(1);
+        header.height = 24;
+        header.eachCell((cell) => {
+          cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0E7C66" } };
+          cell.alignment = { vertical: "middle", horizontal: "left" };
+        });
+        for (let i = 2; i <= ws.rowCount; i++) {
+          const row = ws.getRow(i);
+          row.eachCell({ includeEmpty: true }, (cell) => {
+            cell.alignment = { vertical: "middle" };
+            cell.border = { bottom: { style: "hair", color: { argb: "FFE4E8E4" } } };
+          });
+          if (i % 2 === 0) row.eachCell({ includeEmpty: true }, (cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF6F8F6" } }; });
+        }
+        columns.forEach((c, idx) => { if (c.money) ws.getColumn(idx + 1).numFmt = '#,##0" ₸"'; });
+        if (rows.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
+        return ws;
+      }
+
+      await addSheet("Заявки", [
+        { header: "Дата", key: "date", width: 12 }, { header: "Время", key: "time", width: 8 },
+        { header: "Бренд", key: "brand", width: 12 }, { header: "Тип", key: "type", width: 12 }, { header: "Вид", key: "pest", width: 16 },
+        { header: "Партнёр", key: "partner", width: 14 }, { header: "Доля %", key: "sharePct", width: 9 },
+        { header: "Доля ₸", key: "shareAmt", width: 12, money: true }, { header: "Доля выплачена", key: "sharePaid", width: 14 },
+        { header: "Адрес", key: "address", width: 32 }, { header: "Этаж", key: "floor", width: 8 }, { header: "Метраж", key: "area", width: 9 },
+        { header: "Источник", key: "source", width: 12 }, { header: "Телефон", key: "phone", width: 16 }, { header: "Гарантия (мес)", key: "guarantee", width: 10 },
+        { header: "Дезинфектор", key: "tech", width: 16 }, { header: "Статус", key: "status", width: 12 },
+        { header: "Цена (варианты)", key: "priceVariants", width: 26 },
+        { header: "Оплачено", key: "paid", width: 12, money: true }, { header: "Наличными", key: "cash", width: 12, money: true },
+        { header: "QR", key: "qr", width: 12, money: true }, { header: "Способ", key: "method", width: 12 },
+        { header: "Себестоимость", key: "cost", width: 14, money: true }, { header: "Комиссия QR", key: "qrfee", width: 12, money: true },
+        { header: "Прибыль", key: "profit", width: 14, money: true }, { header: "Препараты", key: "chems", width: 32 },
+        { header: "Комментарий", key: "note", width: 26 }, { header: "Примечание оплаты", key: "paynote", width: 22 },
+        { header: "Повторный", key: "repeat", width: 24 }, { header: "Документы", key: "docsinfo", width: 24 },
+      ], jobs.map((j) => ({
+        date: isoToRu(j.scheduled_date), time: j.scheduled_time, brand: j.brand === "partner" ? "Партнёр" : j.brand, type: j.type, pest: j.pest,
+        partner: j.partner_id ? (partnerById(j.partner_id)?.name || "") : "", sharePct: j.partner_id ? (j.partner_share ?? "") : "",
+        shareAmt: partnerShareAmt(j) || "", sharePaid: j.partner_id && j.status === "done" ? (j.partner_paid ? "да" : "нет") : "",
+        address: j.address, floor: j.floor, area: j.area, source: j.source, phone: j.client_phone, guarantee: j.guarantee_months,
+        tech: techById(j.assigned_to)?.full_name || "", status: (STATUS[j.status] && STATUS[j.status].label) || j.status,
+        priceVariants: (j.price_options || []).map((p) => `${p.amount}${p.label ? " " + p.label : ""}`).join("; "),
+        paid: j.report_paid ?? "", cash: j.report_cash ?? "", qr: j.report_qr ?? "", method: j.report_method ?? "",
+        cost: j.status === "done" ? Math.round(jobChemCost(j)) : "",
+        qrfee: j.status === "done" ? Math.round((Number(j.report_qr) || 0) * QR_FEE_RATE) : "",
+        profit: j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j) - partnerShareAmt(j) - (Number(j.report_qr) || 0) * QR_FEE_RATE) : "",
+        chems: (j.chemicals || []).map((l) => { const c = lineChem(l); return `${l.name || (c && c.name) || ""} ${fmtAmount(lineAmount(l), c && c.unit_kind)}`; }).join("; "),
+        note: j.note ?? "", paynote: j.report_note ?? "",
+        repeat: j.followup_wanted ? `${j.followup_date || "да"}${j.followup_note ? " — " + j.followup_note : ""}` : "",
+        docsinfo: j.docs_needed ? `${[j.docs_avr && "АВР", j.docs_dogovor && "Договор"].filter(Boolean).join(", ") || "да"}${j.docs_done ? " (готовы)" : " (ожидают)"}` : "",
+      })));
+
+      await addSheet("Склад", [
+        { header: "Препарат", key: "name", width: 20 }, { header: "Единица", key: "unit", width: 12 },
+        { header: "Куплено", key: "bought", width: 14 }, { header: "Ушло", key: "used", width: 14 }, { header: "Остаток", key: "left", width: 14 },
+        { header: "Цена за ед. (₸)", key: "price", width: 14, money: true }, { header: "Стоимость остатка", key: "stockValue", width: 16, money: true },
+      ], chemicals.map((c) => {
         const u = chemUnit(c.unit_kind);
         const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => (x.chemical_id ? x.chemical_id === c.id : norm(x.name) === norm(c.name))).reduce((a, x) => a + lineAmount(x), 0), 0);
         const remaining = (Number(c.purchased_ml) || 0) - used;
-        return { "Препарат": c.name, "Единица": u.big + "/" + u.small, "Куплено": fmtAmount(c.purchased_ml, c.unit_kind), "Ушло": fmtAmount(used, c.unit_kind), "Остаток": fmtAmount(remaining, c.unit_kind), ["Цена (₸/" + u.big + ")"]: c.price_per_liter, "Стоимость остатка (₸)": Math.round(remaining * pricePerBase(c)) };
-      });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stockRows.length ? stockRows : [{}]), "Склад");
+        return { name: c.name, unit: u.big + "/" + u.small, bought: fmtAmount(c.purchased_ml, c.unit_kind), used: fmtAmount(used, c.unit_kind), left: fmtAmount(remaining, c.unit_kind), price: c.price_per_liter, stockValue: Math.round(remaining * pricePerBase(c)) };
+      }));
 
-      const techRows = techs.map((t) => ({ "Имя": t.full_name, "Телефон": t.phone, "Заявок": jobs.filter((j) => j.assigned_to === t.id).length }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(techRows.length ? techRows : [{}]), "Дезинфекторы");
+      await addSheet("Дезинфекторы", [
+        { header: "Имя", key: "name", width: 20 }, { header: "Телефон", key: "phone", width: 16 }, { header: "Заявок", key: "count", width: 10 },
+      ], techs.map((t) => ({ name: t.full_name, phone: t.phone, count: jobs.filter((j) => j.assigned_to === t.id).length })));
 
       const ledgerRows = [];
       techs.forEach((t) => techLedger(t.id).forEach((r) => ledgerRows.push({
-        "Сотрудник": t.full_name, "Препарат": r.chem.name,
-        "Выдано": fmtAmount(r.issued, r.chem.unit_kind), "Стартовый остаток": fmtAmount(r.opening, r.chem.unit_kind),
-        "Расход": fmtAmount(r.consumed, r.chem.unit_kind), "На руках": fmtAmount(r.balance, r.chem.unit_kind),
+        tech: t.full_name, chem: r.chem.name,
+        issued: fmtAmount(r.issued, r.chem.unit_kind), opening: fmtAmount(r.opening, r.chem.unit_kind),
+        consumed: fmtAmount(r.consumed, r.chem.unit_kind), balance: fmtAmount(r.balance, r.chem.unit_kind),
       })));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ledgerRows.length ? ledgerRows : [{}]), "Учёт по сотрудникам");
+      await addSheet("Учёт по сотрудникам", [
+        { header: "Сотрудник", key: "tech", width: 18 }, { header: "Препарат", key: "chem", width: 18 },
+        { header: "Выдано", key: "issued", width: 14 }, { header: "Стартовый остаток", key: "opening", width: 16 },
+        { header: "Расход", key: "consumed", width: 14 }, { header: "На руках", key: "balance", width: 14 },
+      ], ledgerRows);
 
-      const logRows = audit.map((a) => ({ "Когда": fmtTs(a.ts), "Кто": a.actor, "Действие": a.action, "Детали": a.summary }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(logRows.length ? logRows : [{}]), "Журнал");
+      await addSheet("Журнал", [
+        { header: "Когда", key: "when", width: 16 }, { header: "Кто", key: "who", width: 16 },
+        { header: "Действие", key: "action", width: 16 }, { header: "Детали", key: "summary", width: 40 },
+      ], audit.map((a) => ({ when: fmtTs(a.ts), who: a.actor, action: a.action, summary: a.summary })));
 
-      const trashRows = trash.map((t) => ({ "Удалено": fmtTs(t.deleted_at), "Кем": t.deleted_by, "Вид": t.job.pest, "Адрес": t.job.address, "Было оплачено": t.job.report_paid ?? "" }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(trashRows.length ? trashRows : [{}]), "Корзина");
+      await addSheet("Корзина", [
+        { header: "Удалено", key: "when", width: 16 }, { header: "Кем", key: "who", width: 16 },
+        { header: "Вид", key: "pest", width: 16 }, { header: "Адрес", key: "address", width: 28 }, { header: "Было оплачено", key: "paid", width: 14, money: true },
+      ], trash.map((t) => ({ when: fmtTs(t.deleted_at), who: t.deleted_by, pest: t.job.pest, address: t.job.address, paid: t.job.report_paid ?? "" })));
 
-      const docRows = docs.map((d) => ({
-        "Тип": d.type, "Партнёр": d.partner_id ? (partnerById(d.partner_id)?.name || "") : "", "Клиент": d.client || "",
-        "Расчёт": d.amount_mode === "percent" ? `${d.percent}% от ${d.base_sum}` : "сумма",
-        "Заработок ₸": d.amount, "Статус": (DOC_STATUS[d.status] || {}).label || d.status, "Заметка": d.note || "",
-      }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(docRows.length ? docRows : [{}]), "Документы");
+      await addSheet("Документы", [
+        { header: "Тип", key: "type", width: 24 }, { header: "Партнёр", key: "partner", width: 16 }, { header: "Клиент", key: "client", width: 22 },
+        { header: "Расчёт", key: "calc", width: 18 }, { header: "Заработок", key: "amount", width: 14, money: true },
+        { header: "Статус", key: "status", width: 12 }, { header: "Заметка", key: "note", width: 24 },
+      ], docs.map((d) => ({
+        type: d.type, partner: d.partner_id ? (partnerById(d.partner_id)?.name || "") : "", client: d.client || "",
+        calc: d.amount_mode === "percent" ? `${d.percent}% от ${d.base_sum}` : "сумма",
+        amount: d.amount, status: (DOC_STATUS[d.status] || {}).label || d.status, note: d.note || "",
+      })));
 
-      const expenseRows = expenses.map((e) => ({
-        "Сотрудник": techById(e.tech_id)?.full_name || "", "Тип": EXPENSE_TYPES[e.type] || e.type,
-        "Сумма ₸": e.amount, "Дата": e.expense_date ? isoToRu(e.expense_date) : "", "Статус": e.status === "paid" ? "Выплачено" : "К выплате", "Заметка": e.note || "",
-      }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(expenseRows.length ? expenseRows : [{}]), "Выплаты сотрудникам");
+      await addSheet("Выплаты сотрудникам", [
+        { header: "Сотрудник", key: "tech", width: 18 }, { header: "Тип", key: "type", width: 14 },
+        { header: "Сумма", key: "amount", width: 14, money: true }, { header: "Дата", key: "date", width: 12 },
+        { header: "Статус", key: "status", width: 12 }, { header: "Заметка", key: "note", width: 24 },
+      ], expenses.map((e) => ({
+        tech: techById(e.tech_id)?.full_name || "", type: EXPENSE_TYPES[e.type] || e.type,
+        amount: e.amount, date: e.expense_date ? isoToRu(e.expense_date) : "", status: e.status === "paid" ? "Выплачено" : "К выплате", note: e.note || "",
+      })));
 
-      const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-      const blob = new Blob([out], { type: "application/octet-stream" });
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = `KazDez_база_${new Date().toISOString().slice(0, 10)}.xlsx`;
@@ -538,42 +604,43 @@ function Dashboard({ session, profile }) {
   });
   const doneGroups = groupByDate(doneSorted);
   const tabs = isAdmin ? [
-    { id: "jobs", label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
-    { id: "done", label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
-    { id: "repeats", label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
-    { id: "finance", label: "Финансы" },
-    { id: "stock", label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
-    { id: "team", label: "Дезинфекторы" },
-    { id: "partners", label: "Партнёры" },
-    { id: "docs", label: "Документы" },
-    { id: "journal", label: "Журнал" },
-    { id: "trash", label: `Корзина${trash.length ? " · " + trash.length : ""}` },
+    { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
+    { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
+    { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
+    { id: "finance", icon: Wallet, label: "Финансы" },
+    { id: "stock", icon: Package, label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
+    { id: "team", icon: Users, label: "Дезинфекторы" },
+    { id: "partners", icon: Handshake, label: "Партнёры" },
+    { id: "docs", icon: FileText, label: "Документы" },
+    { id: "journal", icon: History, label: "Журнал" },
+    { id: "trash", icon: Trash2, label: `Корзина${trash.length ? " · " + trash.length : ""}` },
   ] : [
-    { id: "jobs", label: `Мои заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
-    { id: "done", label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
+    { id: "jobs", icon: ClipboardList, label: `Мои заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
+    { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
   ];
 
   return (
     <div className="kd-app">
+      <div className="kd-hazard" />
       <header className="kd-top">
         <div className="kd-brand">
-          <div className="kd-logo">KD</div>
+          <div className="kd-logo"><Bug size={19} strokeWidth={2.4} /></div>
           <div><div className="kd-brand-name">KazDez</div><div className="kd-brand-sub">{isAdmin ? "Админ" : "Дезинфектор"} · {actorName}</div></div>
         </div>
-        <button className="kd-btn ghost" onClick={() => supabase.auth.signOut()}>Выйти</button>
+        <button className="kd-btn ghost" onClick={() => supabase.auth.signOut()}><LogOut size={15} />Выйти</button>
       </header>
 
       <main className="kd-main">
         <div className="kd-tabbar">
           <div className="kd-tabs">
-            {tabs.map((t) => (<button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => setTab(t.id)}>{t.label}</button>))}
+            {tabs.map((t) => (<button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => setTab(t.id)}>{t.icon ? <t.icon size={15} /> : null}{t.label}</button>))}
           </div>
           <div className="kd-tabactions">
-            {tab === "jobs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}>+ Новая заявка</button>}
-            {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}>+ Препарат</button>}
-            {tab === "partners" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}>+ Партнёр</button>}
-            {tab === "docs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}>+ Документ</button>}
-            {isAdmin && <button className="kd-btn ghost" onClick={exportExcel}>Выгрузить в Excel</button>}
+            {tab === "jobs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
+            {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}><Plus size={15} />Препарат</button>}
+            {tab === "partners" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}><Plus size={15} />Партнёр</button>}
+            {tab === "docs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}><Plus size={15} />Документ</button>}
+            {isAdmin && <button className="kd-btn ghost" onClick={exportExcel}><Download size={15} />Выгрузить в Excel</button>}
           </div>
         </div>
 
@@ -582,8 +649,9 @@ function Dashboard({ session, profile }) {
         {!loading && (tab === "jobs" || tab === "done") && (
           <div className="kd-searchrow">
             <div className="kd-searchbar">
+              <Search size={16} className="kd-search-icon" />
               <input className="kd-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по телефону, адресу или виду вредителя…" />
-              {search && <button className="kd-x" onClick={() => setSearch("")}>✕</button>}
+              {search && <button className="kd-x" onClick={() => setSearch("")}><X size={15} /></button>}
             </div>
             {isAdmin && techs.length > 0 && (
               <select className="kd-techselect" value={techFilter} onChange={(e) => setTechFilter(e.target.value)}>
@@ -678,9 +746,9 @@ function Dashboard({ session, profile }) {
               </div>
               {pMode !== "all" && (
                 <div className="kd-pernav">
-                  <button className="kd-arrow" onClick={() => setPOff(pOff - 1)}>‹</button>
+                  <button className="kd-arrow" onClick={() => setPOff(pOff - 1)}><ChevronLeft size={18} /></button>
                   <span className="kd-perlabel">{range.label}</span>
-                  <button className="kd-arrow" disabled={pOff >= 0} onClick={() => setPOff(pOff + 1)}>›</button>
+                  <button className="kd-arrow" disabled={pOff >= 0} onClick={() => setPOff(pOff + 1)}><ChevronRight size={18} /></button>
                 </div>
               )}
             </div>
@@ -786,8 +854,9 @@ function Dashboard({ session, profile }) {
                       </div>
                     </div>
                     <div className="kd-actions" style={{ marginBottom: 0 }}>
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "techedit", tech: t })}><Pencil size={13} />Имя</button>
                       <button className="kd-btn primary sm" onClick={() => setModal({ kind: "handout", tech: t })}>Выдать / остаток</button>
-                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "expense", tech: t })}>+ Выплата</button>
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "expense", tech: t })}><Plus size={13} />Выплата</button>
                     </div>
                   </div>
                   {ledger.length === 0
@@ -819,7 +888,7 @@ function Dashboard({ session, profile }) {
                             <span style={{ color: e.status === "paid" ? "#0E7C66" : "#B42318", fontWeight: 700 }}>{e.status === "paid" ? "выплачено" : "к выплате"}</span>
                             <span style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                               <button className="kd-btn ghost sm" onClick={() => setExpenseStatus(e, e.status === "paid" ? "unpaid" : "paid")}>{e.status === "paid" ? "Отменить" : "Выплатить"}</button>
-                              <button className="kd-btn ghost danger sm" onClick={() => removeExpense(e)}>✕</button>
+                              <button className="kd-btn ghost danger sm" onClick={() => removeExpense(e)}><Trash2 size={13} /></button>
                             </span>
                           </div>
                         ))}
@@ -953,6 +1022,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
       {modal?.kind === "expense" && <ExpenseModal tech={modal.tech} onClose={() => setModal(null)} onSave={saveExpense} />}
+      {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
@@ -995,14 +1065,14 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
       </div>
       <div className="kd-actions">
-        {isAdmin && <button className="kd-btn wa" onClick={onCopy}>Скопировать для WhatsApp</button>}
+        {isAdmin && <button className="kd-btn wa" onClick={onCopy}><MessageCircle size={15} />Скопировать для WhatsApp</button>}
         {job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
-        {isAdmin && <button className="kd-btn ghost" onClick={onAssign}>{assignedName ? "Переназначить" : "Назначить"}</button>}
-        {isAdmin && <button className="kd-btn ghost" onClick={onEdit}>Изменить</button>}
+        {isAdmin && <button className="kd-btn ghost" onClick={onAssign}><UserPlus size={14} />{assignedName ? "Переназначить" : "Назначить"}</button>}
+        {isAdmin && <button className="kd-btn ghost" onClick={onEdit}><Pencil size={14} />Изменить</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
         {isAdmin && job.status === "done" && !job.repeat_state && <button className="kd-btn ghost" onClick={onRepeat}>На повтор</button>}
         {isAdmin && share > 0 && <button className="kd-btn ghost" onClick={() => onPayPartner(!job.partner_paid)}>{job.partner_paid ? "Отменить выплату" : "Выплатить долю"}</button>}
-        {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить">✕</button>}
+        {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить"><Trash2 size={14} /></button>}
       </div>
     </div>
   );
@@ -1040,7 +1110,7 @@ function ModalShell({ title, onClose, children, footer }) {
   return (
     <div className="kd-overlay">
       <div className="kd-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="kd-modal-head"><h3>{title}</h3><button className="kd-x" onClick={onClose}>✕</button></div>
+        <div className="kd-modal-head"><h3>{title}</h3><button className="kd-x" onClick={onClose}><X size={16} /></button></div>
         <div className="kd-modal-body">{children}</div>
         {footer && <div className="kd-modal-foot">{footer}</div>}
       </div>
@@ -1496,6 +1566,24 @@ function ExpenseModal({ tech, onClose, onSave }) {
         <Field label="Статус"><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="unpaid">К выплате</option><option value="paid">Выплачено</option></select></Field>
       </div>
       <Field label="Заметка"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за какой период / комментарий" /></Field>
+    </ModalShell>
+  );
+}
+
+function TechEditModal({ tech, onClose, onSave }) {
+  const [fullName, setFullName] = useState(tech.full_name || "");
+  const [phone, setPhone] = useState(tech.phone || "");
+  const [saving, setSaving] = useState(false);
+  const ok = fullName.trim();
+  async function save() { setSaving(true); await onSave({ full_name: fullName.trim(), phone: phone.trim() || null }); setSaving(false); }
+  return (
+    <ModalShell title="Данные дезинфектора" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Логин и пароль этим не затрагиваются — меняется только отображаемое имя и телефон в приложении.</div>
+      <Field label="Имя (как будет видно в приложении)"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Байсеит" /></Field>
+      <Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 ..." /></Field>
     </ModalShell>
   );
 }
