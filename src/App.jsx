@@ -159,6 +159,7 @@ function Dashboard({ session, profile }) {
   const [modal, setModal] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [doneSortDir, setDoneSortDir] = useState("desc");
   const [toast, setToast] = useState("");
   const [pMode, setPMode] = useState("all");
   const [pOff, setPOff] = useState(0);
@@ -474,7 +475,11 @@ function Dashboard({ session, profile }) {
   const sorted = [...filteredActive].sort((a, b) => jobTime(a) - jobTime(b));
   const groups = groupByDate(sorted);
   const doneFiltered = doneJobs.filter(matchSearch);
-  const doneSorted = [...doneFiltered].sort((a, b) => new Date(b.reported_at || b.scheduled_date || 0) - new Date(a.reported_at || a.scheduled_date || 0));
+  const doneSorted = [...doneFiltered].sort((a, b) => {
+    const da = new Date(a.scheduled_date || a.reported_at || 0).getTime();
+    const db = new Date(b.scheduled_date || b.reported_at || 0).getTime();
+    return doneSortDir === "desc" ? db - da : da - db;
+  });
   const doneGroups = groupByDate(doneSorted);
   const tabs = isAdmin ? [
     { id: "jobs", label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
@@ -558,13 +563,18 @@ function Dashboard({ session, profile }) {
         )}
 
         {!loading && tab === "done" && (
-          doneFiltered.length === 0 ? <div className="kd-empty">{doneJobs.length === 0 ? "Выполненных заявок пока нет." : "По этому поиску ничего не найдено."}</div> :
-            doneGroups.map((g) => (
-              <div key={g.key} className="kd-group">
-                <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
-                <div className="kd-list">
-                  {g.jobs.map((j) => (
-                    <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""}
+          <>
+            <div className="kd-seg" style={{ marginBottom: 14 }}>
+              <button className={`kd-segbtn ${doneSortDir === "desc" ? "on" : ""}`} onClick={() => setDoneSortDir("desc")}>Сначала новые</button>
+              <button className={`kd-segbtn ${doneSortDir === "asc" ? "on" : ""}`} onClick={() => setDoneSortDir("asc")}>Сначала старые</button>
+            </div>
+            {doneFiltered.length === 0 ? <div className="kd-empty">{doneJobs.length === 0 ? "Выполненных заявок пока нет." : "По этому поиску ничего не найдено."}</div> :
+              doneGroups.map((g) => (
+                <div key={g.key} className="kd-group">
+                  <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
+                  <div className="kd-list">
+                    {g.jobs.map((j) => (
+                      <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                       onReport={() => setModal({ kind: "report", job: j })}
                       onAssign={() => setModal({ kind: "assign", job: j })}
@@ -574,10 +584,11 @@ function Dashboard({ session, profile }) {
                       onPayPartner={(paid) => markPartnerPaid(j, paid)}
                       onHistory={() => setModal({ kind: "history", job: j })}
                       onDelete={() => deleteJob(j)} />
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+          </>
         )}
 
         {!loading && tab === "repeats" && (
