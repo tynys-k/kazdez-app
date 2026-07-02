@@ -91,6 +91,7 @@ body{
 .kd-repeattag{font-size:12px;font-weight:700;color:#B45309;background:#FCF1E2;border-radius:8px;padding:5px 9px;}
 .kd-brandtag{font-size:11px;font-weight:800;color:#0A5E4D;background:#E4F3EE;border-radius:6px;padding:2px 8px;letter-spacing:.3px;}
 .kd-hint{background:#FFF7E6;border:1px solid #F5E2B8;border-radius:10px;padding:9px 12px;margin:6px 0 12px;font-size:13.5px;line-height:1.4;}
+.kd-notebox{background:#F1F4F1;border-radius:10px;padding:8px 12px;margin-bottom:11px;font-size:13.5px;line-height:1.4;color:var(--ink);}
 .kd-textarea{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:64px;width:100%;resize:vertical;}
 
 /* rows / sections */
