@@ -312,8 +312,10 @@ function Dashboard({ session, profile }) {
   const partnerById = (id) => partners.find((p) => p.id === id);
   function brandHeaderOf(job) {
     if (job.brand === "Sanitex") return "Sanitex";
+    if (job.brand === "partner") return partnerById(job.partner_id)?.name || "KazDez";
     return "KazDez";
   }
+  const partnerShareAmt = (job) => (job.partner_id && job.status === "done" ? Math.round((Number(job.report_paid) || 0) * (Number(job.partner_share) || 0) / 100) : 0);
   async function savePartner(payload, existing) {
     const res = existing
       ? await supabase.from("partners").update(payload).eq("id", existing.id)
@@ -327,12 +329,20 @@ function Dashboard({ session, profile }) {
     await logAction("Партнёр", `Удалён: ${p.name}`);
     showToast("Партнёр удалён"); load();
   }
+  async function markPartnerPaid(job, paid) {
+    const { error } = await supabase.from("jobs").update({ partner_paid: paid, partner_paid_at: paid ? new Date().toISOString() : null }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Выплата партнёру", `${partnerById(job.partner_id)?.name || "?"} · ${fmt(partnerShareAmt(job))} ₸ · ${paid ? "выплачено" : "отменено"}`);
+    showToast(paid ? "Отмечено как выплачено" : "Отметка снята"); load();
+  }
 
   function exportExcel() {
     try {
       const wb = XLSX.utils.book_new();
       const jobsRows = jobs.map((j) => ({
-        "Дата": isoToRu(j.scheduled_date), "Время": j.scheduled_time, "Тип": j.type, "Вид": j.pest,
+        "Дата": isoToRu(j.scheduled_date), "Время": j.scheduled_time, "Бренд": j.brand === "partner" ? "Партнёр" : j.brand, "Тип": j.type, "Вид": j.pest,
+        "Партнёр": j.partner_id ? (partnerById(j.partner_id)?.name || "") : "", "Доля %": j.partner_id ? (j.partner_share ?? "") : "",
+        "Доля ₸": partnerShareAmt(j) || "", "Доля выплачена": j.partner_id && j.status === "done" ? (j.partner_paid ? "да" : "нет") : "",
         "Адрес": j.address, "Этаж": j.floor, "Метраж (м²)": j.area, "Источник": j.source,
         "Телефон": j.client_phone, "Гарантия (мес)": j.guarantee_months,
         "Дезинфектор": techById(j.assigned_to)?.full_name || "",
@@ -340,7 +350,7 @@ function Dashboard({ session, profile }) {
         "Цена (варианты)": (j.price_options || []).map((p) => `${p.amount}${p.label ? " " + p.label : ""}`).join("; "),
         "Оплачено": j.report_paid ?? "", "Наличными": j.report_cash ?? "", "QR": j.report_qr ?? "", "Способ": j.report_method ?? "",
         "Себестоимость преп.": j.status === "done" ? Math.round(jobChemCost(j)) : "",
-        "Прибыль": j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j)) : "",
+        "Прибыль (за вычетом доли)": j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j) - partnerShareAmt(j)) : "",
         "Препараты": (j.chemicals || []).map((l) => { const c = lineChem(l); return `${l.name || (c && c.name) || ""} ${fmtAmount(lineAmount(l), c && c.unit_kind)}`; }).join("; "),
         "Примечание": j.report_note ?? "",
         "Повторный": j.followup_wanted ? `${j.followup_date || "да"}${j.followup_note ? " — " + j.followup_note : ""}` : "",
@@ -389,7 +399,7 @@ function Dashboard({ session, profile }) {
   const fin = (() => {
     const weekIdx = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
     const week = [1, 2, 3, 4, 5, 6, 0].map((dow) => ({ dow, label: WEEKDAYS[dow].slice(0, 2), count: 0, revenue: 0 }));
-    let revenue = 0, cost = 0, cash = 0, qr = 0; const bySource = {};
+    let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0; const bySource = {};
     jobs.forEach((j) => {
       const dt = parseIso(j.scheduled_date);
       const inR = pMode === "all" || (dt && dt.getTime() >= range.start && dt.getTime() < range.end);
@@ -400,12 +410,13 @@ function Dashboard({ session, profile }) {
       if (j.status === "done") {
         const paid = Number(j.report_paid) || 0;
         revenue += paid; cost += jobChemCost(j); cash += Number(j.report_cash) || 0; qr += Number(j.report_qr) || 0;
+        partnerShares += partnerShareAmt(j);
         bySource[src].revenue += paid;
         if (dt) { const wi = weekIdx[dt.getDay()]; week[wi].count++; week[wi].revenue += paid; }
       }
     });
     const weekMax = Math.max(1, ...week.map((w) => w.revenue));
-    return { revenue, cost, profit: revenue - cost, cash, qr, bySource, week, weekMax };
+    return { revenue, cost, partnerShares, profit: revenue - cost - partnerShares, cash, qr, bySource, week, weekMax };
   })();
 
   // ---- склад ----
@@ -470,6 +481,7 @@ function Dashboard({ session, profile }) {
                       onView={() => setModal({ kind: "view", job: j })}
                       onEdit={() => setModal({ kind: "edit", job: j })}
                       onRepeat={() => putOnRepeat(j)}
+                      onPayPartner={(paid) => markPartnerPaid(j, paid)}
                       onDelete={() => deleteJob(j)} />
                   ))}
                 </div>
@@ -512,6 +524,7 @@ function Dashboard({ session, profile }) {
                 <div className="kd-row"><span>· наличными</span><span className="kd-muted">{fmt(fin.cash)} ₸</span></div>
                 <div className="kd-row"><span>· QR / переводом</span><span className="kd-muted">{fmt(fin.qr)} ₸</span></div>
                 <div className="kd-row"><span>Себестоимость препаратов</span><strong style={{ color: "#B42318" }}>− {fmt(fin.cost)} ₸</strong></div>
+                <div className="kd-row"><span>Доли партнёров</span><strong style={{ color: "#B42318" }}>− {fmt(fin.partnerShares)} ₸</strong></div>
                 <div className="kd-row total"><span>Прибыль</span><strong style={{ color: "#0E7C66" }}>{fmt(fin.profit)} ₸</strong></div>
               </div>
               <div className="kd-card">
@@ -608,7 +621,10 @@ function Dashboard({ session, profile }) {
           <div className="kd-list">
             {partners.length === 0 && <div className="kd-empty">Партнёров пока нет. Добавь через «+ Партнёр» — имя, долю в % и правило цены повтора.</div>}
             {partners.map((p) => {
-              const cnt = jobs.filter((j) => j.partner_id === p.id).length;
+              const pj = jobs.filter((j) => j.partner_id === p.id);
+              const cnt = pj.length;
+              const owed = pj.filter((j) => j.status === "done" && !j.partner_paid).reduce((s, j) => s + partnerShareAmt(j), 0);
+              const paidOut = pj.filter((j) => j.status === "done" && j.partner_paid).reduce((s, j) => s + partnerShareAmt(j), 0);
               return (
                 <div key={p.id} className="kd-card">
                   <div className="kd-card-head">
@@ -619,7 +635,10 @@ function Dashboard({ session, profile }) {
                     <span>Повтор: {repeatLabel(p.repeat_policy) || "не задан"}</span>
                     <span>·</span><span>заявок: {cnt}</span>
                   </div>
-                  {p.note && <div className="kd-addr">{p.note}</div>}
+                  <div className="kd-card-foot">
+                    <span className="kd-muted" style={{ color: owed > 0 ? "#B42318" : undefined, fontWeight: owed > 0 ? 700 : 400 }}>К выплате: {fmt(owed)} ₸</span>
+                    <span className="kd-muted paid">Выплачено: {fmt(paidOut)} ₸</span>
+                  </div>
                   {isAdmin && (
                     <div className="kd-actions">
                       <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "partner", partner: p })}>Изменить</button>
@@ -679,9 +698,10 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
+  const share = job.partner_id && job.status === "done" ? Math.round((Number(job.report_paid) || 0) * (Number(job.partner_share) || 0) / 100) : 0;
   return (
     <div className="kd-card">
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span></div>
@@ -702,6 +722,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, onCopy, onReport, on
       <div className="kd-card-foot">
         <span className="kd-muted">Клиент: {job.client_phone}</span>
         {isAdmin && job.partner_id && <span className="kd-muted">Партнёр: {partnerName || "?"} · доля {job.partner_share ?? 0}%</span>}
+        {isAdmin && share > 0 && <span className={job.partner_paid ? "kd-muted paid" : "kd-muted"}>Доля партнёру: {fmt(share)} ₸ · {job.partner_paid ? "выплачено" : "к выплате"}</span>}
         {isAdmin && <span className="kd-muted">{assignedName ? "Дезинфектор: " + assignedName : "Не назначен"}</span>}
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
       </div>
@@ -712,6 +733,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, onCopy, onReport, on
         {isAdmin && <button className="kd-btn ghost" onClick={onEdit}>Изменить</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
         {isAdmin && job.status === "done" && !job.repeat_state && <button className="kd-btn ghost" onClick={onRepeat}>На повтор</button>}
+        {isAdmin && share > 0 && <button className="kd-btn ghost" onClick={() => onPayPartner(!job.partner_paid)}>{job.partner_paid ? "Отменить выплату" : "Выплатить долю"}</button>}
         {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить">✕</button>}
       </div>
     </div>
