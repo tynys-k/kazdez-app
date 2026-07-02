@@ -375,7 +375,8 @@ function Dashboard({ session, profile }) {
         "Себестоимость преп.": j.status === "done" ? Math.round(jobChemCost(j)) : "",
         "Прибыль (за вычетом доли)": j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j) - partnerShareAmt(j)) : "",
         "Препараты": (j.chemicals || []).map((l) => { const c = lineChem(l); return `${l.name || (c && c.name) || ""} ${fmtAmount(lineAmount(l), c && c.unit_kind)}`; }).join("; "),
-        "Примечание": j.report_note ?? "",
+        "Комментарий к заявке": j.note ?? "",
+        "Примечание оплаты": j.report_note ?? "",
         "Повторный": j.followup_wanted ? `${j.followup_date || "да"}${j.followup_note ? " — " + j.followup_note : ""}` : "",
         "Документы": j.docs_needed ? `${[j.docs_avr && "АВР", j.docs_dogovor && "Договор"].filter(Boolean).join(", ") || "да"}${j.docs_done ? " (готовы)" : " (ожидают)"}` : "",
       }));
@@ -824,6 +825,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
         {job.area && (<><span>·</span><span>{job.area} м²</span></>)}
       </div>
       <div className="kd-addr">{job.address}</div>
+      {job.note && <div className="kd-notebox">📝 {job.note}</div>}
       <div className="kd-prices">
         {(job.price_options || []).map((p, i) => (<span className="kd-price" key={i}>{fmt(p.amount)} ₸{p.label ? <em> · {p.label}</em> : null}</span>))}
         {job.source && <span className="kd-srctag">{job.source}</span>}
@@ -924,11 +926,12 @@ function jobToForm(job) {
     p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
     client_phone: job.client_phone || "+7 ", guarantee_months: job.guarantee_months ?? 6,
     brand: job.brand || "KazDez", partner_id: job.partner_id || "", partner_share: job.partner_share ?? "",
+    note: job.note || "",
   };
 }
 
 function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], onClose, onSave }) {
-  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", scheduled_time: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6, brand: "KazDez", partner_id: "", partner_share: "" });
+  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", scheduled_time: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6, brand: "KazDez", partner_id: "", partner_share: "", note: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
@@ -939,7 +942,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
     const price_options = [];
     if (f.p1amount) price_options.push({ label: f.p1label, amount: Number(f.p1amount) });
     if (f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
-    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time: f.scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: f.brand === "partner" ? (f.partner_id || null) : null, partner_share: f.brand === "partner" ? (Number(f.partner_share) || 0) : null };
+    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time: f.scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: f.brand === "partner" ? (f.partner_id || null) : null, partner_share: f.brand === "partner" ? (Number(f.partner_share) || 0) : null, note: f.note || null };
     if (!keepStatus) payload.status = "new";
     await onSave(payload);
     setSaving(false);
@@ -983,6 +986,9 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
         <Field label="Телефон клиента"><input value={f.client_phone} onChange={set("client_phone")} placeholder="+7 701 ..." /></Field>
         <Field label="Гарантия (мес.)"><input value={f.guarantee_months} onChange={set("guarantee_months")} inputMode="numeric" /></Field>
       </div>
+      <Field label="Примечание / комментарий (видно только команде, клиенту не идёт)">
+        <textarea className="kd-textarea" value={f.note} onChange={set("note")} placeholder="Напр.: домофон не работает, звонить за 30 мин, есть собака" />
+      </Field>
     </ModalShell>
   );
 }
