@@ -6,13 +6,19 @@ import * as XLSX from "xlsx";
 const fmt = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 const ml2l = (ml) => Math.round(((Number(ml) || 0) / 1000) * 100) / 100;
 const norm = (s) => (s || "").trim().toLowerCase();
-const chemUnit = (kind) => (kind === "weight" ? { big: "кг", small: "г" } : { big: "л", small: "мл" });
+const chemUnit = (kind) => {
+  if (kind === "weight") return { big: "кг", small: "г", factor: 1000 };
+  if (kind === "piece") return { big: "шт", small: "шт", factor: 1 };
+  if (kind === "pack") return { big: "уп.", small: "уп.", factor: 1 };
+  return { big: "л", small: "мл", factor: 1000 };
+};
 function fmtAmount(amount, kind) {
-  const u = chemUnit(kind); const a = Number(amount) || 0;
-  if (a >= 1000) return `${Math.round((a / 1000) * 100) / 100} ${u.big}`;
+  const u = chemUnit(kind); const a = Number(amount) || 0; const f = u.factor || 1000;
+  if (f > 1 && a >= f) return `${Math.round((a / f) * 100) / 100} ${u.big}`;
   return `${Math.round(a)} ${u.small}`;
 }
 const lineAmount = (l) => Number(l.amount ?? l.ml) || 0;
+const pricePerBase = (chem) => (chem ? (Number(chem.price_per_liter) || 0) / (chemUnit(chem.unit_kind).factor || 1000) : 0);
 const QR_FEE_RATE = 0.0095;
 const REPEAT_POLICIES = [
   { code: "half", label: "50% (стандарт)" },
@@ -203,7 +209,7 @@ function Dashboard({ session, profile }) {
   }
   const chemById = (id) => chemicals.find((x) => x.id === id);
   const lineChem = (l) => (l.chemical_id ? chemById(l.chemical_id) : chemicals.find((x) => norm(x.name) === norm(l.name)));
-  const jobChemCost = (job) => (job.chemicals || []).reduce((s, l) => { const c = lineChem(l); return s + lineAmount(l) * (c ? (Number(c.price_per_liter) || 0) / 1000 : 0); }, 0);
+  const jobChemCost = (job) => (job.chemicals || []).reduce((s, l) => { const c = lineChem(l); return s + lineAmount(l) * pricePerBase(c); }, 0);
   function techLedger(techId) {
     const m = {};
     const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0 });
@@ -394,7 +400,7 @@ function Dashboard({ session, profile }) {
         const u = chemUnit(c.unit_kind);
         const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => (x.chemical_id ? x.chemical_id === c.id : norm(x.name) === norm(c.name))).reduce((a, x) => a + lineAmount(x), 0), 0);
         const remaining = (Number(c.purchased_ml) || 0) - used;
-        return { "Препарат": c.name, "Единица": u.big + "/" + u.small, "Куплено": fmtAmount(c.purchased_ml, c.unit_kind), "Ушло": fmtAmount(used, c.unit_kind), "Остаток": fmtAmount(remaining, c.unit_kind), ["Цена (₸/" + u.big + ")"]: c.price_per_liter, "Стоимость остатка (₸)": Math.round(remaining * ((Number(c.price_per_liter) || 0) / 1000)) };
+        return { "Препарат": c.name, "Единица": u.big + "/" + u.small, "Куплено": fmtAmount(c.purchased_ml, c.unit_kind), "Ушло": fmtAmount(used, c.unit_kind), "Остаток": fmtAmount(remaining, c.unit_kind), ["Цена (₸/" + u.big + ")"]: c.price_per_liter, "Стоимость остатка (₸)": Math.round(remaining * pricePerBase(c)) };
       });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stockRows.length ? stockRows : [{}]), "Склад");
 
@@ -464,7 +470,7 @@ function Dashboard({ session, profile }) {
   const inventory = chemicals.map((c) => {
     const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => (x.chemical_id ? x.chemical_id === c.id : norm(x.name) === norm(c.name))).reduce((a, x) => a + lineAmount(x), 0), 0);
     const remaining = (Number(c.purchased_ml) || 0) - used;
-    return { ...c, used, remaining, low: remaining <= (Number(c.min_ml) || 0), stockValue: remaining * ((Number(c.price_per_liter) || 0) / 1000) };
+    return { ...c, used, remaining, low: remaining <= (Number(c.min_ml) || 0), stockValue: remaining * pricePerBase(c) };
   });
   const lowCount = inventory.filter((i) => i.low).length;
 
@@ -1162,7 +1168,8 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
     setSaving(true);
     const lines = chems.filter((c) => c.chemical_id && Number(c.amount) > 0).map((c) => {
       const ch = chemicals.find((x) => x.id === c.chemical_id);
-      const base = c.unit === "big" ? (Number(c.amount) || 0) * 1000 : (Number(c.amount) || 0);
+      const f = chemUnit(ch?.unit_kind).factor || 1000;
+      const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
       return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
     });
     await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote } }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
@@ -1192,9 +1199,9 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
               {chemicals.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
             </select>
             <input placeholder="кол-во" inputMode="decimal" value={c.amount} onChange={setChem(i, "amount")} />
-            <select value={c.unit} onChange={setChem(i, "unit")}>
+            <select value={c.unit} onChange={setChem(i, "unit")} disabled={u.factor === 1}>
               <option value="small">{u.small}</option>
-              <option value="big">{u.big}</option>
+              {u.factor !== 1 && <option value="big">{u.big}</option>}
             </select>
           </div>
         );
@@ -1280,7 +1287,8 @@ function AddChemModal({ onClose, onSave }) {
   const ok = name && qty && price;
   async function save() {
     setSaving(true);
-    await onSave({ name, unit_kind: unitKind, purchased_ml: (Number(qty) || 0) * 1000, price_per_liter: Number(price) || 0, min_ml: (Number(minQ) || 0) * 1000 });
+    const f = u.factor || 1000;
+    await onSave({ name, unit_kind: unitKind, purchased_ml: (Number(qty) || 0) * f, price_per_liter: Number(price) || 0, min_ml: (Number(minQ) || 0) * f });
     setSaving(false);
   }
   return (
@@ -1289,8 +1297,15 @@ function AddChemModal({ onClose, onSave }) {
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Добавить"}</button>
     </>}>
       <div className="kd-grid2">
-        <Field label="Название"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Культ / Крысогон" /></Field>
-        <Field label="Измеряется в"><select value={unitKind} onChange={(e) => setUnitKind(e.target.value)}><option value="volume">Объём (мл/л)</option><option value="weight">Вес (г/кг)</option></select></Field>
+        <Field label="Название"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Культ / контейнеры / ловушки" /></Field>
+        <Field label="Измеряется в">
+          <select value={unitKind} onChange={(e) => setUnitKind(e.target.value)}>
+            <option value="volume">Объём (мл/л)</option>
+            <option value="weight">Вес (г/кг)</option>
+            <option value="piece">Поштучно (шт)</option>
+            <option value="pack">Упаковками (уп.)</option>
+          </select>
+        </Field>
       </div>
       <div className="kd-grid2">
         <Field label={`Куплено (${u.big})`}><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
@@ -1306,7 +1321,7 @@ function StockInModal({ chem, onClose, onSave }) {
   const u = chemUnit(chem.unit_kind);
   async function save() {
     setSaving(true);
-    await onSave(chem, (Number(qty) || 0) * 1000, price ? Number(price) : null);
+    await onSave(chem, (Number(qty) || 0) * (u.factor || 1000), price ? Number(price) : null);
     setSaving(false);
   }
   return (
@@ -1328,7 +1343,7 @@ function HandoutModal({ tech, chemicals, onClose, onSave }) {
   const ok = chemId && Number(amount) > 0;
   async function save() {
     setSaving(true);
-    const base = unit === "big" ? (Number(amount) || 0) * 1000 : (Number(amount) || 0);
+    const base = unit === "big" ? (Number(amount) || 0) * (u.factor || 1000) : (Number(amount) || 0);
     await onSave({ tech_id: tech.id, chemical_id: chemId, amount: base, kind, note });
     setSaving(false);
   }
@@ -1353,9 +1368,9 @@ function HandoutModal({ tech, chemicals, onClose, onSave }) {
       <div className="kd-grid2">
         <Field label="Количество"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="4" /></Field>
         <Field label="Единица">
-          <select value={unit} onChange={(e) => setUnit(e.target.value)}>
+          <select value={unit} onChange={(e) => setUnit(e.target.value)} disabled={u.factor === 1}>
             <option value="small">{u.small}</option>
-            <option value="big">{u.big}</option>
+            {u.factor !== 1 && <option value="big">{u.big}</option>}
           </select>
         </Field>
       </div>
