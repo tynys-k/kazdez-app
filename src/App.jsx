@@ -13,6 +13,7 @@ function fmtAmount(amount, kind) {
   return `${Math.round(a)} ${u.small}`;
 }
 const lineAmount = (l) => Number(l.amount ?? l.ml) || 0;
+const QR_FEE_RATE = 0.0095;
 const REPEAT_POLICIES = [
   { code: "half", label: "50% (стандарт)" },
   { code: "free", label: "Бесплатно" },
@@ -161,6 +162,7 @@ function Dashboard({ session, profile }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [doneSortDir, setDoneSortDir] = useState("desc");
+  const [techFilter, setTechFilter] = useState("");
   const [toast, setToast] = useState("");
   const [pMode, setPMode] = useState("all");
   const [pOff, setPOff] = useState(0);
@@ -378,7 +380,8 @@ function Dashboard({ session, profile }) {
         "Цена (варианты)": (j.price_options || []).map((p) => `${p.amount}${p.label ? " " + p.label : ""}`).join("; "),
         "Оплачено": j.report_paid ?? "", "Наличными": j.report_cash ?? "", "QR": j.report_qr ?? "", "Способ": j.report_method ?? "",
         "Себестоимость преп.": j.status === "done" ? Math.round(jobChemCost(j)) : "",
-        "Прибыль (за вычетом доли)": j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j) - partnerShareAmt(j)) : "",
+        "Комиссия QR": j.status === "done" ? Math.round((Number(j.report_qr) || 0) * QR_FEE_RATE) : "",
+        "Прибыль (за вычетом доли и комиссии)": j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j) - partnerShareAmt(j) - (Number(j.report_qr) || 0) * QR_FEE_RATE) : "",
         "Препараты": (j.chemicals || []).map((l) => { const c = lineChem(l); return `${l.name || (c && c.name) || ""} ${fmtAmount(lineAmount(l), c && c.unit_kind)}`; }).join("; "),
         "Комментарий к заявке": j.note ?? "",
         "Примечание оплаты": j.report_note ?? "",
@@ -435,7 +438,7 @@ function Dashboard({ session, profile }) {
   const fin = (() => {
     const weekIdx = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
     const week = [1, 2, 3, 4, 5, 6, 0].map((dow) => ({ dow, label: WEEKDAYS[dow].slice(0, 2), count: 0, revenue: 0 }));
-    let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0; const bySource = {};
+    let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, qrFees = 0; const bySource = {};
     jobs.forEach((j) => {
       const dt = parseIso(j.scheduled_date);
       const inR = pMode === "all" || (dt && dt.getTime() >= range.start && dt.getTime() < range.end);
@@ -445,14 +448,16 @@ function Dashboard({ session, profile }) {
       bySource[src].count++;
       if (j.status === "done") {
         const paid = Number(j.report_paid) || 0;
-        revenue += paid; cost += jobChemCost(j); cash += Number(j.report_cash) || 0; qr += Number(j.report_qr) || 0;
+        const jqr = Number(j.report_qr) || 0;
+        revenue += paid; cost += jobChemCost(j); cash += Number(j.report_cash) || 0; qr += jqr;
+        qrFees += jqr * QR_FEE_RATE;
         partnerShares += partnerShareAmt(j);
         bySource[src].revenue += paid;
         if (dt) { const wi = weekIdx[dt.getDay()]; week[wi].count++; week[wi].revenue += paid; }
       }
     });
     const weekMax = Math.max(1, ...week.map((w) => w.revenue));
-    return { revenue, cost, partnerShares, profit: revenue - cost - partnerShares, cash, qr, bySource, week, weekMax };
+    return { revenue, cost, partnerShares, qrFees, profit: revenue - cost - partnerShares - qrFees, cash, qr, bySource, week, weekMax };
   })();
 
   // ---- склад ----
@@ -468,6 +473,7 @@ function Dashboard({ session, profile }) {
   const q = search.trim().toLowerCase();
   const qDigits = q.replace(/\D/g, "");
   function matchSearch(j) {
+    if (techFilter && j.assigned_to !== techFilter) return false;
     if (!q) return true;
     const phoneDigits = (j.client_phone || "").replace(/\D/g, "");
     if (qDigits && phoneDigits.includes(qDigits)) return true;
@@ -527,9 +533,17 @@ function Dashboard({ session, profile }) {
         {loading && <div className="kd-empty">Загрузка…</div>}
 
         {!loading && (tab === "jobs" || tab === "done") && (
-          <div className="kd-searchbar">
-            <input className="kd-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по телефону, адресу или виду вредителя…" />
-            {search && <button className="kd-x" onClick={() => setSearch("")}>✕</button>}
+          <div className="kd-searchrow">
+            <div className="kd-searchbar">
+              <input className="kd-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по телефону, адресу или виду вредителя…" />
+              {search && <button className="kd-x" onClick={() => setSearch("")}>✕</button>}
+            </div>
+            {isAdmin && techs.length > 0 && (
+              <select className="kd-techselect" value={techFilter} onChange={(e) => setTechFilter(e.target.value)}>
+                <option value="">Все дезинфекторы</option>
+                {techs.map((t) => <option key={t.id} value={t.id}>{t.full_name || t.id.slice(0, 6)}</option>)}
+              </select>
+            )}
           </div>
         )}
 
@@ -631,6 +645,7 @@ function Dashboard({ session, profile }) {
                 <div className="kd-row"><span>· QR / переводом</span><span className="kd-muted">{fmt(fin.qr)} ₸</span></div>
                 <div className="kd-row"><span>Себестоимость препаратов</span><strong style={{ color: "#B42318" }}>− {fmt(fin.cost)} ₸</strong></div>
                 <div className="kd-row"><span>Доли партнёров</span><strong style={{ color: "#B42318" }}>− {fmt(fin.partnerShares)} ₸</strong></div>
+                <div className="kd-row"><span>Комиссия банка по QR (0.95%)</span><strong style={{ color: "#B42318" }}>− {fmt(fin.qrFees)} ₸</strong></div>
                 <div className="kd-row total"><span>Прибыль</span><strong style={{ color: "#0E7C66" }}>{fmt(fin.profit)} ₸</strong></div>
               </div>
               <div className="kd-card">
@@ -734,7 +749,7 @@ function Dashboard({ session, profile }) {
               return (
                 <div key={p.id} className="kd-card">
                   <div className="kd-card-head">
-                    <div className="kd-pest">{p.name}</div>
+                    <button className="kd-partnername" onClick={() => setModal({ kind: "partnerJobs", partner: p })}>{p.name}</button>
                     <span className="kd-badge" style={{ color: "#7C3AED", background: "#F1ECFE" }}>доля {p.default_share}%</span>
                   </div>
                   <div className="kd-meta">
@@ -747,6 +762,7 @@ function Dashboard({ session, profile }) {
                   </div>
                   {isAdmin && (
                     <div className="kd-actions">
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "partnerJobs", partner: p })}>Заявки</button>
                       <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "partner", partner: p })}>Изменить</button>
                       <button className="kd-btn ghost danger sm" onClick={() => removePartner(p)}>Удалить</button>
                     </div>
@@ -842,6 +858,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
+      {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} onClose={() => setModal(null)}
+        onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
       {modal?.kind === "doc" && <DocModal doc={modal.doc} partners={partners} onClose={() => setModal(null)} onSave={saveDoc} />}
       {toast && <div className="kd-toast">{toast}</div>}
     </div>
@@ -852,8 +870,9 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const share = job.partner_id && job.status === "done" ? Math.round((Number(job.report_paid) || 0) * (Number(job.partner_share) || 0) / 100) : 0;
+  const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
   return (
-    <div className="kd-card">
+    <div className={`kd-card ${needsFollowup ? "low" : ""}`}>
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span></div>
       <div className="kd-meta">
         <span className="kd-brandtag">{brandLabel}</span>
@@ -869,6 +888,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
         {job.docs_needed && <span className="kd-doctag">{job.docs_done ? "Документы готовы" : "Нужны документы"}</span>}
         {job.repeat_state === "on_repeat" && <span className="kd-repeattag">на повторе</span>}
         {job.repeat_state === "finished" && <span className="kd-muted">завершена</span>}
+        {needsFollowup && <span className="kd-followuptag">💬 пора связаться · {daysSince(job.reported_at)} дн. после первичной</span>}
       </div>
       <div className="kd-card-foot">
         <button className="kd-clientlink" onClick={onHistory} title="Показать все заявки этого клиента">Клиент: {job.client_phone}</button>
@@ -991,7 +1011,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
     </>}>
       <div className="kd-grid2">
         <Field label="Бренд"><select value={f.brand} onChange={onBrand}><option value="KazDez">KazDez</option><option value="Sanitex">Sanitex</option><option value="partner">Партнёрская</option></select></Field>
-        <Field label="Тип"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Плановая</option><option>Гарантийная</option><option>Осмотр</option></select></Field>
+        <Field label="Тип"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Плановая</option><option>Тендерная</option><option>Гарантийная</option><option>Осмотр</option></select></Field>
       </div>
       {f.brand === "partner" && (
         <div className="kd-grid2">
@@ -1048,6 +1068,35 @@ function PartnerModal({ partner, onClose, onSave }) {
         <Field label="Цена повтора"><select value={policy} onChange={(e) => setPolicy(e.target.value)}>{REPEAT_POLICIES.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}</select></Field>
       </div>
       <div className="kd-muted">Правило повтора — подсказка при работе с заявками этого партнёра.</div>
+    </ModalShell>
+  );
+}
+
+function PartnerJobsModal({ partner, jobs, onClose, onOpenClient }) {
+  const share = (j) => (j.status === "done" ? Math.round((Number(j.report_paid) || 0) * (Number(j.partner_share) || 0) / 100) : 0);
+  const list = [...jobs].sort((a, b) => new Date(b.scheduled_date || b.created_at || 0) - new Date(a.scheduled_date || a.created_at || 0));
+  const owed = list.filter((j) => j.status === "done" && !j.partner_paid).reduce((s, j) => s + share(j), 0);
+  return (
+    <ModalShell title={`Заявки партнёра · ${partner.name}`} onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Всего заявок: {list.length} · к выплате: {fmt(owed)} ₸</div>
+      {list.length === 0 && <div className="kd-empty">У этого партнёра пока нет заявок.</div>}
+      {list.map((j) => {
+        const st = STATUS[j.status] || STATUS.new;
+        const sh = share(j);
+        return (
+          <div key={j.id} className="kd-histrow" style={{ cursor: "default" }}>
+            <div>
+              <div className="kd-histmain">{j.type} · {j.pest}</div>
+              <div className="kd-muted">{isoToRu(j.scheduled_date) || "без даты"} · {j.address}</div>
+              <button className="kd-clientlink" onClick={() => onOpenClient(j.client_phone)} style={{ marginTop: 3 }}>Клиент: {j.client_phone}</button>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+              {sh > 0 && <div className="kd-muted" style={{ marginTop: 4, color: j.partner_paid ? "#0E7C66" : "#B42318", fontWeight: 700 }}>{fmt(sh)} ₸ · {j.partner_paid ? "выплачено" : "к выплате"}</div>}
+            </div>
+          </div>
+        );
+      })}
     </ModalShell>
   );
 }
