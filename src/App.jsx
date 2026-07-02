@@ -13,6 +13,14 @@ function fmtAmount(amount, kind) {
   return `${Math.round(a)} ${u.small}`;
 }
 const lineAmount = (l) => Number(l.amount ?? l.ml) || 0;
+const REPEAT_POLICIES = [
+  { code: "half", label: "50% (стандарт)" },
+  { code: "free", label: "Бесплатно" },
+  { code: "full", label: "100% (как первичная)" },
+  { code: "disc15", label: "Скидка 15%" },
+  { code: "disc20", label: "Скидка 20%" },
+];
+const repeatLabel = (code) => (REPEAT_POLICIES.find((p) => p.code === code) || {}).label || "";
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -71,9 +79,10 @@ function groupByDate(jobs) {
   });
   return groups;
 }
-function buildMsg(job) {
-  const head = job.type === "Осмотр" ? "Осмотр объекта" : `${job.type || "Первичная"} обработка`;
-  const lines = ["Наша заявка", head, `Дата: ${isoToRu(job.scheduled_date)}`, `Время: ${job.scheduled_time || ""}`, `Адрес: ${job.address || ""}`];
+function buildMsg(job, header) {
+  const brand = header || "KazDez";
+  const line1 = job.type === "Осмотр" ? "Осмотр объекта" : `${job.type || "Первичная"} обработка`;
+  const lines = [brand, line1, `Дата: ${isoToRu(job.scheduled_date)}`, `Время: ${job.scheduled_time || ""}`, `Адрес: ${job.address || ""}`];
   if (job.floor) lines.push(`Этаж: ${job.floor}`);
   if (job.area) lines.push(`Метраж: ${job.area} м²`);
   lines.push(`Вид: ${job.pest || ""}`);
@@ -139,6 +148,7 @@ function Dashboard({ session, profile }) {
   const [chemicals, setChemicals] = useState([]);
   const [techs, setTechs] = useState([]);
   const [handouts, setHandouts] = useState([]);
+  const [partners, setPartners] = useState([]);
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -154,7 +164,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -162,6 +172,7 @@ function Dashboard({ session, profile }) {
       supabase.from("trash").select("*").order("deleted_at", { ascending: false }),
       supabase.from("profiles").select("id, full_name, phone, role"),
       supabase.from("handouts").select("*"),
+      supabase.from("partners").select("*"),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -170,6 +181,7 @@ function Dashboard({ session, profile }) {
     setTrash(tr.data || []);
     setTechs((pr.data || []).filter((p) => p.role === "tech"));
     setHandouts(hr.data || []);
+    setPartners(ptr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -297,6 +309,24 @@ function Dashboard({ session, profile }) {
     await logAction("Выдача", `${t?.full_name || "?"} · ${c?.name || "?"} +${fmtAmount(payload.amount, c?.unit_kind)} (${kindLabel})`);
     setModal(null); showToast("Записано"); load();
   }
+  const partnerById = (id) => partners.find((p) => p.id === id);
+  function brandHeaderOf(job) {
+    if (job.brand === "Sanitex") return "Sanitex";
+    return "KazDez";
+  }
+  async function savePartner(payload, existing) {
+    const res = existing
+      ? await supabase.from("partners").update(payload).eq("id", existing.id)
+      : await supabase.from("partners").insert(payload);
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Партнёр", `${existing ? "Изменён" : "Добавлен"}: ${payload.name} (${payload.default_share}%)`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function removePartner(p) {
+    await supabase.from("partners").delete().eq("id", p.id);
+    await logAction("Партнёр", `Удалён: ${p.name}`);
+    showToast("Партнёр удалён"); load();
+  }
 
   function exportExcel() {
     try {
@@ -394,6 +424,7 @@ function Dashboard({ session, profile }) {
     { id: "finance", label: "Финансы" },
     { id: "stock", label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
     { id: "team", label: "Дезинфекторы" },
+    { id: "partners", label: "Партнёры" },
     { id: "journal", label: "Журнал" },
     { id: "trash", label: `Корзина${trash.length ? " · " + trash.length : ""}` },
   ] : [
@@ -418,6 +449,7 @@ function Dashboard({ session, profile }) {
           <div className="kd-tabactions">
             {tab === "jobs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}>+ Новая заявка</button>}
             {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}>+ Препарат</button>}
+            {tab === "partners" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}>+ Партнёр</button>}
             {isAdmin && <button className="kd-btn ghost" onClick={exportExcel}>Выгрузить в Excel</button>}
           </div>
         </div>
@@ -431,8 +463,8 @@ function Dashboard({ session, profile }) {
                 <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                 <div className="kd-list">
                   {g.jobs.map((j) => (
-                    <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name}
-                      onCopy={() => copyText(buildMsg(j), () => showToast("Текст скопирован"))}
+                    <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name}
+                      onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                       onReport={() => setModal({ kind: "report", job: j })}
                       onAssign={() => setModal({ kind: "assign", job: j })}
                       onView={() => setModal({ kind: "view", job: j })}
@@ -572,6 +604,34 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
+        {!loading && tab === "partners" && (
+          <div className="kd-list">
+            {partners.length === 0 && <div className="kd-empty">Партнёров пока нет. Добавь через «+ Партнёр» — имя, долю в % и правило цены повтора.</div>}
+            {partners.map((p) => {
+              const cnt = jobs.filter((j) => j.partner_id === p.id).length;
+              return (
+                <div key={p.id} className="kd-card">
+                  <div className="kd-card-head">
+                    <div className="kd-pest">{p.name}</div>
+                    <span className="kd-badge" style={{ color: "#7C3AED", background: "#F1ECFE" }}>доля {p.default_share}%</span>
+                  </div>
+                  <div className="kd-meta">
+                    <span>Повтор: {repeatLabel(p.repeat_policy) || "не задан"}</span>
+                    <span>·</span><span>заявок: {cnt}</span>
+                  </div>
+                  {p.note && <div className="kd-addr">{p.note}</div>}
+                  {isAdmin && (
+                    <div className="kd-actions">
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "partner", partner: p })}>Изменить</button>
+                      <button className="kd-btn ghost danger sm" onClick={() => removePartner(p)}>Удалить</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {!loading && tab === "journal" && (
           <div className="kd-card">
             {audit.length === 0 && <div className="kd-muted">Пока нет записей.</div>}
@@ -605,25 +665,28 @@ function Dashboard({ session, profile }) {
         )}
       </main>
 
-      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" onClose={() => setModal(null)} onSave={createJob} />}
-      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
+      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} onClose={() => setModal(null)} onSave={createJob} />}
+      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} />}
       {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
+      {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {toast && <div className="kd-toast">{toast}</div>}
     </div>
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
+  const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   return (
     <div className="kd-card">
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span></div>
       <div className="kd-meta">
+        <span className="kd-brandtag">{brandLabel}</span>
         <span>{job.type}</span><span>·</span><span>{isoToRu(job.scheduled_date)} {job.scheduled_time}</span>
         {job.floor && (<><span>·</span><span>{job.floor} этаж</span></>)}
         {job.area && (<><span>·</span><span>{job.area} м²</span></>)}
@@ -638,6 +701,7 @@ function JobCard({ job, isAdmin, assignedName, onCopy, onReport, onAssign, onVie
       </div>
       <div className="kd-card-foot">
         <span className="kd-muted">Клиент: {job.client_phone}</span>
+        {isAdmin && job.partner_id && <span className="kd-muted">Партнёр: {partnerName || "?"} · доля {job.partner_share ?? 0}%</span>}
         {isAdmin && <span className="kd-muted">{assignedName ? "Дезинфектор: " + assignedName : "Не назначен"}</span>}
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
       </div>
@@ -723,12 +787,15 @@ function jobToForm(job) {
     p1label: po[0]?.label || "С запахом", p1amount: po[0]?.amount ?? "",
     p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
     client_phone: job.client_phone || "+7 ", guarantee_months: job.guarantee_months ?? 6,
+    brand: job.brand || "KazDez", partner_id: job.partner_id || "", partner_share: job.partner_share ?? "",
   };
 }
 
-function JobFormModal({ initial, title, submitLabel, keepStatus, onClose, onSave }) {
-  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", scheduled_time: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6 });
+function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], onClose, onSave }) {
+  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", scheduled_time: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6, brand: "KazDez", partner_id: "", partner_share: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
+  const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
   const ok = f.address && f.pest && (f.p1amount || f.p2amount || f.type === "Осмотр");
   const [saving, setSaving] = useState(false);
   async function save() {
@@ -736,7 +803,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, onClose, onSave
     const price_options = [];
     if (f.p1amount) price_options.push({ label: f.p1label, amount: Number(f.p1amount) });
     if (f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
-    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time: f.scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6 };
+    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time: f.scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: f.brand === "partner" ? (f.partner_id || null) : null, partner_share: f.brand === "partner" ? (Number(f.partner_share) || 0) : null };
     if (!keepStatus) payload.status = "new";
     await onSave(payload);
     setSaving(false);
@@ -747,16 +814,27 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, onClose, onSave
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : submitLabel}</button>
     </>}>
       <div className="kd-grid2">
+        <Field label="Бренд"><select value={f.brand} onChange={onBrand}><option value="KazDez">KazDez</option><option value="Sanitex">Sanitex</option><option value="partner">Партнёрская</option></select></Field>
         <Field label="Тип"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Гарантийная</option><option>Осмотр</option></select></Field>
+      </div>
+      {f.brand === "partner" && (
+        <div className="kd-grid2">
+          <Field label="Партнёр"><select value={f.partner_id} onChange={onPartner}><option value="">— выбери —</option>{partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+          <Field label="Доля партнёра (%)"><input value={f.partner_share} onChange={set("partner_share")} inputMode="numeric" placeholder="50" /></Field>
+        </div>
+      )}
+      <div className="kd-grid2">
         <Field label="Вид (вредитель)"><input value={f.pest} onChange={set("pest")} placeholder="Тараканы" /></Field>
+        <Field label="Источник"><input value={f.source} onChange={set("source")} placeholder="OLX" /></Field>
+      </div>
+      <div className="kd-grid2">
         <Field label="Дата"><input type="date" value={f.scheduled_date} onChange={set("scheduled_date")} /></Field>
         <Field label="Время"><input value={f.scheduled_time} onChange={set("scheduled_time")} placeholder="12:00" /></Field>
       </div>
       <Field label="Адрес"><input value={f.address} onChange={set("address")} placeholder="ул. ..., кв. ..." /></Field>
-      <div className="kd-grid3">
+      <div className="kd-grid2">
         <Field label="Этаж"><input value={f.floor} onChange={set("floor")} inputMode="numeric" placeholder="5" /></Field>
         <Field label="Метраж (м²)"><input value={f.area} onChange={set("area")} inputMode="numeric" placeholder="45" /></Field>
-        <Field label="Источник"><input value={f.source} onChange={set("source")} placeholder="OLX" /></Field>
       </div>
       {f.type === "Осмотр" && <div className="kd-muted" style={{ marginBottom: 10 }}>Для осмотра цену можно не заполнять.</div>}
       <div className="kd-grid2">
@@ -769,6 +847,28 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, onClose, onSave
         <Field label="Телефон клиента"><input value={f.client_phone} onChange={set("client_phone")} placeholder="+7 701 ..." /></Field>
         <Field label="Гарантия (мес.)"><input value={f.guarantee_months} onChange={set("guarantee_months")} inputMode="numeric" /></Field>
       </div>
+    </ModalShell>
+  );
+}
+
+function PartnerModal({ partner, onClose, onSave }) {
+  const [name, setName] = useState(partner?.name || "");
+  const [share, setShare] = useState(partner?.default_share ?? "");
+  const [policy, setPolicy] = useState(partner?.repeat_policy || "half");
+  const [saving, setSaving] = useState(false);
+  const ok = name.trim();
+  async function save() { setSaving(true); await onSave({ name: name.trim(), default_share: Number(share) || 0, repeat_policy: policy }, partner); setSaving(false); }
+  return (
+    <ModalShell title={partner ? "Изменить партнёра" : "Новый партнёр"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <Field label="Имя партнёра"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Айдын" /></Field>
+      <div className="kd-grid2">
+        <Field label="Доля партнёра (%)"><input value={share} onChange={(e) => setShare(e.target.value)} inputMode="numeric" placeholder="50" /></Field>
+        <Field label="Цена повтора"><select value={policy} onChange={(e) => setPolicy(e.target.value)}>{REPEAT_POLICIES.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}</select></Field>
+      </div>
+      <div className="kd-muted">Правило повтора — подсказка при работе с заявками этого партнёра.</div>
     </ModalShell>
   );
 }
