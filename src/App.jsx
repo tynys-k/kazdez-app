@@ -1079,7 +1079,7 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
   return (
     <ModalShell title="Отчёт по заявке" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={total <= 0 || saving} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
+      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
     </>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
       <div className="kd-section">Оплата</div>
