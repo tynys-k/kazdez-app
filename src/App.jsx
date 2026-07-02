@@ -21,6 +21,8 @@ const REPEAT_POLICIES = [
   { code: "disc20", label: "Скидка 20%" },
 ];
 const repeatLabel = (code) => (REPEAT_POLICIES.find((p) => p.code === code) || {}).label || "";
+const DOC_TYPES = ["Договор", "Акт о дезработах", "Провести через фирму (АВР+ЭСФ)", "КП"];
+const DOC_STATUS = { todo: { label: "В работе", color: "#2563EB", bg: "#EAF1FE" }, done: { label: "Сделано", color: "#B45309", bg: "#FCF1E2" }, paid: { label: "Оплачено", color: "#0E7C66", bg: "#E4F3EE" } };
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -149,6 +151,7 @@ function Dashboard({ session, profile }) {
   const [techs, setTechs] = useState([]);
   const [handouts, setHandouts] = useState([]);
   const [partners, setPartners] = useState([]);
+  const [docs, setDocs] = useState([]);
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -164,7 +167,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -173,6 +176,7 @@ function Dashboard({ session, profile }) {
       supabase.from("profiles").select("id, full_name, phone, role"),
       supabase.from("handouts").select("*"),
       supabase.from("partners").select("*"),
+      supabase.from("doc_services").select("*").order("created_at", { ascending: false }),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -182,6 +186,7 @@ function Dashboard({ session, profile }) {
     setTechs((pr.data || []).filter((p) => p.role === "tech"));
     setHandouts(hr.data || []);
     setPartners(ptr.data || []);
+    setDocs(dsr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -335,6 +340,23 @@ function Dashboard({ session, profile }) {
     await logAction("Выплата партнёру", `${partnerById(job.partner_id)?.name || "?"} · ${fmt(partnerShareAmt(job))} ₸ · ${paid ? "выплачено" : "отменено"}`);
     showToast(paid ? "Отмечено как выплачено" : "Отметка снята"); load();
   }
+  async function saveDoc(payload, existing) {
+    const res = existing ? await supabase.from("doc_services").update(payload).eq("id", existing.id) : await supabase.from("doc_services").insert({ ...payload, created_by: session.user.id });
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Документы", `${existing ? "Изменено" : "Добавлено"}: ${payload.type} · ${fmt(payload.amount)} ₸`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function setDocStatus(d, status) {
+    const { error } = await supabase.from("doc_services").update({ status }).eq("id", d.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Документы", `${d.type} · ${DOC_STATUS[status]?.label || status}`);
+    showToast("Статус обновлён"); load();
+  }
+  async function removeDoc(d) {
+    await supabase.from("doc_services").delete().eq("id", d.id);
+    await logAction("Документы", `Удалено: ${d.type} · ${fmt(d.amount)} ₸`);
+    showToast("Удалено"); load();
+  }
 
   function exportExcel() {
     try {
@@ -382,6 +404,13 @@ function Dashboard({ session, profile }) {
 
       const trashRows = trash.map((t) => ({ "Удалено": fmtTs(t.deleted_at), "Кем": t.deleted_by, "Вид": t.job.pest, "Адрес": t.job.address, "Было оплачено": t.job.report_paid ?? "" }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(trashRows.length ? trashRows : [{}]), "Корзина");
+
+      const docRows = docs.map((d) => ({
+        "Тип": d.type, "Партнёр": d.partner_id ? (partnerById(d.partner_id)?.name || "") : "", "Клиент": d.client || "",
+        "Расчёт": d.amount_mode === "percent" ? `${d.percent}% от ${d.base_sum}` : "сумма",
+        "Заработок ₸": d.amount, "Статус": (DOC_STATUS[d.status] || {}).label || d.status, "Заметка": d.note || "",
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(docRows.length ? docRows : [{}]), "Документы");
 
       const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       const blob = new Blob([out], { type: "application/octet-stream" });
@@ -436,6 +465,7 @@ function Dashboard({ session, profile }) {
     { id: "stock", label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
     { id: "team", label: "Дезинфекторы" },
     { id: "partners", label: "Партнёры" },
+    { id: "docs", label: "Документы" },
     { id: "journal", label: "Журнал" },
     { id: "trash", label: `Корзина${trash.length ? " · " + trash.length : ""}` },
   ] : [
@@ -461,6 +491,7 @@ function Dashboard({ session, profile }) {
             {tab === "jobs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}>+ Новая заявка</button>}
             {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}>+ Препарат</button>}
             {tab === "partners" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}>+ Партнёр</button>}
+            {tab === "docs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}>+ Документ</button>}
             {isAdmin && <button className="kd-btn ghost" onClick={exportExcel}>Выгрузить в Excel</button>}
           </div>
         </div>
@@ -474,7 +505,7 @@ function Dashboard({ session, profile }) {
                 <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                 <div className="kd-list">
                   {g.jobs.map((j) => (
-                    <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name}
+                    <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                       onReport={() => setModal({ kind: "report", job: j })}
                       onAssign={() => setModal({ kind: "assign", job: j })}
@@ -496,7 +527,8 @@ function Dashboard({ session, profile }) {
             {jobs.filter((j) => j.repeat_state === "on_repeat")
               .sort((a, b) => new Date(a.repeat_since || 0) - new Date(b.repeat_since || 0))
               .map((j) => (
-                <RepeatCard key={j.id} job={j} onSaveNote={saveRepeatNote} onCreate={createRepeatJob} onFinish={finishRepeat} />
+                <RepeatCard key={j.id} job={j} onSaveNote={saveRepeatNote} onCreate={createRepeatJob} onFinish={finishRepeat}
+                  repeatHint={j.brand === "partner" && partnerById(j.partner_id) ? `Повтор у партнёра ${partnerById(j.partner_id).name}: ${repeatLabel(partnerById(j.partner_id).repeat_policy)}` : "Повтор: 50% от первичной (стандарт)"} />
               ))}
           </div>
         )}
@@ -651,6 +683,48 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
+        {!loading && tab === "docs" && (() => {
+          const total = docs.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+          const paid = docs.filter((d) => d.status === "paid").reduce((s, d) => s + (Number(d.amount) || 0), 0);
+          const pending = total - paid;
+          return (
+            <div className="kd-list">
+              <div className="kd-card">
+                <div className="kd-section">Отдельный отчёт по документам (не входит в заработок команды)</div>
+                <div className="kd-row"><span>Всего начислено</span><strong>{fmt(total)} ₸</strong></div>
+                <div className="kd-row"><span>Оплачено</span><strong style={{ color: "#0E7C66" }}>{fmt(paid)} ₸</strong></div>
+                <div className="kd-row total"><span>Ожидает оплаты</span><strong style={{ color: pending > 0 ? "#B42318" : undefined }}>{fmt(pending)} ₸</strong></div>
+              </div>
+              {docs.length === 0 && <div className="kd-empty">Записей пока нет. Добавь через «+ Документ»: тип, клиент, сумму или % от суммы клиента.</div>}
+              {docs.map((d) => {
+                const stt = DOC_STATUS[d.status] || DOC_STATUS.todo;
+                return (
+                  <div key={d.id} className="kd-card">
+                    <div className="kd-card-head">
+                      <div className="kd-pest">{d.type}</div>
+                      <span className="kd-badge" style={{ color: stt.color, background: stt.bg }}>{stt.label}</span>
+                    </div>
+                    <div className="kd-meta">
+                      {d.partner_id && <span>{partnerById(d.partner_id)?.name || "партнёр"}</span>}
+                      {d.partner_id && <span>·</span>}
+                      <span>{d.client || "без описания"}</span>
+                      {d.amount_mode === "percent" && <><span>·</span><span>{d.percent}% от {fmt(d.base_sum)} ₸</span></>}
+                    </div>
+                    <div className="kd-card-foot"><strong>{fmt(d.amount)} ₸</strong>{d.note && <span className="kd-muted">{d.note}</span>}</div>
+                    <div className="kd-actions">
+                      {d.status !== "done" && <button className="kd-btn ghost sm" onClick={() => setDocStatus(d, "done")}>Сделано</button>}
+                      {d.status !== "paid" && <button className="kd-btn primary sm" onClick={() => setDocStatus(d, "paid")}>Оплачено</button>}
+                      {d.status === "paid" && <button className="kd-btn ghost sm" onClick={() => setDocStatus(d, "done")}>Снять оплату</button>}
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "doc", doc: d })}>Изменить</button>
+                      <button className="kd-btn ghost danger sm" onClick={() => removeDoc(d)}>Удалить</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+
         {!loading && tab === "journal" && (
           <div className="kd-card">
             {audit.length === 0 && <div className="kd-muted">Пока нет записей.</div>}
@@ -693,12 +767,13 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
+      {modal?.kind === "doc" && <DocModal doc={modal.doc} partners={partners} onClose={() => setModal(null)} onSave={saveDoc} />}
       {toast && <div className="kd-toast">{toast}</div>}
     </div>
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const share = job.partner_id && job.status === "done" ? Math.round((Number(job.report_paid) || 0) * (Number(job.partner_share) || 0) / 100) : 0;
@@ -722,6 +797,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, onCopy, onReport, on
       <div className="kd-card-foot">
         <span className="kd-muted">Клиент: {job.client_phone}</span>
         {isAdmin && job.partner_id && <span className="kd-muted">Партнёр: {partnerName || "?"} · доля {job.partner_share ?? 0}%</span>}
+        {isAdmin && job.brand === "partner" && partnerRepeat && <span className="kd-muted">Повтор: {partnerRepeat}</span>}
         {isAdmin && share > 0 && <span className={job.partner_paid ? "kd-muted paid" : "kd-muted"}>Доля партнёру: {fmt(share)} ₸ · {job.partner_paid ? "выплачено" : "к выплате"}</span>}
         {isAdmin && <span className="kd-muted">{assignedName ? "Дезинфектор: " + assignedName : "Не назначен"}</span>}
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
@@ -740,7 +816,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, onCopy, onReport, on
   );
 }
 
-function RepeatCard({ job, onSaveNote, onCreate, onFinish }) {
+function RepeatCard({ job, onSaveNote, onCreate, onFinish, repeatHint }) {
   const [note, setNote] = useState(job.repeat_note || "");
   const days = daysSince(job.repeat_since);
   const due = days >= 5;
@@ -754,6 +830,7 @@ function RepeatCard({ job, onSaveNote, onCreate, onFinish }) {
       </div>
       <div className="kd-addr">{job.address}</div>
       <div className="kd-card-foot"><span className="kd-muted">Клиент: {job.client_phone}</span></div>
+      {repeatHint && <div className="kd-hint">💡 {repeatHint}</div>}
       <Field label="Как прошёл созвон / заметка">
         <textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Напр.: созвонился, согласен на субботу" />
       </Field>
@@ -891,6 +968,54 @@ function PartnerModal({ partner, onClose, onSave }) {
         <Field label="Цена повтора"><select value={policy} onChange={(e) => setPolicy(e.target.value)}>{REPEAT_POLICIES.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}</select></Field>
       </div>
       <div className="kd-muted">Правило повтора — подсказка при работе с заявками этого партнёра.</div>
+    </ModalShell>
+  );
+}
+
+function DocModal({ doc, partners, onClose, onSave }) {
+  const [type, setType] = useState(doc?.type || DOC_TYPES[0]);
+  const [partnerId, setPartnerId] = useState(doc?.partner_id || "");
+  const [client, setClient] = useState(doc?.client || "");
+  const [mode, setMode] = useState(doc?.amount_mode || "fixed");
+  const [baseSum, setBaseSum] = useState(doc?.base_sum ?? "");
+  const [percent, setPercent] = useState(doc?.percent ?? "");
+  const [fixedAmount, setFixedAmount] = useState(doc && doc.amount_mode === "fixed" ? (doc.amount ?? "") : "");
+  const [status, setStatus] = useState(doc?.status || "todo");
+  const [note, setNote] = useState(doc?.note || "");
+  const [saving, setSaving] = useState(false);
+  const computed = mode === "percent" ? Math.round((Number(baseSum) || 0) * (Number(percent) || 0) / 100) : (Number(fixedAmount) || 0);
+  const ok = computed > 0;
+  async function save() {
+    setSaving(true);
+    await onSave({ type, partner_id: partnerId || null, client, amount_mode: mode, base_sum: mode === "percent" ? (Number(baseSum) || 0) : null, percent: mode === "percent" ? (Number(percent) || 0) : null, amount: computed, status, note }, doc);
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={doc ? "Изменить запись" : "Документ / услуга"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <div className="kd-grid2">
+        <Field label="Что делаем"><select value={type} onChange={(e) => setType(e.target.value)}>{DOC_TYPES.map((t) => <option key={t}>{t}</option>)}</select></Field>
+        <Field label="Партнёр (если есть)"><select value={partnerId} onChange={(e) => setPartnerId(e.target.value)}><option value="">— без партнёра —</option>{partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+      </div>
+      <Field label="Клиент / описание"><input value={client} onChange={(e) => setClient(e.target.value)} placeholder="ТОО «...», за что" /></Field>
+      <Field label="Как считаем сумму">
+        <select value={mode} onChange={(e) => setMode(e.target.value)}><option value="fixed">Фиксированная сумма</option><option value="percent">% от суммы клиента</option></select>
+      </Field>
+      {mode === "fixed" ? (
+        <Field label="Сумма (₸)"><input value={fixedAmount} onChange={(e) => setFixedAmount(e.target.value)} inputMode="numeric" placeholder="30000" /></Field>
+      ) : (
+        <div className="kd-grid2">
+          <Field label="Сумма клиента (₸)"><input value={baseSum} onChange={(e) => setBaseSum(e.target.value)} inputMode="numeric" placeholder="300000" /></Field>
+          <Field label="Процент (%)"><input value={percent} onChange={(e) => setPercent(e.target.value)} inputMode="numeric" placeholder="10" /></Field>
+        </div>
+      )}
+      <div className="kd-paytotal"><span>Твой заработок</span><strong>{fmt(computed)} ₸</strong></div>
+      <div className="kd-grid2">
+        <Field label="Статус"><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="todo">В работе</option><option value="done">Сделано</option><option value="paid">Оплачено</option></select></Field>
+        <Field label="Заметка"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="необязательно" /></Field>
+      </div>
     </ModalShell>
   );
 }
