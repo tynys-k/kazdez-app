@@ -157,6 +157,7 @@ function Dashboard({ session, profile }) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("jobs");
   const [modal, setModal] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("all");
   const [toast, setToast] = useState("");
   const [pMode, setPMode] = useState("all");
   const [pOff, setPOff] = useState(0);
@@ -456,10 +457,16 @@ function Dashboard({ session, profile }) {
   });
   const lowCount = inventory.filter((i) => i.low).length;
 
-  const sorted = [...jobs].sort((a, b) => jobTime(a) - jobTime(b));
+  const activeJobs = jobs.filter((j) => j.status !== "done");
+  const doneJobs = jobs.filter((j) => j.status === "done");
+  const filteredActive = statusFilter === "all" ? activeJobs : activeJobs.filter((j) => j.status === statusFilter);
+  const sorted = [...filteredActive].sort((a, b) => jobTime(a) - jobTime(b));
   const groups = groupByDate(sorted);
+  const doneSorted = [...doneJobs].sort((a, b) => new Date(b.reported_at || b.scheduled_date || 0) - new Date(a.reported_at || a.scheduled_date || 0));
+  const doneGroups = groupByDate(doneSorted);
   const tabs = isAdmin ? [
-    { id: "jobs", label: "Заявки" },
+    { id: "jobs", label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
+    { id: "done", label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "repeats", label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "finance", label: "Финансы" },
     { id: "stock", label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
@@ -469,7 +476,8 @@ function Dashboard({ session, profile }) {
     { id: "journal", label: "Журнал" },
     { id: "trash", label: `Корзина${trash.length ? " · " + trash.length : ""}` },
   ] : [
-    { id: "jobs", label: "Мои заявки" },
+    { id: "jobs", label: `Мои заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
+    { id: "done", label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
   ];
 
   return (
@@ -499,10 +507,39 @@ function Dashboard({ session, profile }) {
         {loading && <div className="kd-empty">Загрузка…</div>}
 
         {!loading && tab === "jobs" && (
-          jobs.length === 0 ? <div className="kd-empty">Заявок пока нет.</div> :
-            groups.map((g) => (
+          <>
+            <div className="kd-seg" style={{ marginBottom: 14 }}>
+              {[{ id: "all", label: "Все" }, { id: "new", label: "Новые" }, { id: "assigned", label: "Назначены" }].map((s) => (
+                <button key={s.id} className={`kd-segbtn ${statusFilter === s.id ? "on" : ""}`} onClick={() => setStatusFilter(s.id)}>{s.label}</button>
+              ))}
+            </div>
+            {filteredActive.length === 0 ? <div className="kd-empty">{activeJobs.length === 0 ? "Активных заявок нет — все выполнены. Загляни во вкладку «Выполненные»." : "По этому фильтру заявок нет."}</div> :
+              groups.map((g) => (
+                <div key={g.key} className="kd-group">
+                  <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
+                  <div className="kd-list">
+                    {g.jobs.map((j) => (
+                      <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""}
+                        onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
+                        onReport={() => setModal({ kind: "report", job: j })}
+                        onAssign={() => setModal({ kind: "assign", job: j })}
+                        onView={() => setModal({ kind: "view", job: j })}
+                        onEdit={() => setModal({ kind: "edit", job: j })}
+                        onRepeat={() => putOnRepeat(j)}
+                        onPayPartner={(paid) => markPartnerPaid(j, paid)}
+                        onDelete={() => deleteJob(j)} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </>
+        )}
+
+        {!loading && tab === "done" && (
+          doneJobs.length === 0 ? <div className="kd-empty">Выполненных заявок пока нет.</div> :
+            doneGroups.map((g) => (
               <div key={g.key} className="kd-group">
-                <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
+                <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                 <div className="kd-list">
                   {g.jobs.map((j) => (
                     <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""}
@@ -846,7 +883,7 @@ function RepeatCard({ job, onSaveNote, onCreate, onFinish, repeatHint }) {
 // ----------------------------- modals -----------------------------
 function ModalShell({ title, onClose, children, footer }) {
   return (
-    <div className="kd-overlay" onClick={onClose}>
+    <div className="kd-overlay">
       <div className="kd-modal" onClick={(e) => e.stopPropagation()}>
         <div className="kd-modal-head"><h3>{title}</h3><button className="kd-x" onClick={onClose}>✕</button></div>
         <div className="kd-modal-body">{children}</div>
