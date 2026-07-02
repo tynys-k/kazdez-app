@@ -527,11 +527,13 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "jobs" && (
           <>
-            <div className="kd-seg" style={{ marginBottom: 14 }}>
-              {[{ id: "all", label: "Все" }, { id: "new", label: "Новые" }, { id: "assigned", label: "Назначены" }].map((s) => (
-                <button key={s.id} className={`kd-segbtn ${statusFilter === s.id ? "on" : ""}`} onClick={() => setStatusFilter(s.id)}>{s.label}</button>
-              ))}
-            </div>
+            {isAdmin && (
+              <div className="kd-seg" style={{ marginBottom: 14 }}>
+                {[{ id: "all", label: "Все" }, { id: "new", label: "Новые" }, { id: "assigned", label: "Назначены" }].map((s) => (
+                  <button key={s.id} className={`kd-segbtn ${statusFilter === s.id ? "on" : ""}`} onClick={() => setStatusFilter(s.id)}>{s.label}</button>
+                ))}
+              </div>
+            )}
             {filteredActive.length === 0 ? <div className="kd-empty">{activeJobs.length === 0 ? "Активных заявок нет — все выполнены. Загляни во вкладку «Выполненные»." : "По этому фильтру ничего не найдено."}</div> :
               groups.map((g) => (
                 <div key={g.key} className="kd-group">
@@ -841,7 +843,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span></div>
       <div className="kd-meta">
         <span className="kd-brandtag">{brandLabel}</span>
-        <span>{job.type}</span><span>·</span><span>{isoToRu(job.scheduled_date)} {job.scheduled_time}</span>
+        <span>{job.type}</span><span>·</span><span className="kd-datetimetag">{isoToRu(job.scheduled_date) || "без даты"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
         {job.floor && (<><span>·</span><span>{job.floor} этаж</span></>)}
         {job.area && (<><span>·</span><span>{job.area} м²</span></>)}
       </div>
@@ -863,7 +865,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
       </div>
       <div className="kd-actions">
-        <button className="kd-btn wa" onClick={onCopy}>Скопировать для WhatsApp</button>
+        {isAdmin && <button className="kd-btn wa" onClick={onCopy}>Скопировать для WhatsApp</button>}
         {job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
         {isAdmin && job.status !== "done" && <button className="kd-btn ghost" onClick={onAssign}>{assignedName ? "Переназначить" : "Назначить"}</button>}
         {isAdmin && <button className="kd-btn ghost" onClick={onEdit}>Изменить</button>}
