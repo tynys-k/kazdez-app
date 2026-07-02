@@ -92,6 +92,15 @@ body{
 .kd-brandtag{font-size:11px;font-weight:800;color:#0A5E4D;background:#E4F3EE;border-radius:6px;padding:2px 8px;letter-spacing:.3px;}
 .kd-hint{background:#FFF7E6;border:1px solid #F5E2B8;border-radius:10px;padding:9px 12px;margin:6px 0 12px;font-size:13.5px;line-height:1.4;}
 .kd-notebox{background:#F1F4F1;border-radius:10px;padding:8px 12px;margin-bottom:11px;font-size:13.5px;line-height:1.4;color:var(--ink);}
+.kd-clientlink{border:none;background:transparent;padding:0;font:inherit;font-size:13px;color:var(--muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;}
+.kd-clientlink:hover{color:var(--primary-d);}
+.kd-searchbar{position:relative;margin-bottom:14px;}
+.kd-search{width:100%;font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:11px 40px 11px 14px;min-height:44px;}
+.kd-searchbar .kd-x{position:absolute;right:6px;top:6px;}
+.kd-histrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer;}
+.kd-histrow:last-child{border-bottom:none;}
+.kd-histrow:hover{background:#F7F9F7;}
+.kd-histmain{font-weight:650;font-size:14px;margin-bottom:2px;}
 .kd-textarea{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:64px;width:100%;resize:vertical;}
 
 /* rows / sections */
