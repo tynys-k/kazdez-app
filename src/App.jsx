@@ -176,6 +176,8 @@ function Dashboard({ session, profile }) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("jobs");
   const [modal, setModal] = useState(null);
+  const [confirmState, setConfirmState] = useState(null);
+  const askConfirm = (message, onYes) => setConfirmState({ message, onYes });
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [doneSortDir, setDoneSortDir] = useState("desc");
@@ -297,7 +299,7 @@ function Dashboard({ session, profile }) {
       p_docs_needed: docs.needed, p_docs_avr: docs.avr, p_docs_dogovor: docs.dogovor, p_docs_note: docs.note,
     });
     if (error) { showToast("Ошибка: " + error.message); return; }
-    setModal(null); showToast("Отчёт сохранён"); load();
+    setModal({ kind: "reportSuccess" }); load();
   }
   async function deleteJob(job) {
     await supabase.from("trash").insert({ deleted_by: actorName, deleted_by_id: session.user.id, job: { ...job } });
@@ -764,7 +766,7 @@ function Dashboard({ session, profile }) {
                         onRepeat={() => putOnRepeat(j)}
                         onPayPartner={(paid) => markPartnerPaid(j, paid)}
                         onHistory={() => setModal({ kind: "history", job: j })}
-                        onDelete={() => deleteJob(j)} />
+                        onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
                   </div>
                 </div>
@@ -793,7 +795,7 @@ function Dashboard({ session, profile }) {
                       onRepeat={() => putOnRepeat(j)}
                       onPayPartner={(paid) => markPartnerPaid(j, paid)}
                       onHistory={() => setModal({ kind: "history", job: j })}
-                      onDelete={() => deleteJob(j)} />
+                      onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
                   </div>
                 </div>
@@ -1172,6 +1174,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} />}
       {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
+      {modal?.kind === "reportSuccess" && <ReportSuccessModal onClose={() => setModal(null)} />}
       {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} />}
       {modal?.kind === "history" && <HistoryModal job={modal.job} jobs={jobs} onClose={() => setModal(null)} onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : { kind: "edit", job: j })} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
@@ -1187,6 +1190,11 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
       {modal?.kind === "doc" && <DocModal doc={modal.doc} partners={partners} onClose={() => setModal(null)} onSave={saveDoc} />}
+      {confirmState && (
+        <ConfirmModal message={confirmState.message}
+          onCancel={() => setConfirmState(null)}
+          onConfirm={() => { confirmState.onYes(); setConfirmState(null); }} />
+      )}
       {toast && <div className="kd-toast">{toast}</div>}
     </div>
   );
@@ -1266,6 +1274,40 @@ function RepeatCard({ job, onSaveNote, onCreate, onFinish, repeatHint }) {
 }
 
 // ----------------------------- modals -----------------------------
+function ConfirmModal({ message, onCancel, onConfirm }) {
+  return (
+    <div className="kd-overlay">
+      <div className="kd-modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div className="kd-modal-body" style={{ paddingTop: 22, textAlign: "center" }}>
+          <div className="kd-confirm-icon"><Trash2 size={22} /></div>
+          <div style={{ fontWeight: 700, fontSize: 16, marginTop: 12, lineHeight: 1.4 }}>{message}</div>
+        </div>
+        <div className="kd-modal-foot" style={{ justifyContent: "center" }}>
+          <button className="kd-btn ghost" onClick={onCancel}>Отмена</button>
+          <button className="kd-btn primary danger" onClick={onConfirm}>Да, удалить</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportSuccessModal({ onClose }) {
+  return (
+    <div className="kd-overlay">
+      <div className="kd-modal" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
+        <div className="kd-modal-body" style={{ paddingTop: 26, paddingBottom: 6, textAlign: "center" }}>
+          <div className="kd-success-icon"><CheckCircle2 size={26} /></div>
+          <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 19, marginTop: 14 }}>Изменения сохранены!</div>
+          <div className="kd-muted" style={{ marginTop: 6 }}>Красавчик 👏 Отчёт ушёл админу.</div>
+        </div>
+        <div className="kd-modal-foot" style={{ justifyContent: "center" }}>
+          <button className="kd-btn primary" onClick={onClose}>Отлично</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalShell({ title, onClose, children, footer }) {
   return (
     <div className="kd-overlay">
