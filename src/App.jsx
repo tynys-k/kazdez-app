@@ -356,7 +356,16 @@ function Dashboard({ session, profile }) {
     if (job.brand === "partner") return partnerById(job.partner_id)?.name || "KazDez";
     return "KazDez";
   }
-  const partnerShareAmt = (job) => (job.partner_id && job.status === "done" ? Math.round((Number(job.report_paid) || 0) * (Number(job.partner_share) || 0) / 100) : 0);
+  const partnerShareAmt = (job) => {
+    if (!job.partner_id || job.status !== "done") return 0;
+    const paid = Number(job.report_paid) || 0;
+    if (!job.joint_work) return Math.round(paid * (Number(job.partner_share) || 0) / 100);
+    const cost = jobChemCost(job);
+    const net = paid - cost;
+    const profitShare = net * (Number(job.partner_share) || 0) / 100;
+    const costOwed = job.joint_supplier === "us" ? cost * (Number(job.joint_cost_share) || 0) / 100 : 0;
+    return Math.round(profitShare - costOwed);
+  };
   async function savePartner(payload, existing) {
     const res = existing
       ? await supabase.from("partners").update(payload).eq("id", existing.id)
@@ -758,7 +767,7 @@ function Dashboard({ session, profile }) {
                   <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""}
+                      <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                         onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                         onReport={() => setModal({ kind: "report", job: j })}
                         onAssign={() => setModal({ kind: "assign", job: j })}
@@ -787,7 +796,7 @@ function Dashboard({ session, profile }) {
                   <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""}
+                      <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                       onReport={() => setModal({ kind: "report", job: j })}
                       onAssign={() => setModal({ kind: "assign", job: j })}
@@ -1188,7 +1197,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "transferEquip" && <TransferEquipModal handout={modal.handout} techs={techs.filter((t) => t.id !== modal.handout.tech_id)} onClose={() => setModal(null)} onSave={(newTechId, note) => transferEquipment(modal.handout, newTechId, note)} />}
       {modal?.kind === "reportEquip" && <ReportEquipModal equip={modal.equip} status={modal.status} onClose={() => setModal(null)} onSave={(note) => reportEquipIssue(modal.handout, modal.status, note)} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
-      {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} onClose={() => setModal(null)}
+      {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
       {modal?.kind === "doc" && <DocModal doc={modal.doc} partners={partners} onClose={() => setModal(null)} onSave={saveDoc} />}
       {confirmState && (
@@ -1201,10 +1210,9 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onHistory, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onHistory, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
-  const share = job.partner_id && job.status === "done" ? Math.round((Number(job.report_paid) || 0) * (Number(job.partner_share) || 0) / 100) : 0;
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
   return (
     <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
@@ -1227,7 +1235,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, onCop
       </div>
       <div className="kd-card-foot">
         <button className="kd-clientlink" onClick={onHistory} title="Показать все заявки этого клиента">Клиент: {job.client_phone}</button>
-        {isAdmin && job.partner_id && <span className="kd-muted">Партнёр: {partnerName || "?"} · доля {job.partner_share ?? 0}%</span>}
+        {isAdmin && job.partner_id && <span className="kd-muted">Партнёр: {partnerName || "?"}{job.joint_work ? ` · совместная работа · доля в прибыли ${job.partner_share ?? 0}%${job.joint_supplier === "us" ? ` · его расходы ${job.joint_cost_share ?? 0}%` : " · препараты партнёра"}` : ` · доля ${job.partner_share ?? 0}%`}</span>}
         {isAdmin && job.brand === "partner" && partnerRepeat && <span className="kd-muted">Повтор: {partnerRepeat}</span>}
         {isAdmin && share > 0 && <span className={job.partner_paid ? "kd-muted paid" : "kd-muted"}>Доля партнёру: {fmt(share)} ₸ · {job.partner_paid ? "выплачено" : "к выплате"}</span>}
         {isAdmin && <span className="kd-muted">{assignedName ? "Дезинфектор: " + assignedName : "Не назначен"}</span>}
@@ -1353,12 +1361,12 @@ function jobToForm(job) {
     p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
     client_phone: job.client_phone || "+7 ", guarantee_months: job.guarantee_months ?? 6,
     brand: job.brand || "KazDez", partner_id: job.partner_id || "", partner_share: job.partner_share ?? "",
-    note: job.note || "",
+    note: job.note || "", joint_work: !!job.joint_work, joint_supplier: job.joint_supplier || "us", joint_cost_share: job.joint_cost_share ?? "",
   };
 }
 
 function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], onClose, onSave }) {
-  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6, brand: "KazDez", partner_id: "", partner_share: "", note: "" });
+  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6, brand: "KazDez", partner_id: "", partner_share: "", note: "", joint_work: false, joint_supplier: "us", joint_cost_share: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
@@ -1370,7 +1378,8 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
     if (f.p1amount) price_options.push({ label: f.p1label, amount: Number(f.p1amount) });
     if (f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
     const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
-    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: f.brand === "partner" ? (f.partner_id || null) : null, partner_share: f.brand === "partner" ? (Number(f.partner_share) || 0) : null, note: f.note || null };
+    const isPartner = f.brand === "partner";
+    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null };
     if (!keepStatus) payload.status = "new";
     await onSave(payload);
     setSaving(false);
@@ -1385,10 +1394,19 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
         <Field label="Тип"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Плановая</option><option>Тендерная</option><option>Гарантийная</option><option>Осмотр</option></select></Field>
       </div>
       {f.brand === "partner" && (
-        <div className="kd-grid2">
-          <Field label="Партнёр"><select value={f.partner_id} onChange={onPartner}><option value="">— выбери —</option>{partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
-          <Field label="Доля партнёра (%)"><input value={f.partner_share} onChange={set("partner_share")} inputMode="numeric" placeholder="50" /></Field>
-        </div>
+        <>
+          <div className="kd-grid2">
+            <Field label="Партнёр"><select value={f.partner_id} onChange={onPartner}><option value="">— выбери —</option>{partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+            <Field label={f.joint_work ? "Доля партнёра в прибыли (%)" : "Доля партнёра (%)"}><input value={f.partner_share} onChange={set("partner_share")} inputMode="numeric" placeholder="50" /></Field>
+          </div>
+          <label className="kd-check"><input type="checkbox" checked={f.joint_work} onChange={(e) => setF({ ...f, joint_work: e.target.checked })} /><span>Совместная работа — едем на объект вместе, делим расходы и прибыль</span></label>
+          {f.joint_work && (
+            <div className="kd-grid2">
+              <Field label="Кто привозит препараты"><select value={f.joint_supplier} onChange={set("joint_supplier")}><option value="us">Мы (со своего склада)</option><option value="partner">Партнёр (свои)</option></select></Field>
+              {f.joint_supplier === "us" && <Field label="Доля партнёра в расходах (%)"><input value={f.joint_cost_share} onChange={set("joint_cost_share")} inputMode="numeric" placeholder="50" /></Field>}
+            </div>
+          )}
+        </>
       )}
       <div className="kd-grid2">
         <Field label="Вид (вредитель)"><input value={f.pest} onChange={set("pest")} placeholder="Тараканы" /></Field>
@@ -1444,8 +1462,8 @@ function PartnerModal({ partner, onClose, onSave }) {
   );
 }
 
-function PartnerJobsModal({ partner, jobs, onClose, onOpenClient }) {
-  const share = (j) => (j.status === "done" ? Math.round((Number(j.report_paid) || 0) * (Number(j.partner_share) || 0) / 100) : 0);
+function PartnerJobsModal({ partner, jobs, shareOf, onClose, onOpenClient }) {
+  const share = shareOf;
   const list = [...jobs].sort((a, b) => new Date(b.scheduled_date || b.created_at || 0) - new Date(a.scheduled_date || a.created_at || 0));
   const owed = list.filter((j) => j.status === "done" && !j.partner_paid).reduce((s, j) => s + share(j), 0);
   return (
