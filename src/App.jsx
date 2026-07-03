@@ -833,6 +833,7 @@ function Dashboard({ session, profile }) {
                         onRepeat={() => putOnRepeat(j)}
                         onPayPartner={(paid) => markPartnerPaid(j, paid)}
                         onHistory={() => setModal({ kind: "history", job: j })}
+                        onOpenDetails={() => setModal({ kind: "details", job: j })}
                         onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
                   </div>
@@ -862,6 +863,7 @@ function Dashboard({ session, profile }) {
                       onRepeat={() => putOnRepeat(j)}
                       onPayPartner={(paid) => markPartnerPaid(j, paid)}
                       onHistory={() => setModal({ kind: "history", job: j })}
+                        onOpenDetails={() => setModal({ kind: "details", job: j })}
                       onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
                   </div>
@@ -1248,6 +1250,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "reportSuccess" && <ReportSuccessModal onClose={() => setModal(null)} />}
       {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} />}
+      {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} onReport={() => setModal({ kind: "report", job: modal.job })} onClose={() => setModal(null)} />}
       {modal?.kind === "history" && <HistoryModal job={modal.job} jobs={jobs} onClose={() => setModal(null)} onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : { kind: "edit", job: j })} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
@@ -1284,7 +1287,7 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onHistory, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onHistory, onOpenDetails, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
@@ -1317,6 +1320,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
       </div>
       <div className="kd-actions">
         {isAdmin && <button className="kd-btn wa" onClick={onCopy}><MessageCircle size={15} />Скопировать для WhatsApp</button>}
+        {!isAdmin && job.status !== "done" && <button className="kd-btn ghost" onClick={onOpenDetails}>Открыть</button>}
         {job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
         {isAdmin && <button className="kd-btn ghost" onClick={onAssign}><UserPlus size={14} />{assignedName ? "Переназначить" : "Назначить"}</button>}
         {isAdmin && <button className="kd-btn ghost" onClick={onEdit}><Pencil size={14} />Изменить</button>}
@@ -1680,6 +1684,51 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
         </div>
         <Field label="Кому / реквизиты"><input value={docNote} onChange={(e) => setDocNote(e.target.value)} placeholder="ТОО «...», БИН ..." /></Field>
       </>)}
+    </ModalShell>
+  );
+}
+
+function DetailsModal({ job, header, onReport, onClose }) {
+  const [view, setView] = useState("card");
+  const [copied, setCopied] = useState(false);
+  const msg = buildMsg(job, header);
+  const prices = (job.price_options || []).filter((p) => p.amount);
+  function doCopy() { copyText(msg, () => { setCopied(true); setTimeout(() => setCopied(false), 1800); }); }
+  return (
+    <ModalShell title="Заявка" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Закрыть</button>
+      {job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
+    </>}>
+      <div className="kd-seg" style={{ marginBottom: 16, width: "100%" }}>
+        <button className={`kd-segbtn ${view === "card" ? "on" : ""}`} onClick={() => setView("card")}>Карточка</button>
+        <button className={`kd-segbtn ${view === "wa" ? "on" : ""}`} onClick={() => setView("wa")}>Как в WhatsApp</button>
+      </div>
+
+      {view === "card" ? (
+        <>
+          <div className="kd-row"><span>Бренд</span><strong>{header}</strong></div>
+          <div className="kd-row"><span>Тип</span><strong>{job.type}</strong></div>
+          <div className="kd-row"><span>Вид</span><strong>{job.pest}</strong></div>
+          <div className="kd-row"><span>Дата и время</span><strong>{isoToRu(job.scheduled_date) || "—"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</strong></div>
+          <div className="kd-row"><span>Адрес</span><strong style={{ textAlign: "right" }}>{job.address}</strong></div>
+          {job.floor && <div className="kd-row"><span>Этаж</span><strong>{job.floor}</strong></div>}
+          {job.area && <div className="kd-row"><span>Метраж</span><strong>{job.area} м²</strong></div>}
+          {prices.length > 0 && (
+            <>
+              <div className="kd-section" style={{ marginTop: 12 }}>Цена</div>
+              {prices.map((p, i) => (<div className="kd-row" key={i}><span>{p.label || "Вариант " + (i + 1)}</span><strong>{fmt(p.amount)} ₸</strong></div>))}
+            </>
+          )}
+          <div className="kd-row"><span>Телефон клиента</span><strong><a href={`tel:${(job.client_phone || "").replace(/\s/g, "")}`} style={{ color: "var(--primary-d)" }}>{job.client_phone}</a></strong></div>
+          {job.type !== "Осмотр" && <div className="kd-row"><span>Гарантия</span><strong>{job.guarantee_months || 6} мес.</strong></div>}
+          {job.note && <div className="kd-notebox" style={{ marginTop: 12 }}>📝 {job.note}</div>}
+        </>
+      ) : (
+        <>
+          <pre className="kd-watext">{msg}</pre>
+          <button className="kd-btn wa wide" onClick={doCopy}><MessageCircle size={15} />{copied ? "Скопировано ✓" : "Скопировать текст"}</button>
+        </>
+      )}
     </ModalShell>
   );
 }
