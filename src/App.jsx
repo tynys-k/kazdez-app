@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -23,7 +23,6 @@ function fmtAmount(amount, kind) {
 }
 const lineAmount = (l) => Number(l.amount ?? l.ml) || 0;
 const pricePerBase = (chem) => (chem ? (Number(chem.price_per_liter) || 0) / (chemUnit(chem.unit_kind).factor || 1000) : 0);
-const QR_FEE_RATE = 0.0095;
 const REPEAT_POLICIES = [
   { code: "half", label: "50% (стандарт)" },
   { code: "free", label: "Бесплатно" },
@@ -123,6 +122,9 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [booting, setBooting] = useState(true);
   useEffect(() => {
+    document.documentElement.setAttribute("data-theme", localStorage.getItem("kd-theme") || "light");
+  }, []);
+  useEffect(() => {
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setBooting(false); });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
@@ -172,6 +174,9 @@ function Dashboard({ session, profile }) {
   const [expenses, setExpenses] = useState([]);
   const [equipment, setEquipment] = useState([]);
   const [equipHandouts, setEquipHandouts] = useState([]);
+  const [sources, setSources] = useState([]);
+  const [pestTypes, setPestTypes] = useState([]);
+  const [settings, setSettings] = useState({});
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -185,6 +190,7 @@ function Dashboard({ session, profile }) {
   const [techFilter, setTechFilter] = useState("");
   const [toast, setToast] = useState("");
   const [pMode, setPMode] = useState("all");
+  const [brandFilter, setBrandFilter] = useState("all");
   const [pOff, setPOff] = useState(0);
   const isAdmin = profile?.role === "admin";
   const actorName = profile?.full_name || (isAdmin ? "Админ" : session.user.email);
@@ -193,7 +199,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -206,6 +212,9 @@ function Dashboard({ session, profile }) {
       supabase.from("tech_expenses").select("*").order("created_at", { ascending: false }),
       supabase.from("equipment").select("*"),
       supabase.from("equipment_handouts").select("*"),
+      supabase.from("client_sources").select("*").order("name"),
+      supabase.from("pest_types").select("*").order("name"),
+      supabase.from("app_settings").select("*"),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -220,6 +229,11 @@ function Dashboard({ session, profile }) {
     setExpenses(exr.data || []);
     setEquipment(eqr.data || []);
     setEquipHandouts(ehr.data || []);
+    setSources(scr.data || []);
+    setPestTypes(ptyr.data || []);
+    const settingsMap = {};
+    (str.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
+    setSettings(settingsMap);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -230,6 +244,8 @@ function Dashboard({ session, profile }) {
   const chemById = (id) => chemicals.find((x) => x.id === id);
   const lineChem = (l) => (l.chemical_id ? chemById(l.chemical_id) : chemicals.find((x) => norm(x.name) === norm(l.name)));
   const jobChemCost = (job) => (job.chemicals || []).reduce((s, l) => { const c = lineChem(l); return s + lineAmount(l) * pricePerBase(c); }, 0);
+  const qrFeeRate = (Number(settings.qr_fee_rate) || 0.95) / 100;
+  const defaultGuarantee = Number(settings.default_guarantee_months) || 6;
   function techLedger(techId) {
     const m = {};
     const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0 });
@@ -243,15 +259,25 @@ function Dashboard({ session, profile }) {
   const equipById = (id) => equipment.find((e) => e.id === id);
   const techEquipment = (techId) => equipHandouts.filter((h) => h.tech_id === techId && h.status === "with_tech").map((h) => ({ handout: h, equip: equipById(h.equipment_id) })).filter((r) => r.equip);
 
+  async function ensureCatalog(table, list, value) {
+    const v = (value || "").trim();
+    if (!v) return;
+    if (list.some((x) => norm(x.name) === norm(v))) return;
+    await supabase.from(table).insert({ name: v });
+  }
   async function createJob(payload) {
     const { error } = await supabase.from("jobs").insert({ ...payload, created_by: session.user.id });
     if (error) { showToast("Ошибка: " + error.message); return; }
+    await ensureCatalog("client_sources", sources, payload.source);
+    await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
     setModal(null); showToast("Заявка создана"); load();
   }
   async function editJob(job, payload) {
     const { error } = await supabase.from("jobs").update(payload).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
+    await ensureCatalog("client_sources", sources, payload.source);
+    await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Редактирование", `${payload.pest || job.pest} · ${payload.address || job.address}`);
     setModal(null); showToast("Заявка обновлена"); load();
   }
@@ -426,6 +452,30 @@ function Dashboard({ session, profile }) {
     await logAction("Дезинфектор", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
     setModal(null); showToast("Сохранено"); load();
   }
+  async function saveAppSetting(key, value) {
+    const { error } = await supabase.from("app_settings").upsert({ key, value, updated_at: new Date().toISOString() });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Настройки", `${key} → ${JSON.stringify(value)}`);
+    showToast("Сохранено"); load();
+  }
+  async function addCatalogItem(table, name) {
+    const v = (name || "").trim();
+    if (!v) return;
+    const { error } = await supabase.from(table).insert({ name: v });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Справочник", `Добавлено: ${v}`);
+    load();
+  }
+  async function removeCatalogItem(table, item) {
+    const { error } = await supabase.from(table).delete().eq("id", item.id);
+    if (error) { showToast("Ошибка: нельзя удалить — значение уже используется в заявках"); return; }
+    await logAction("Справочник", `Удалено: ${item.name}`);
+    load();
+  }
+  function setTheme(theme) {
+    localStorage.setItem("kd-theme", theme);
+    document.documentElement.setAttribute("data-theme", theme);
+  }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
@@ -523,8 +573,8 @@ function Dashboard({ session, profile }) {
         priceVariants: (j.price_options || []).map((p) => `${p.amount}${p.label ? " " + p.label : ""}`).join("; "),
         paid: j.report_paid ?? "", cash: j.report_cash ?? "", qr: j.report_qr ?? "", method: j.report_method ?? "",
         cost: j.status === "done" ? Math.round(jobChemCost(j)) : "",
-        qrfee: j.status === "done" ? Math.round((Number(j.report_qr) || 0) * QR_FEE_RATE) : "",
-        profit: j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j) - partnerShareAmt(j) - (Number(j.report_qr) || 0) * QR_FEE_RATE) : "",
+        qrfee: j.status === "done" ? Math.round((Number(j.report_qr) || 0) * qrFeeRate) : "",
+        profit: j.status === "done" ? Math.round((Number(j.report_paid) || 0) - jobChemCost(j) - partnerShareAmt(j) - (Number(j.report_qr) || 0) * qrFeeRate) : "",
         chems: (j.chemicals || []).map((l) => { const c = lineChem(l); return `${l.name || (c && c.name) || ""} ${fmtAmount(lineAmount(l), c && c.unit_kind)}`; }).join("; "),
         note: j.note ?? "", paynote: j.report_note ?? "",
         repeat: j.followup_wanted ? `${j.followup_date || "да"}${j.followup_note ? " — " + j.followup_note : ""}` : "",
@@ -626,20 +676,24 @@ function Dashboard({ session, profile }) {
     const week = [1, 2, 3, 4, 5, 6, 0].map((dow) => ({ dow, label: WEEKDAYS[dow].slice(0, 2), count: 0, revenue: 0 }));
     let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, qrFees = 0; const bySource = {}; const byTech = {};
     jobs.forEach((j) => {
+      const isPartnerJob = j.brand === "partner";
+      if (brandFilter === "ours" && isPartnerJob) return;
+      if (brandFilter === "partner" && !isPartnerJob) return;
       const dt = parseIso(j.scheduled_date);
       const inR = pMode === "all" || (dt && dt.getTime() >= range.start && dt.getTime() < range.end);
       if (!inR) return;
-      const src = j.source || "Не указан";
-      if (!bySource[src]) bySource[src] = { count: 0, revenue: 0 };
-      bySource[src].count++;
+      const srcRaw = (j.source || "Не указан").trim() || "Не указан";
+      const srcKey = norm(srcRaw);
+      if (!bySource[srcKey]) bySource[srcKey] = { label: srcRaw, count: 0, revenue: 0 };
+      bySource[srcKey].count++;
       if (j.status === "done") {
         const paid = Number(j.report_paid) || 0;
         const jqr = Number(j.report_qr) || 0;
         const jcost = jobChemCost(j);
         revenue += paid; cost += jcost; cash += Number(j.report_cash) || 0; qr += jqr;
-        qrFees += jqr * QR_FEE_RATE;
+        qrFees += jqr * qrFeeRate;
         partnerShares += partnerShareAmt(j);
-        bySource[src].revenue += paid;
+        bySource[srcKey].revenue += paid;
         if (dt) { const wi = weekIdx[dt.getDay()]; week[wi].count++; week[wi].revenue += paid; }
         if (j.assigned_to) {
           if (!byTech[j.assigned_to]) byTech[j.assigned_to] = { count: 0, revenue: 0, cost: 0 };
@@ -717,7 +771,10 @@ function Dashboard({ session, profile }) {
           <div className="kd-logo"><Bug size={19} strokeWidth={2.4} /></div>
           <div><div className="kd-brand-name">KazDez</div><div className="kd-brand-sub">{isAdmin ? "Админ" : "Дезинфектор"} · {actorName}</div></div>
         </div>
-        <button className="kd-btn ghost" onClick={() => supabase.auth.signOut()}><LogOut size={15} />Выйти</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {isAdmin && <button className="kd-btn ghost" onClick={() => setModal({ kind: "settings" })}><Settings size={15} /></button>}
+          <button className="kd-btn ghost" onClick={() => supabase.auth.signOut()}><LogOut size={15} />Выйти</button>
+        </div>
       </header>
 
       <main className="kd-main">
@@ -861,10 +918,15 @@ function Dashboard({ session, profile }) {
                   <button className="kd-arrow" disabled={pOff >= 0} onClick={() => setPOff(pOff + 1)}><ChevronRight size={18} /></button>
                 </div>
               )}
+              <div className="kd-seg">
+                {[{ id: "all", label: "Все заявки" }, { id: "ours", label: "Наши" }, { id: "partner", label: "Партнёрские" }].map((p) => (
+                  <button key={p.id} className={`kd-segbtn ${brandFilter === p.id ? "on" : ""}`} onClick={() => setBrandFilter(p.id)}>{p.label}</button>
+                ))}
+              </div>
             </div>
             <div className="kd-twocol">
               <div className="kd-card">
-                <div className="kd-section">Итоги · {range.label}</div>
+                <div className="kd-section">Итоги · {range.label}{brandFilter !== "all" ? ` · ${brandFilter === "ours" ? "наши заявки" : "партнёрские"}` : ""}</div>
                 <div className="kd-row"><span>Выручка</span><strong>{fmt(fin.revenue)} ₸</strong></div>
                 <div className="kd-row"><span>· наличными</span><span className="kd-muted">{fmt(fin.cash)} ₸</span></div>
                 <div className="kd-row"><span>· QR / переводом</span><span className="kd-muted">{fmt(fin.qr)} ₸</span></div>
@@ -878,8 +940,8 @@ function Dashboard({ session, profile }) {
               <div className="kd-card">
                 <div className="kd-section">Источники клиентов</div>
                 {Object.keys(fin.bySource).length === 0 && <div className="kd-muted">За период заявок нет.</div>}
-                {Object.entries(fin.bySource).sort((a, b) => b[1].count - a[1].count).map(([src, v]) => (
-                  <div className="kd-row" key={src}><span>{src}</span><span className="kd-twoval"><em>{v.count} заявок</em><strong>{fmt(v.revenue)} ₸</strong></span></div>
+                {Object.entries(fin.bySource).sort((a, b) => b[1].count - a[1].count).map(([key, v]) => (
+                  <div className="kd-row" key={key}><span>{v.label}</span><span className="kd-twoval"><em>{v.count} заявок</em><strong>{fmt(v.revenue)} ₸</strong></span></div>
                 ))}
               </div>
             </div>
@@ -1180,8 +1242,8 @@ function Dashboard({ session, profile }) {
         )}
       </main>
 
-      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} onClose={() => setModal(null)} onSave={createJob} />}
-      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
+      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} sources={sources} pestTypes={pestTypes} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
+      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} sources={sources} pestTypes={pestTypes} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} />}
       {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "reportSuccess" && <ReportSuccessModal onClose={() => setModal(null)} />}
@@ -1196,6 +1258,18 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
       {modal?.kind === "transferEquip" && <TransferEquipModal handout={modal.handout} techs={techs.filter((t) => t.id !== modal.handout.tech_id)} onClose={() => setModal(null)} onSave={(newTechId, note) => transferEquipment(modal.handout, newTechId, note)} />}
       {modal?.kind === "reportEquip" && <ReportEquipModal equip={modal.equip} status={modal.status} onClose={() => setModal(null)} onSave={(note) => reportEquipIssue(modal.handout, modal.status, note)} />}
+      {modal?.kind === "settings" && (
+        <SettingsModal
+          settings={settings} sources={sources} pestTypes={pestTypes}
+          onClose={() => setModal(null)}
+          onSaveSetting={saveAppSetting}
+          onSetTheme={setTheme}
+          onAddSource={(name) => addCatalogItem("client_sources", name)}
+          onRemoveSource={(item) => removeCatalogItem("client_sources", item)}
+          onAddPest={(name) => addCatalogItem("pest_types", name)}
+          onRemovePest={(item) => removeCatalogItem("pest_types", item)}
+        />
+      )}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
@@ -1365,8 +1439,8 @@ function jobToForm(job) {
   };
 }
 
-function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], onClose, onSave }) {
-  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6, brand: "KazDez", partner_id: "", partner_share: "", note: "", joint_work: false, joint_supplier: "us", joint_cost_share: "" });
+function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], sources = [], pestTypes = [], defaultGuarantee = 6, onClose, onSave }) {
+  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", joint_work: false, joint_supplier: "us", joint_cost_share: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
@@ -1408,9 +1482,11 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
           )}
         </>
       )}
+      <datalist id="kd-pests-list">{pestTypes.map((p) => <option key={p.id} value={p.name} />)}</datalist>
+      <datalist id="kd-sources-list">{sources.map((s) => <option key={s.id} value={s.name} />)}</datalist>
       <div className="kd-grid2">
-        <Field label="Вид (вредитель)"><input value={f.pest} onChange={set("pest")} placeholder="Тараканы" /></Field>
-        <Field label="Источник"><input value={f.source} onChange={set("source")} placeholder="OLX" /></Field>
+        <Field label="Вид (вредитель)"><input list="kd-pests-list" value={f.pest} onChange={set("pest")} placeholder="Тараканы" /></Field>
+        <Field label="Источник"><input list="kd-sources-list" value={f.source} onChange={set("source")} placeholder="OLX" /></Field>
       </div>
       <div className="kd-grid3">
         <Field label="Дата"><input type="date" value={f.scheduled_date} onChange={set("scheduled_date")} /></Field>
@@ -1887,6 +1963,58 @@ function ReportEquipModal({ equip, status, onClose, onSave }) {
     </>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{equip?.name}. Админ увидит это в журнале и решит вопрос с заменой.</div>
       <Field label="Что случилось (по возможности опиши)"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Напр.: не заводится, разбит бак и т.п." /></Field>
+    </ModalShell>
+  );
+}
+
+function CatalogList({ items, onAdd, onRemove, placeholder }) {
+  const [val, setVal] = useState("");
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <input value={val} onChange={(e) => setVal(e.target.value)} placeholder={placeholder}
+          style={{ flex: 1, font: "inherit", fontWeight: 600, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "10px 12px", minHeight: 44 }} />
+        <button className="kd-btn primary sm" onClick={() => { onAdd(val); setVal(""); }} disabled={!val.trim()}><Plus size={14} /></button>
+      </div>
+      {items.length === 0 && <div className="kd-muted">Список пуст.</div>}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+        {items.map((it) => (
+          <span key={it.id} className="kd-price" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+            {it.name}
+            <button onClick={() => onRemove(it)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", display: "flex" }}><X size={13} /></button>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SettingsModal({ settings, sources, pestTypes, onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest }) {
+  const [theme, setThemeLocal] = useState(localStorage.getItem("kd-theme") || "light");
+  const [qrRate, setQrRate] = useState(settings.qr_fee_rate ?? 0.95);
+  const [guarantee, setGuarantee] = useState(settings.default_guarantee_months ?? 6);
+  function pickTheme(t) { setThemeLocal(t); onSetTheme(t); }
+  return (
+    <ModalShell title="Настройки" onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Готово</button>}>
+      <div className="kd-section">Оформление</div>
+      <div className="kd-seg" style={{ marginBottom: 18 }}>
+        <button className={`kd-segbtn ${theme === "light" ? "on" : ""}`} onClick={() => pickTheme("light")}>Светлая</button>
+        <button className={`kd-segbtn ${theme === "dark" ? "on" : ""}`} onClick={() => pickTheme("dark")}>Тёмная</button>
+      </div>
+      <div className="kd-muted" style={{ marginTop: -10, marginBottom: 18 }}>Применяется на этом устройстве сразу, без перезагрузки.</div>
+
+      <div className="kd-section">Источники клиентов</div>
+      <div style={{ marginBottom: 18 }}><CatalogList items={sources} onAdd={onAddSource} onRemove={onRemoveSource} placeholder="Напр.: Facebook" /></div>
+
+      <div className="kd-section">Виды вредителей</div>
+      <div style={{ marginBottom: 18 }}><CatalogList items={pestTypes} onAdd={onAddPest} onRemove={onRemovePest} placeholder="Напр.: Муравьи" /></div>
+
+      <div className="kd-section">Финансы по умолчанию</div>
+      <div className="kd-grid2">
+        <Field label="Комиссия банка по QR (%)"><input value={qrRate} onChange={(e) => setQrRate(e.target.value)} inputMode="decimal" onBlur={() => onSaveSetting("qr_fee_rate", Number(qrRate) || 0)} /></Field>
+        <Field label="Гарантия по умолчанию (мес.)"><input value={guarantee} onChange={(e) => setGuarantee(e.target.value)} inputMode="numeric" onBlur={() => onSaveSetting("default_guarantee_months", Number(guarantee) || 6)} /></Field>
+      </div>
+      <div className="kd-muted">Сохраняется при выходе из поля. Значения применяются ко всем новым заявкам и расчётам.</div>
     </ModalShell>
   );
 }
