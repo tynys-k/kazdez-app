@@ -78,7 +78,8 @@ const STATUS = {
   done: { label: "Выполнена", color: "#0E7C66", bg: "#E4F3EE" },
 };
 
-function jobTime(j) { if (!j.scheduled_date) return Infinity; return new Date(`${j.scheduled_date}T${j.scheduled_time || "00:00"}`).getTime(); }
+function timeStart(t) { const m = (t || "").match(/^(\d{1,2}):(\d{2})/); return m ? `${m[1].padStart(2, "0")}:${m[2]}` : "00:00"; }
+function jobTime(j) { if (!j.scheduled_date) return Infinity; return new Date(`${j.scheduled_date}T${timeStart(j.scheduled_time)}`).getTime(); }
 function dateGroupLabel(iso) {
   const date = parseIso(iso); if (!date) return "Без даты";
   const diff = Math.round((date.getTime() - todayStart()) / 86400000); const ru = isoToRu(iso);
@@ -1344,8 +1345,9 @@ function AssignModal({ job, techs, onClose, onSave }) {
 
 function jobToForm(job) {
   const po = job.price_options || [];
+  const [timeFrom, timeTo] = (job.scheduled_time || "").split(/[–-]/).map((s) => s.trim());
   return {
-    type: job.type || "Первичная", scheduled_date: job.scheduled_date || "", scheduled_time: job.scheduled_time || "",
+    type: job.type || "Первичная", scheduled_date: job.scheduled_date || "", time_from: timeFrom || "", time_to: timeTo || "",
     address: job.address || "", floor: job.floor || "", area: job.area ?? "", source: job.source || "", pest: job.pest || "",
     p1label: po[0]?.label || "С запахом", p1amount: po[0]?.amount ?? "",
     p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
@@ -1356,7 +1358,7 @@ function jobToForm(job) {
 }
 
 function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], onClose, onSave }) {
-  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", scheduled_time: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6, brand: "KazDez", partner_id: "", partner_share: "", note: "" });
+  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: 6, brand: "KazDez", partner_id: "", partner_share: "", note: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
@@ -1367,7 +1369,8 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
     const price_options = [];
     if (f.p1amount) price_options.push({ label: f.p1label, amount: Number(f.p1amount) });
     if (f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
-    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time: f.scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: f.brand === "partner" ? (f.partner_id || null) : null, partner_share: f.brand === "partner" ? (Number(f.partner_share) || 0) : null, note: f.note || null };
+    const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
+    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: f.brand === "partner" ? (f.partner_id || null) : null, partner_share: f.brand === "partner" ? (Number(f.partner_share) || 0) : null, note: f.note || null };
     if (!keepStatus) payload.status = "new";
     await onSave(payload);
     setSaving(false);
@@ -1391,9 +1394,10 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
         <Field label="Вид (вредитель)"><input value={f.pest} onChange={set("pest")} placeholder="Тараканы" /></Field>
         <Field label="Источник"><input value={f.source} onChange={set("source")} placeholder="OLX" /></Field>
       </div>
-      <div className="kd-grid2">
+      <div className="kd-grid3">
         <Field label="Дата"><input type="date" value={f.scheduled_date} onChange={set("scheduled_date")} /></Field>
-        <Field label="Время"><input value={f.scheduled_time} onChange={set("scheduled_time")} placeholder="12:00" /></Field>
+        <Field label="Время с"><input type="time" value={f.time_from} onChange={set("time_from")} /></Field>
+        <Field label="Время до (необязательно)"><input type="time" value={f.time_to} onChange={set("time_to")} /></Field>
       </div>
       <Field label="Адрес"><input value={f.address} onChange={set("address")} placeholder="ул. ..., кв. ..." /></Field>
       <div className="kd-grid2">
