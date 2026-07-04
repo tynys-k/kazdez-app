@@ -429,6 +429,12 @@ function Dashboard({ session, profile }) {
     await logAction("Выплата партнёру", `${partnerById(job.partner_id)?.name || "?"} · ${fmt(partnerShareAmt(job))} ₸ · ${paid ? "выплачено" : "отменено"}`);
     showToast(paid ? "Отмечено как выплачено" : "Отметка снята"); load();
   }
+  async function markCompPaid(job, paid) {
+    const { error } = await supabase.from("jobs").update({ partner_comp_paid: paid }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Компенсация партнёра", `${partnerById(job.partner_id)?.name || "?"} · ${fmt(job.partner_comp)} ₸ · ${paid ? "получено" : "снята отметка"}`);
+    showToast(paid ? "Отмечено как полученное" : "Отметка снята"); load();
+  }
   async function saveDoc(payload, existing) {
     const res = existing ? await supabase.from("doc_services").update(payload).eq("id", existing.id) : await supabase.from("doc_services").insert({ ...payload, created_by: session.user.id });
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
@@ -615,6 +621,7 @@ function Dashboard({ session, profile }) {
         { header: "Бренд", key: "brand", width: 12 }, { header: "Тип", key: "type", width: 12 }, { header: "Вид", key: "pest", width: 16 },
         { header: "Партнёр", key: "partner", width: 14 }, { header: "Доля %", key: "sharePct", width: 9 },
         { header: "Доля ₸", key: "shareAmt", width: 12, money: true }, { header: "Доля выплачена", key: "sharePaid", width: 14 },
+        { header: "Компенсация нам ₸", key: "comp", width: 16, money: true }, { header: "Компенсация получена", key: "compPaid", width: 16 },
         { header: "Адрес", key: "address", width: 32 }, { header: "Этаж", key: "floor", width: 8 }, { header: "Метраж", key: "area", width: 9 },
         { header: "Источник", key: "source", width: 12 }, { header: "Телефон", key: "phone", width: 16 }, { header: "Гарантия (мес)", key: "guarantee", width: 10 },
         { header: "Дезинфектор", key: "tech", width: 16 }, { header: "Статус", key: "status", width: 12 },
@@ -629,6 +636,7 @@ function Dashboard({ session, profile }) {
         date: isoToRu(j.scheduled_date), time: j.scheduled_time, brand: j.brand === "partner" ? "Партнёр" : j.brand, type: j.type, pest: j.pest,
         partner: j.partner_id ? (partnerById(j.partner_id)?.name || "") : "", sharePct: j.partner_id ? (j.partner_share ?? "") : "",
         shareAmt: partnerShareAmt(j) || "", sharePaid: j.partner_id && j.status === "done" ? (j.partner_paid ? "да" : "нет") : "",
+        comp: j.partner_comp || "", compPaid: j.partner_comp > 0 ? (j.partner_comp_paid ? "да" : "нет") : "",
         address: j.address, floor: j.floor, area: j.area, source: j.source, phone: j.client_phone, guarantee: j.guarantee_months,
         tech: techById(j.assigned_to)?.full_name || "", status: (STATUS[j.status] && STATUS[j.status].label) || j.status,
         priceVariants: (j.price_options || []).map((p) => `${p.amount}${p.label ? " " + p.label : ""}`).join("; "),
@@ -752,7 +760,7 @@ function Dashboard({ session, profile }) {
   const fin = (() => {
     const weekIdx = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
     const week = [1, 2, 3, 4, 5, 6, 0].map((dow) => ({ dow, label: WEEKDAYS[dow].slice(0, 2), count: 0, revenue: 0 }));
-    let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, qrFees = 0; const bySource = {}; const byTech = {};
+    let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, qrFees = 0, partnerComp = 0; const bySource = {}; const byTech = {};
     jobs.forEach((j) => {
       const isPartnerJob = j.brand === "partner";
       if (brandFilter === "ours" && isPartnerJob) return;
@@ -778,9 +786,10 @@ function Dashboard({ session, profile }) {
           byTech[j.assigned_to].count++; byTech[j.assigned_to].revenue += paid; byTech[j.assigned_to].cost += jcost;
         }
       }
+      if (j.partner_comp > 0) partnerComp += Number(j.partner_comp) || 0;
     });
     const weekMax = Math.max(1, ...week.map((w) => w.revenue));
-    return { revenue, cost, partnerShares, qrFees, profit: revenue - cost - partnerShares - qrFees, cash, qr, bySource, byTech, week, weekMax };
+    return { revenue, cost, partnerShares, qrFees, partnerComp, profit: revenue - cost - partnerShares - qrFees + partnerComp, cash, qr, bySource, byTech, week, weekMax };
   })();
 
   const expensesInRange = expenses.filter((e) => {
@@ -922,6 +931,7 @@ function Dashboard({ session, profile }) {
                         onEdit={() => setModal({ kind: "edit", job: j })}
                         onRepeat={() => putOnRepeat(j)}
                         onPayPartner={(paid) => markPartnerPaid(j, paid)}
+                        onCompPaid={(paid) => markCompPaid(j, paid)}
                         onHistory={() => setModal({ kind: "history", job: j })}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                         onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
@@ -952,6 +962,7 @@ function Dashboard({ session, profile }) {
                       onEdit={() => setModal({ kind: "edit", job: j })}
                       onRepeat={() => putOnRepeat(j)}
                       onPayPartner={(paid) => markPartnerPaid(j, paid)}
+                        onCompPaid={(paid) => markCompPaid(j, paid)}
                       onHistory={() => setModal({ kind: "history", job: j })}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                       onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
@@ -1111,6 +1122,7 @@ function Dashboard({ session, profile }) {
                 <div className="kd-row"><span>Себестоимость препаратов</span><strong style={{ color: "#B42318" }}>− {fmt(fin.cost)} ₸</strong></div>
                 <div className="kd-row"><span>Доли партнёров</span><strong style={{ color: "#B42318" }}>− {fmt(fin.partnerShares)} ₸</strong></div>
                 <div className="kd-row"><span>Комиссия банка по QR (0.95%)</span><strong style={{ color: "#B42318" }}>− {fmt(fin.qrFees)} ₸</strong></div>
+                {fin.partnerComp > 0 && <div className="kd-row"><span>Компенсации от партнёров (на Kaspi)</span><strong style={{ color: "#0E7C66" }}>+ {fmt(fin.partnerComp)} ₸</strong></div>}
                 <div className="kd-row"><span>Прибыль по заявкам</span><strong>{fmt(fin.profit)} ₸</strong></div>
                 <div className="kd-row"><span>Выплаты сотрудникам (зарплата/дорожные)</span><strong style={{ color: "#B42318" }}>− {fmt(expensesInRange)} ₸</strong></div>
                 <div className="kd-row"><span>Операционные расходы</span><strong style={{ color: "#B42318" }}>− {fmt(opexInRange)} ₸</strong></div>
@@ -1526,7 +1538,7 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onHistory, onOpenDetails, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
@@ -1554,6 +1566,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {isAdmin && job.partner_id && <span className="kd-muted">Партнёр: {partnerName || "?"}{job.joint_work ? ` · совместная работа · доля в прибыли ${job.partner_share ?? 0}%${job.joint_supplier === "us" ? ` · его расходы ${job.joint_cost_share ?? 0}%` : " · препараты партнёра"}` : ` · доля ${job.partner_share ?? 0}%`}</span>}
         {isAdmin && job.brand === "partner" && partnerRepeat && <span className="kd-muted">Повтор: {partnerRepeat}</span>}
         {isAdmin && share > 0 && <span className={job.partner_paid ? "kd-muted paid" : "kd-muted"}>Доля партнёру: {fmt(share)} ₸ · {job.partner_paid ? "выплачено" : "к выплате"}</span>}
+        {isAdmin && job.partner_comp > 0 && <span className={job.partner_comp_paid ? "kd-muted paid" : "kd-muted"} style={{ color: job.partner_comp_paid ? undefined : "#B4650B", fontWeight: 700 }}>💳 Компенсация от партнёра нам: {fmt(job.partner_comp)} ₸ · {job.partner_comp_paid ? "получено" : "ожидаем на Kaspi"}</span>}
         {isAdmin && <span className="kd-muted">{assignedName ? "Дезинфектор: " + assignedName : "Не назначен"}</span>}
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
       </div>
@@ -1566,6 +1579,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
         {isAdmin && job.status === "done" && !job.repeat_state && <button className="kd-btn ghost" onClick={onRepeat}>На повтор</button>}
         {isAdmin && share > 0 && <button className="kd-btn ghost" onClick={() => onPayPartner(!job.partner_paid)}>{job.partner_paid ? "Отменить выплату" : "Выплатить долю"}</button>}
+        {isAdmin && job.partner_comp > 0 && <button className="kd-btn ghost" onClick={() => onCompPaid(!job.partner_comp_paid)}>{job.partner_comp_paid ? "Компенсация не получена" : "Компенсация получена"}</button>}
         {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить"><Trash2 size={14} /></button>}
       </div>
     </div>
@@ -1678,12 +1692,12 @@ function jobToForm(job) {
     p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
     client_phone: job.client_phone || "+7 ", guarantee_months: job.guarantee_months ?? 6,
     brand: job.brand || "KazDez", partner_id: job.partner_id || "", partner_share: job.partner_share ?? "",
-    note: job.note || "", joint_work: !!job.joint_work, joint_supplier: job.joint_supplier || "us", joint_cost_share: job.joint_cost_share ?? "",
+    note: job.note || "", joint_work: !!job.joint_work, joint_supplier: job.joint_supplier || "us", joint_cost_share: job.joint_cost_share ?? "", partner_comp: job.partner_comp ?? "",
   };
 }
 
 function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], sources = [], pestTypes = [], defaultGuarantee = 6, onClose, onSave }) {
-  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", joint_work: false, joint_supplier: "us", joint_cost_share: "" });
+  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
@@ -1696,7 +1710,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
     if (f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
     const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
     const isPartner = f.brand === "partner";
-    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null };
+    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null };
     if (!keepStatus) payload.status = "new";
     await onSave(payload);
     setSaving(false);
@@ -1723,6 +1737,9 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
               {f.joint_supplier === "us" && <Field label="Доля партнёра в расходах (%)"><input value={f.joint_cost_share} onChange={set("joint_cost_share")} inputMode="numeric" placeholder="50" /></Field>}
             </div>
           )}
+          <Field label="Компенсация от партнёра нам (₸) — на личный Kaspi, скрыто от дезинфектора">
+            <input value={f.partner_comp} onChange={set("partner_comp")} inputMode="numeric" placeholder="напр. 8000 (если партнёр компенсирует нам)" />
+          </Field>
         </>
       )}
       <datalist id="kd-pests-list">{pestTypes.map((p) => <option key={p.id} value={p.name} />)}</datalist>
