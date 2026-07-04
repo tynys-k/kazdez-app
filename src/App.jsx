@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -76,6 +76,7 @@ const STATUS = {
   new: { label: "Новая", color: "#2563EB", bg: "#EAF1FE" },
   assigned: { label: "Назначена", color: "#B45309", bg: "#FCF1E2" },
   done: { label: "Выполнена", color: "#0E7C66", bg: "#E4F3EE" },
+  canceled: { label: "Отменена", color: "#B3261E", bg: "#FBE7E5" },
 };
 
 function timeStart(t) { const m = (t || "").match(/^(\d{1,2}):(\d{2})/); return m ? `${m[1].padStart(2, "0")}:${m[2]}` : "00:00"; }
@@ -95,6 +96,21 @@ function groupByDate(jobs) {
     groups[idx[key]].jobs.push(j);
   });
   return groups;
+}
+function AddressText({ text }) {
+  if (!text) return null;
+  const urlMatch = String(text).match(/https?:\/\/[^\s]+/);
+  if (!urlMatch) return <>{text}</>;
+  const url = urlMatch[0];
+  const before = text.slice(0, urlMatch.index).trim();
+  const after = text.slice(urlMatch.index + url.length).trim();
+  return (
+    <>
+      {before && <span>{before} </span>}
+      <a href={url} target="_blank" rel="noopener noreferrer" className="kd-maplink" onClick={(e) => e.stopPropagation()}>📍 Открыть на карте</a>
+      {after && <span> {after}</span>}
+    </>
+  );
 }
 function buildMsg(job, header) {
   const brand = header || "KazDez";
@@ -304,6 +320,18 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Повтор", `На повтор · ${job.pest} · ${job.address}`);
     showToast("Заявка на повторе"); load();
+  }
+  async function cancelJob(job, reason) {
+    const { error } = await supabase.from("jobs").update({ status: "canceled", cancel_reason: reason || null, canceled_at: new Date().toISOString(), canceled_by: session.user.id }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Отмена заявки", `${job.pest} · ${job.address}${reason ? " — " + reason : ""}`);
+    setModal(null); showToast("Заявка отменена"); load();
+  }
+  async function restoreCanceled(job) {
+    const { error } = await supabase.from("jobs").update({ status: job.assigned_to ? "assigned" : "new", cancel_reason: null, canceled_at: null, canceled_by: null }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Отмена заявки", `Восстановлена · ${job.pest} · ${job.address}`);
+    showToast("Заявка возвращена в работу"); load();
   }
   async function saveRepeatNote(job, note) {
     const { error } = await supabase.from("jobs").update({ repeat_note: note }).eq("id", job.id);
@@ -624,7 +652,7 @@ function Dashboard({ session, profile }) {
         { header: "Компенсация нам ₸", key: "comp", width: 16, money: true }, { header: "Компенсация получена", key: "compPaid", width: 16 },
         { header: "Адрес", key: "address", width: 32 }, { header: "Этаж", key: "floor", width: 8 }, { header: "Метраж", key: "area", width: 9 },
         { header: "Источник", key: "source", width: 12 }, { header: "Телефон", key: "phone", width: 16 }, { header: "Гарантия (мес)", key: "guarantee", width: 10 },
-        { header: "Дезинфектор", key: "tech", width: 16 }, { header: "Статус", key: "status", width: 12 },
+        { header: "Дезинфектор", key: "tech", width: 16 }, { header: "Статус", key: "status", width: 12 }, { header: "Причина отмены", key: "cancelReason", width: 24 },
         { header: "Цена (варианты)", key: "priceVariants", width: 26 },
         { header: "Оплачено", key: "paid", width: 12, money: true }, { header: "Наличными", key: "cash", width: 12, money: true },
         { header: "QR", key: "qr", width: 12, money: true }, { header: "Способ", key: "method", width: 12 },
@@ -638,7 +666,7 @@ function Dashboard({ session, profile }) {
         shareAmt: partnerShareAmt(j) || "", sharePaid: j.partner_id && j.status === "done" ? (j.partner_paid ? "да" : "нет") : "",
         comp: j.partner_comp || "", compPaid: j.partner_comp > 0 ? (j.partner_comp_paid ? "да" : "нет") : "",
         address: j.address, floor: j.floor, area: j.area, source: j.source, phone: j.client_phone, guarantee: j.guarantee_months,
-        tech: techById(j.assigned_to)?.full_name || "", status: (STATUS[j.status] && STATUS[j.status].label) || j.status,
+        tech: techById(j.assigned_to)?.full_name || "", status: (STATUS[j.status] && STATUS[j.status].label) || j.status, cancelReason: j.cancel_reason || "",
         priceVariants: (j.price_options || []).map((p) => `${p.amount}${p.label ? " " + p.label : ""}`).join("; "),
         paid: j.report_paid ?? "", cash: j.report_cash ?? "", qr: j.report_qr ?? "", method: j.report_method ?? "",
         cost: j.status === "done" ? Math.round(jobChemCost(j)) : "",
@@ -762,6 +790,7 @@ function Dashboard({ session, profile }) {
     const week = [1, 2, 3, 4, 5, 6, 0].map((dow) => ({ dow, label: WEEKDAYS[dow].slice(0, 2), count: 0, revenue: 0 }));
     let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, qrFees = 0, partnerComp = 0; const bySource = {}; const byTech = {};
     jobs.forEach((j) => {
+      if (j.status === "canceled") return;
       const isPartnerJob = j.brand === "partner";
       if (brandFilter === "ours" && isPartnerJob) return;
       if (brandFilter === "partner" && !isPartnerJob) return;
@@ -819,8 +848,9 @@ function Dashboard({ session, profile }) {
   const equipIssuedQty = (equipId) => equipHandouts.filter((h) => h.equipment_id === equipId && h.status === "with_tech").reduce((s, h) => s + (Number(h.qty) || 0), 0);
   const totalEquipValue = equipment.reduce((s, e) => s + equipIssuedQty(e.id) * (Number(e.price) || 0), 0);
 
-  const activeJobs = jobs.filter((j) => j.status !== "done");
+  const activeJobs = jobs.filter((j) => j.status !== "done" && j.status !== "canceled");
   const doneJobs = jobs.filter((j) => j.status === "done");
+  const canceledJobs = jobs.filter((j) => j.status === "canceled");
   const q = search.trim().toLowerCase();
   const qDigits = q.replace(/\D/g, "");
   function matchSearch(j) {
@@ -844,6 +874,7 @@ function Dashboard({ session, profile }) {
   const tabs = isAdmin ? [
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
+    { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
     { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "finance", icon: Wallet, label: "Финансы" },
     { id: "opex", icon: Receipt, label: "Расходы" },
@@ -932,6 +963,8 @@ function Dashboard({ session, profile }) {
                         onRepeat={() => putOnRepeat(j)}
                         onPayPartner={(paid) => markPartnerPaid(j, paid)}
                         onCompPaid={(paid) => markCompPaid(j, paid)}
+                        onCancel={() => setModal({ kind: "cancelJob", job: j })}
+                        onRestore={() => restoreCanceled(j)}
                         onHistory={() => setModal({ kind: "history", job: j })}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                         onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
@@ -963,6 +996,8 @@ function Dashboard({ session, profile }) {
                       onRepeat={() => putOnRepeat(j)}
                       onPayPartner={(paid) => markPartnerPaid(j, paid)}
                         onCompPaid={(paid) => markCompPaid(j, paid)}
+                        onCancel={() => setModal({ kind: "cancelJob", job: j })}
+                        onRestore={() => restoreCanceled(j)}
                       onHistory={() => setModal({ kind: "history", job: j })}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                       onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
@@ -1076,6 +1111,28 @@ function Dashboard({ session, profile }) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {!loading && tab === "canceled" && (
+          <div className="kd-list">
+            {canceledJobs.length === 0 ? <div className="kd-empty">Отменённых заявок нет.</div> :
+              [...canceledJobs].sort((a, b) => new Date(b.canceled_at || 0) - new Date(a.canceled_at || 0)).map((j) => (
+                <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat="" share={partnerShareAmt(j)}
+                  onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
+                  onReport={() => setModal({ kind: "report", job: j })}
+                  onAssign={() => setModal({ kind: "assign", job: j })}
+                  onView={() => setModal({ kind: "view", job: j })}
+                  onEdit={() => setModal({ kind: "edit", job: j })}
+                  onRepeat={() => putOnRepeat(j)}
+                  onPayPartner={(paid) => markPartnerPaid(j, paid)}
+                  onCompPaid={(paid) => markCompPaid(j, paid)}
+                  onCancel={() => setModal({ kind: "cancelJob", job: j })}
+                  onRestore={() => restoreCanceled(j)}
+                  onHistory={() => setModal({ kind: "history", job: j })}
+                  onOpenDetails={() => setModal({ kind: "details", job: j })}
+                  onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину.`, () => deleteJob(j))} />
+              ))}
           </div>
         )}
 
@@ -1477,7 +1534,7 @@ function Dashboard({ session, profile }) {
             {trash.map((row) => (
               <div key={row.id} className="kd-card">
                 <div className="kd-card-head"><div className="kd-pest">{row.job.pest}</div><span className="kd-muted">удалено {fmtTs(row.deleted_at)}</span></div>
-                <div className="kd-addr">{row.job.address}</div>
+                <div className="kd-addr"><AddressText text={row.job.address} /></div>
                 <div className="kd-card-foot"><span className="kd-muted">Удалил: {row.deleted_by}</span>
                   {row.job.report_paid != null && <span className="kd-muted">Было оплачено: {fmt(row.job.report_paid)} ₸</span>}</div>
                 <div className="kd-actions">
@@ -1523,6 +1580,7 @@ function Dashboard({ session, profile }) {
       )}
       {modal?.kind === "opex" && <OpexModal opex={modal.opex} expCats={expCats} onClose={() => setModal(null)} onSave={saveOpex} />}
       {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}
+      {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "rejectDeposit" && <RejectDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} onClose={() => setModal(null)} onSave={(adminNote) => { decideDeposit(modal.dep, "rejected", adminNote); setModal(null); }} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
@@ -1538,7 +1596,7 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
@@ -1551,7 +1609,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {job.floor && (<><span>·</span><span>{job.floor} этаж</span></>)}
         {job.area && (<><span>·</span><span>{job.area} м²</span></>)}
       </div>
-      <div className="kd-addr">{job.address}</div>
+      <div className="kd-addr"><AddressText text={job.address} /></div>
       {job.note && <div className="kd-notebox">📝 {job.note}</div>}
       <div className="kd-prices">
         {(job.price_options || []).map((p, i) => (<span className="kd-price" key={i}>{fmt(p.amount)} ₸{p.label ? <em> · {p.label}</em> : null}</span>))}
@@ -1569,15 +1627,18 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {isAdmin && job.partner_comp > 0 && <span className={job.partner_comp_paid ? "kd-muted paid" : "kd-muted"} style={{ color: job.partner_comp_paid ? undefined : "#B4650B", fontWeight: 700 }}>💳 Компенсация от партнёра нам: {fmt(job.partner_comp)} ₸ · {job.partner_comp_paid ? "получено" : "ожидаем на Kaspi"}</span>}
         {isAdmin && <span className="kd-muted">{assignedName ? "Дезинфектор: " + assignedName : "Не назначен"}</span>}
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
+        {job.status === "canceled" && <span className="kd-muted" style={{ color: "#B3261E", fontWeight: 700 }}>Отменена{job.cancel_reason ? ": " + job.cancel_reason : ""}</span>}
       </div>
       <div className="kd-actions">
-        {isAdmin && <button className="kd-btn wa" onClick={onCopy}><MessageCircle size={15} />Скопировать для WhatsApp</button>}
-        {!isAdmin && job.status !== "done" && <button className="kd-btn ghost" onClick={onOpenDetails}>Открыть</button>}
-        {job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
-        {isAdmin && <button className="kd-btn ghost" onClick={onAssign}><UserPlus size={14} />{assignedName ? "Переназначить" : "Назначить"}</button>}
-        {isAdmin && <button className="kd-btn ghost" onClick={onEdit}><Pencil size={14} />Изменить</button>}
+        {isAdmin && job.status !== "canceled" && <button className="kd-btn wa" onClick={onCopy}><MessageCircle size={15} />Скопировать для WhatsApp</button>}
+        {!isAdmin && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onOpenDetails}>Открыть</button>}
+        {job.status !== "done" && job.status !== "canceled" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
+        {job.status !== "done" && job.status !== "canceled" && <button className="kd-btn ghost danger" onClick={onCancel}>Клиент отказался</button>}
+        {isAdmin && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onAssign}><UserPlus size={14} />{assignedName ? "Переназначить" : "Назначить"}</button>}
+        {isAdmin && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onEdit}><Pencil size={14} />Изменить</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
         {isAdmin && job.status === "done" && !job.repeat_state && <button className="kd-btn ghost" onClick={onRepeat}>На повтор</button>}
+        {isAdmin && job.status === "canceled" && <button className="kd-btn primary" onClick={() => onRestore()}>Вернуть в работу</button>}
         {isAdmin && share > 0 && <button className="kd-btn ghost" onClick={() => onPayPartner(!job.partner_paid)}>{job.partner_paid ? "Отменить выплату" : "Выплатить долю"}</button>}
         {isAdmin && job.partner_comp > 0 && <button className="kd-btn ghost" onClick={() => onCompPaid(!job.partner_comp_paid)}>{job.partner_comp_paid ? "Компенсация не получена" : "Компенсация получена"}</button>}
         {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить"><Trash2 size={14} /></button>}
@@ -1598,7 +1659,7 @@ function RepeatCard({ job, onSaveNote, onCreate, onFinish, repeatHint }) {
           {due ? "пора связаться" : `${days} дн. назад`}
         </span>
       </div>
-      <div className="kd-addr">{job.address}</div>
+      <div className="kd-addr"><AddressText text={job.address} /></div>
       <div className="kd-card-foot"><span className="kd-muted">Клиент: {job.client_phone}</span></div>
       {repeatHint && <div className="kd-hint">💡 {repeatHint}</div>}
       <Field label="Как прошёл созвон / заметка">
@@ -1966,7 +2027,7 @@ function DetailsModal({ job, header, onReport, onClose }) {
           <div className="kd-row"><span>Тип</span><strong>{job.type}</strong></div>
           <div className="kd-row"><span>Вид</span><strong>{job.pest}</strong></div>
           <div className="kd-row"><span>Дата и время</span><strong>{isoToRu(job.scheduled_date) || "—"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</strong></div>
-          <div className="kd-row"><span>Адрес</span><strong style={{ textAlign: "right" }}>{job.address}</strong></div>
+          <div className="kd-row"><span>Адрес</span><strong style={{ textAlign: "right", overflowWrap: "anywhere" }}><AddressText text={job.address} /></strong></div>
           {job.floor && <div className="kd-row"><span>Этаж</span><strong>{job.floor}</strong></div>}
           {job.area && <div className="kd-row"><span>Метраж</span><strong>{job.area} м²</strong></div>}
           {prices.length > 0 && (
@@ -2389,6 +2450,29 @@ function OpexModal({ opex, expCats, onClose, onSave }) {
         <Field label="Дата"><input type="date" value={spentDate} onChange={(e) => setSpentDate(e.target.value)} /></Field>
       </div>
       <Field label="Комментарий"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за что именно / за какой месяц" /></Field>
+    </ModalShell>
+  );
+}
+
+function CancelJobModal({ job, onClose, onSave }) {
+  const COMMON = ["Клиент передумал", "Слишком дорого", "Нашёл дешевле", "Не дозвонились", "Перенёс на потом", "Клиент не отвечает"];
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function save() { setSaving(true); await onSave(reason.trim()); setSaving(false); }
+  return (
+    <ModalShell title="Клиент отказался" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Назад</button>
+      <button className="kd-btn primary danger" disabled={saving} onClick={save}>{saving ? "…" : "Отменить заявку"}</button>
+    </>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}. Заявка уйдёт в «Отменённые», в выручку не попадёт. Позже можно вернуть в работу.</div>
+      <div className="kd-field"><span>Частые причины</span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {COMMON.map((c) => (
+            <button key={c} type="button" onClick={() => setReason(c)} className="kd-price" style={{ cursor: "pointer", border: reason === c ? "1px solid var(--primary)" : "1px solid var(--line-soft)", color: reason === c ? "var(--primary-d)" : "var(--ink)" }}>{c}</button>
+          ))}
+        </div>
+      </div>
+      <Field label="Причина / комментарий"><textarea className="kd-textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Что, где, как — своими словами" /></Field>
     </ModalShell>
   );
 }
