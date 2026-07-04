@@ -179,8 +179,6 @@ function Dashboard({ session, profile }) {
   const [settings, setSettings] = useState({});
   const [expCats, setExpCats] = useState([]);
   const [opex, setOpex] = useState([]);
-  const [expCats, setExpCats] = useState([]);
-  const [opex, setOpex] = useState([]);
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
