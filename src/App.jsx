@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -200,6 +200,8 @@ function Dashboard({ session, profile }) {
   const [opex, setOpex] = useState([]);
   const [deposits, setDeposits] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [moves, setMoves] = useState([]);
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [audit, setAudit] = useState([]);
@@ -226,7 +228,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -246,6 +248,8 @@ function Dashboard({ session, profile }) {
       supabase.from("opex").select("*").order("spent_date", { ascending: false }),
       supabase.from("cash_deposits").select("*").order("requested_at", { ascending: false }),
       supabase.from("tasks").select("*").order("created_at", { ascending: false }),
+      supabase.from("accounts").select("*").order("sort"),
+      supabase.from("money_moves").select("*").order("move_date", { ascending: false }),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -269,6 +273,8 @@ function Dashboard({ session, profile }) {
     setOpex(opr.data || []);
     setDeposits(dpr.data || []);
     setTasks(tkr.data || []);
+    setAccounts(accr.data || []);
+    setMoves(mvr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -564,17 +570,51 @@ function Dashboard({ session, profile }) {
     await logAction("Расходы", `Удалено: ${fmt(o.amount)} ₸`);
     showToast("Удалено"); load();
   }
+  async function saveMove(payload, existing) {
+    const res = existing ? await supabase.from("money_moves").update(payload).eq("id", existing.id) : await supabase.from("money_moves").insert({ ...payload, created_by: session.user.id, source: "manual" });
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    const dirLabel = payload.direction === "income" ? "Доход" : payload.direction === "expense" ? "Расход" : "Перевод";
+    await logAction("Финансы", `${dirLabel}: ${fmt(payload.amount)} ₸`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function removeMove(m) {
+    if (m.source !== "manual") { showToast("Автоматическое движение — удалить нельзя"); return; }
+    await supabase.from("money_moves").delete().eq("id", m.id);
+    await logAction("Финансы", `Удалено движение: ${fmt(m.amount)} ₸`);
+    showToast("Удалено"); load();
+  }
+  async function saveAccount(payload, existing) {
+    const res = existing ? await supabase.from("accounts").update(payload).eq("id", existing.id) : await supabase.from("accounts").insert(payload);
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Финансы", `Счёт ${existing ? "изменён" : "добавлен"}: ${payload.name}`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function removeAccount(acc) {
+    const { error } = await supabase.from("accounts").delete().eq("id", acc.id);
+    if (error) { showToast("Ошибка: по счёту есть движения — сначала перенеси/удали их"); return; }
+    await logAction("Финансы", `Счёт удалён: ${acc.name}`);
+    showToast("Удалено"); load();
+  }
   async function requestDeposit(amount, note) {
     const { error } = await supabase.from("cash_deposits").insert({ tech_id: session.user.id, amount: Number(amount) || 0, status: "pending", note: note || null });
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Касса", `Заявка на внесение: ${fmt(amount)} ₸ (ожидает подтверждения)`);
     setModal(null); showToast("Отправлено на подтверждение"); load();
   }
-  async function decideDeposit(dep, status, adminNote) {
+  async function decideDeposit(dep, status, adminNote, accountId) {
     const { error } = await supabase.from("cash_deposits").update({ status, decided_at: new Date().toISOString(), decided_by: session.user.id, admin_note: adminNote || null }).eq("id", dep.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     const who = techById(dep.tech_id)?.full_name || "?";
-    await logAction("Касса", `${status === "confirmed" ? "Подтверждено поступление" : "Отклонено"}: ${who} · ${fmt(dep.amount)} ₸`);
+    if (status === "confirmed" && accountId) {
+      const exists = moves.some((m) => m.source === "deposit" && m.ref_id === dep.id);
+      if (!exists) {
+        await supabase.from("money_moves").insert({
+          account_id: accountId, direction: "income", amount: dep.amount, move_date: new Date().toISOString().slice(0, 10),
+          note: `Сдача наличных: ${who}`, source: "deposit", ref_id: dep.id, created_by: session.user.id,
+        });
+      }
+    }
+    await logAction("Касса", `${status === "confirmed" ? "Подтверждено поступление" : "Отклонено"}: ${who} · ${fmt(dep.amount)} ₸${status === "confirmed" && accountId ? " → " + (accountById(accountId)?.name || "") : ""}`);
     showToast(status === "confirmed" ? "Поступление подтверждено" : "Отклонено"); load();
   }
   async function cancelDeposit(dep) {
@@ -864,6 +904,27 @@ function Dashboard({ session, profile }) {
     return t >= range.start && t < range.end;
   }).reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const catName = (id) => (expCats.find((c) => c.id === id) || {}).name || "—";
+  const accountById = (id) => accounts.find((a) => a.id === id);
+  const qrAccountId = settings.qr_account_id || null;
+  const cashDepositAccountId = settings.cash_account_id || null;
+  // авто-доход QR и комиссия по всем выполненным заявкам (виртуально, не пишем в money_moves)
+  const qrAutoIncome = jobs.filter((j) => j.status === "done").reduce((s, j) => s + (Number(j.report_qr) || 0), 0);
+  const qrAutoFee = jobs.filter((j) => j.status === "done").reduce((s, j) => s + (Number(j.report_qr) || 0) * qrFeeRate, 0);
+  const accountBalance = (accId) => {
+    let bal = moves.reduce((s, m) => {
+      let d = 0;
+      if (m.direction === "income" && m.account_id === accId) d += Number(m.amount) || 0;
+      if (m.direction === "expense" && m.account_id === accId) d -= Number(m.amount) || 0;
+      if (m.direction === "transfer") {
+        if (m.account_id === accId) d -= Number(m.amount) || 0;
+        if (m.to_account_id === accId) d += Number(m.amount) || 0;
+      }
+      return s + d;
+    }, 0);
+    // на QR-счёт автоматически приходят QR-оплаты минус комиссия банка
+    if (accId && accId === qrAccountId) bal += qrAutoIncome - qrAutoFee;
+    return bal;
+  };
   const opexInRangeList = opex.filter((o) => {
     if (pMode === "all") return true;
     if (!o.spent_date) return false;
@@ -929,8 +990,8 @@ function Dashboard({ session, profile }) {
     { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `Задачи${allOpenTasks ? " · " + allOpenTasks : ""}` },
     { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
-    { id: "finance", icon: Wallet, label: "Финансы" },
-    { id: "opex", icon: Receipt, label: "Расходы" },
+    { id: "finance", icon: Wallet, label: "Аналитика" },
+    { id: "opex", icon: Landmark, label: "Финансы" },
     { id: "cash", icon: Banknote, label: `Касса${deposits.filter((d) => d.status === "pending").length ? " · " + deposits.filter((d) => d.status === "pending").length : ""}` },
     { id: "stock", icon: Package, label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
     { id: "team", icon: Users, label: "Дезинфекторы" },
@@ -1105,7 +1166,7 @@ function Dashboard({ session, profile }) {
                     </div>
                     <div className="kd-meta"><span>Заявлено: {fmtTs(d.requested_at)}</span>{d.note && <><span>·</span><span>{d.note}</span></>}</div>
                     <div className="kd-actions">
-                      <button className="kd-btn primary sm" onClick={() => askConfirm(`Подтвердить поступление ${fmt(d.amount)} ₸ от ${techById(d.tech_id)?.full_name || "?"}?`, () => decideDeposit(d, "confirmed"), { danger: false, confirmLabel: "Да, подтвердить" })}>Подтвердить</button>
+                      <button className="kd-btn primary sm" onClick={() => setModal({ kind: "confirmDeposit", dep: d })}>Подтвердить</button>
                       <button className="kd-btn ghost danger sm" onClick={() => setModal({ kind: "rejectDeposit", dep: d })}>Отклонить</button>
                     </div>
                   </div>
@@ -1333,7 +1394,30 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "opex" && (
           <>
-            <div className="kd-periodbar">
+            <div className="kd-tabbar" style={{ marginBottom: 8 }}>
+              <div className="kd-title" style={{ fontSize: 18 }}>Финансы · счета</div>
+              <div className="kd-tabactions">
+                <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "account" })}><Plus size={14} />Счёт</button>
+                <button className="kd-btn primary" onClick={() => setModal({ kind: "move" })}><Plus size={15} />Движение</button>
+              </div>
+            </div>
+
+            <div className="kd-stockgrid" style={{ gridTemplateColumns: `repeat(${Math.min(accounts.length || 1, 3)}, 1fr)` }}>
+              {accounts.length === 0 && <div className="kd-muted">Счетов нет. Добавь через «+ Счёт».</div>}
+              {accounts.map((a) => (
+                <div key={a.id} className="kd-card" style={{ boxShadow: "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                    <span className="kd-muted" style={{ fontWeight: 700 }}>{a.name}</span>
+                    <button onClick={() => setModal({ kind: "account", item: a })} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", display: "flex" }}><Pencil size={13} /></button>
+                  </div>
+                  <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20, color: accountBalance(a.id) < 0 ? "#B3261E" : "var(--ink)" }}>{fmt(accountBalance(a.id))} ₸</div>
+                  {a.id === qrAccountId && <span className="kd-srctag" style={{ marginTop: 6, display: "inline-block" }}>сюда падают QR</span>}
+                  {a.id === cashDepositAccountId && <span className="kd-brandtag" style={{ marginTop: 6, display: "inline-block" }}>сдача налички</span>}
+                </div>
+              ))}
+            </div>
+
+            <div className="kd-periodbar" style={{ marginTop: 16 }}>
               <div className="kd-seg">
                 {[{ id: "all", label: "Всё время" }, { id: "week", label: "Неделя" }, { id: "month", label: "Месяц" }].map((p) => (
                   <button key={p.id} className={`kd-segbtn ${pMode === p.id ? "on" : ""}`} onClick={() => { setPMode(p.id); setPOff(0); }}>{p.label}</button>
@@ -1348,43 +1432,56 @@ function Dashboard({ session, profile }) {
               )}
             </div>
 
-            <div className="kd-card" style={{ marginBottom: 14 }}>
-              <div className="kd-section">Операционные расходы · {range.label}</div>
-              {(() => {
-                const byCat = {};
-                opexInRangeList.forEach((o) => {
-                  const cid = o.category_id || "none";
-                  if (!byCat[cid]) byCat[cid] = 0;
-                  byCat[cid] += Number(o.amount) || 0;
-                });
-                const rows = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
-                if (rows.length === 0) return <div className="kd-muted">За период расходов нет.</div>;
-                return (<>
-                  {rows.map(([cid, sum]) => (
-                    <div className="kd-row" key={cid}><span>{cid === "none" ? "Без категории" : catName(cid)}</span><strong>{fmt(sum)} ₸</strong></div>
-                  ))}
-                  <div className="kd-row total"><span>Всего за период</span><strong style={{ color: "#B42318" }}>{fmt(opexInRange)} ₸</strong></div>
-                </>);
-              })()}
-            </div>
+            {(() => {
+              const inRange = (d) => pMode === "all" || (d && new Date(d).getTime() >= range.start && new Date(d).getTime() < range.end);
+              const movesInRange = moves.filter((m) => inRange(m.move_date)).sort((a, b) => new Date(b.move_date || 0) - new Date(a.move_date || 0));
+              const income = movesInRange.filter((m) => m.direction === "income").reduce((s, m) => s + (Number(m.amount) || 0), 0);
+              const expense = movesInRange.filter((m) => m.direction === "expense").reduce((s, m) => s + (Number(m.amount) || 0), 0);
+              return (
+                <>
+                  <div className="kd-card" style={{ marginBottom: 14 }}>
+                    <div className="kd-section">Итоги движений · {range.label}</div>
+                    <div className="kd-row"><span>Доходы (ручные + сдача налички)</span><strong style={{ color: "#0E7C66" }}>+ {fmt(income)} ₸</strong></div>
+                    <div className="kd-row"><span>Расходы</span><strong style={{ color: "#B42318" }}>− {fmt(expense)} ₸</strong></div>
+                    <div className="kd-muted" style={{ marginTop: 8 }}>QR-оплаты по заявкам приходят на счёт «{accountById(qrAccountId)?.name || "не выбран"}» автоматически (минус комиссия банка) и в этот список не входят — их видно в «Аналитике».</div>
+                  </div>
 
-            <div className="kd-list">
-              {opexInRangeList.length === 0 && <div className="kd-empty">Пока нет расходов за этот период. Добавь через «+ Расход» — аренда, реклама, налоги, зарплаты администрации и т.п.</div>}
-              {opexInRangeList.map((o) => (
-                <div key={o.id} className="kd-card">
-                  <div className="kd-card-head">
-                    <div className="kd-pest">{catName(o.category_id)}{o.subcategory_id ? " · " + catName(o.subcategory_id) : ""}</div>
-                    <strong style={{ color: "#B42318", fontSize: 16 }}>− {fmt(o.amount)} ₸</strong>
+                  <div className="kd-list">
+                    {movesInRange.length === 0 && <div className="kd-empty">Движений за период нет. Добавь доход, расход или перевод через «+ Движение».</div>}
+                    {movesInRange.map((m) => {
+                      const isIncome = m.direction === "income", isExpense = m.direction === "expense", isTransfer = m.direction === "transfer";
+                      const color = isIncome ? "#0E7C66" : isExpense ? "#B42318" : "#B4650B";
+                      const sign = isIncome ? "+ " : isExpense ? "− " : "";
+                      const title = isTransfer ? `${accountById(m.account_id)?.name || "?"} → ${accountById(m.to_account_id)?.name || "?"}` : (accountById(m.account_id)?.name || "?");
+                      const cat = m.category_id ? catName(m.category_id) + (m.subcategory_id ? " · " + catName(m.subcategory_id) : "") : "";
+                      return (
+                        <div key={m.id} className="kd-card">
+                          <div className="kd-card-head">
+                            <div className="kd-pest" style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                              {isIncome ? <ArrowDownCircle size={17} color={color} /> : isExpense ? <ArrowUpCircle size={17} color={color} /> : <ArrowRightLeft size={17} color={color} />}
+                              {title}
+                            </div>
+                            <strong style={{ color, fontSize: 16 }}>{sign}{fmt(m.amount)} ₸</strong>
+                          </div>
+                          <div className="kd-meta">
+                            <span>{isoToRu(m.move_date) || "без даты"}</span>
+                            {cat && <><span>·</span><span className="kd-doctag">{cat}</span></>}
+                            {m.source !== "manual" && <><span>·</span><span className="kd-muted">авто</span></>}
+                          </div>
+                          {m.note && <div className="kd-notebox">📝 {m.note}</div>}
+                          {m.source === "manual" && (
+                            <div className="kd-actions">
+                              <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "move", move: m })}><Pencil size={13} />Изменить</button>
+                              <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить движение на ${fmt(m.amount)} ₸?`, () => removeMove(m))}><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="kd-meta"><span>{isoToRu(o.spent_date) || "без даты"}</span></div>
-                  {o.note && <div className="kd-notebox">📝 {o.note}</div>}
-                  <div className="kd-actions">
-                    <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "opex", opex: o })}><Pencil size={13} />Изменить</button>
-                    <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить расход «${catName(o.category_id)} · ${fmt(o.amount)} ₸»?`, () => removeOpex(o))}><Trash2 size={13} /></button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                </>
+              );
+            })()}
           </>
         )}
 
@@ -1669,7 +1766,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "reportEquip" && <ReportEquipModal equip={modal.equip} status={modal.status} onClose={() => setModal(null)} onSave={(note) => reportEquipIssue(modal.handout, modal.status, note)} />}
       {modal?.kind === "settings" && (
         <SettingsModal
-          settings={settings} sources={sources} pestTypes={pestTypes} expCats={expCats}
+          settings={settings} sources={sources} pestTypes={pestTypes} expCats={expCats} accounts={accounts}
           onClose={() => setModal(null)}
           onSaveSetting={saveAppSetting}
           onSetTheme={setTheme}
@@ -1682,6 +1779,9 @@ function Dashboard({ session, profile }) {
         />
       )}
       {modal?.kind === "opex" && <OpexModal opex={modal.opex} expCats={expCats} onClose={() => setModal(null)} onSave={saveOpex} />}
+      {modal?.kind === "move" && <MoveModal move={modal.move} accounts={accounts} expCats={expCats} onClose={() => setModal(null)} onSave={saveMove} />}
+      {modal?.kind === "account" && <AccountModal item={modal.item} onClose={() => setModal(null)} onSave={saveAccount} onRemove={removeAccount} />}
+      {modal?.kind === "confirmDeposit" && <ConfirmDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} accounts={accounts} defaultAccountId={cashDepositAccountId} onClose={() => setModal(null)} onConfirm={(accId) => { decideDeposit(modal.dep, "confirmed", null, accId); setModal(null); }} />}
       {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
@@ -2467,7 +2567,7 @@ function CatalogList({ items, onAdd, onRemove, placeholder }) {
   );
 }
 
-function SettingsModal({ settings, sources, pestTypes, expCats, onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
+function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
   const [theme, setThemeLocal] = useState(localStorage.getItem("kd-theme") || "light");
   const [qrRate, setQrRate] = useState(settings.qr_fee_rate ?? 0.95);
   const [guarantee, setGuarantee] = useState(settings.default_guarantee_months ?? 6);
@@ -2528,7 +2628,13 @@ function SettingsModal({ settings, sources, pestTypes, expCats, onClose, onSaveS
         <Field label="Комиссия банка по QR (%)"><input value={qrRate} onChange={(e) => setQrRate(e.target.value)} inputMode="decimal" onBlur={() => onSaveSetting("qr_fee_rate", Number(qrRate) || 0)} /></Field>
         <Field label="Гарантия по умолчанию (мес.)"><input value={guarantee} onChange={(e) => setGuarantee(e.target.value)} inputMode="numeric" onBlur={() => onSaveSetting("default_guarantee_months", Number(guarantee) || 6)} /></Field>
       </div>
-      <div className="kd-muted">Сохраняется при выходе из поля. Значения применяются ко всем новым заявкам и расчётам.</div>
+      {accounts.length > 0 && (
+        <div className="kd-grid2">
+          <Field label="Счёт для QR-оплат (Kaspi Pay)"><select value={settings.qr_account_id || ""} onChange={(e) => onSaveSetting("qr_account_id", e.target.value || null)}><option value="">— не выбран —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+          <Field label="Счёт для сдачи налички (Kaspi Gold)"><select value={settings.cash_account_id || ""} onChange={(e) => onSaveSetting("cash_account_id", e.target.value || null)}><option value="">— не выбран —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+        </div>
+      )}
+      <div className="kd-muted">QR-оплаты по заявкам автоматически приходят на выбранный счёт (минус комиссия). Сдача налички дезинфектором — на второй счёт, когда ты подтверждаешь поступление. Сохраняется при выходе из поля.</div>
     </ModalShell>
   );
 }
@@ -2562,6 +2668,88 @@ function OpexModal({ opex, expCats, onClose, onSave }) {
         <Field label="Дата"><input type="date" value={spentDate} onChange={(e) => setSpentDate(e.target.value)} /></Field>
       </div>
       <Field label="Комментарий"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за что именно / за какой месяц" /></Field>
+    </ModalShell>
+  );
+}
+
+function MoveModal({ move, accounts, expCats, onClose, onSave }) {
+  const [direction, setDirection] = useState(move?.direction || "expense");
+  const [accountId, setAccountId] = useState(move?.account_id || (accounts[0]?.id || ""));
+  const [toAccountId, setToAccountId] = useState(move?.to_account_id || "");
+  const [amount, setAmount] = useState(move?.amount ?? "");
+  const [moveDate, setMoveDate] = useState(move?.move_date || new Date().toISOString().slice(0, 10));
+  const [categoryId, setCategoryId] = useState(move?.category_id || "");
+  const [subcategoryId, setSubcategoryId] = useState(move?.subcategory_id || "");
+  const [note, setNote] = useState(move?.note || "");
+  const [saving, setSaving] = useState(false);
+  const parents = (expCats || []).filter((c) => !c.parent_id);
+  const subs = (expCats || []).filter((c) => c.parent_id === categoryId);
+  const ok = accountId && Number(amount) > 0 && (direction !== "transfer" || (toAccountId && toAccountId !== accountId));
+  async function save() {
+    setSaving(true);
+    await onSave({
+      direction, account_id: accountId, to_account_id: direction === "transfer" ? toAccountId : null,
+      amount: Number(amount) || 0, move_date: moveDate || null,
+      category_id: direction === "expense" ? (categoryId || null) : null,
+      subcategory_id: direction === "expense" ? (subcategoryId || null) : null, note: note || null,
+    }, move);
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={move ? "Изменить движение" : "Новое движение"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <div className="kd-seg" style={{ width: "100%", marginBottom: 14 }}>
+        <button className={`kd-segbtn ${direction === "income" ? "on" : ""}`} onClick={() => setDirection("income")}>Доход</button>
+        <button className={`kd-segbtn ${direction === "expense" ? "on" : ""}`} onClick={() => setDirection("expense")}>Расход</button>
+        <button className={`kd-segbtn ${direction === "transfer" ? "on" : ""}`} onClick={() => setDirection("transfer")}>Перевод</button>
+      </div>
+      <Field label={direction === "transfer" ? "Со счёта" : "Счёт"}><select value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      {direction === "transfer" && <Field label="На счёт"><select value={toAccountId} onChange={(e) => setToAccountId(e.target.value)}><option value="">— выбери —</option>{accounts.filter((a) => a.id !== accountId).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>}
+      <div className="kd-grid2">
+        <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="50000" /></Field>
+        <Field label="Дата"><input type="date" value={moveDate} onChange={(e) => setMoveDate(e.target.value)} /></Field>
+      </div>
+      {direction === "expense" && parents.length > 0 && (
+        <>
+          <Field label="Статья расхода"><select value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setSubcategoryId(""); }}><option value="">— без статьи —</option>{parents.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+          {subs.length > 0 && <Field label="Подстатья"><select value={subcategoryId} onChange={(e) => setSubcategoryId(e.target.value)}><option value="">— без подстатьи —</option>{subs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>}
+        </>
+      )}
+      <Field label="Комментарий"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за что / откуда / комментарий" /></Field>
+    </ModalShell>
+  );
+}
+
+function AccountModal({ item, onClose, onSave, onRemove }) {
+  const [name, setName] = useState(item?.name || "");
+  const [kind, setKind] = useState(item?.kind || "bank");
+  const [saving, setSaving] = useState(false);
+  const ok = name.trim();
+  async function save() { setSaving(true); await onSave({ name: name.trim(), kind }, item); setSaving(false); }
+  return (
+    <ModalShell title={item ? "Счёт" : "Новый счёт"} onClose={onClose} footer={<>
+      {item && <button className="kd-btn ghost danger" onClick={() => onRemove(item)} style={{ marginRight: "auto" }}>Удалить</button>}
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <Field label="Название счёта"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Напр.: Halyk Bank" /></Field>
+      <Field label="Тип"><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="bank">Банковский счёт</option><option value="cash">Наличные</option><option value="other">Другое</option></select></Field>
+    </ModalShell>
+  );
+}
+
+function ConfirmDepositModal({ dep, techName, accounts, defaultAccountId, onClose, onConfirm }) {
+  const [accId, setAccId] = useState(defaultAccountId || accounts[0]?.id || "");
+  return (
+    <ModalShell title="Подтвердить поступление" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!accId} onClick={() => onConfirm(accId)}>Да, подтвердить</button>
+    </>}>
+      <div className="kd-paytotal"><span>{techName || "Дезинфектор"}</span><strong>{fmt(dep.amount)} ₸</strong></div>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Деньги придут на выбранный счёт (сдача налички через банкомат). Это перевод из «на руках» дезинфектора на счёт — без двойного счёта.</div>
+      <Field label="На какой счёт поступило"><select value={accId} onChange={(e) => setAccId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
     </ModalShell>
   );
 }
