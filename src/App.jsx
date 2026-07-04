@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -177,6 +177,10 @@ function Dashboard({ session, profile }) {
   const [sources, setSources] = useState([]);
   const [pestTypes, setPestTypes] = useState([]);
   const [settings, setSettings] = useState({});
+  const [expCats, setExpCats] = useState([]);
+  const [opex, setOpex] = useState([]);
+  const [expCats, setExpCats] = useState([]);
+  const [opex, setOpex] = useState([]);
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -199,7 +203,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -215,6 +219,8 @@ function Dashboard({ session, profile }) {
       supabase.from("client_sources").select("*").order("name"),
       supabase.from("pest_types").select("*").order("name"),
       supabase.from("app_settings").select("*"),
+      supabase.from("expense_categories").select("*").order("name"),
+      supabase.from("opex").select("*").order("spent_date", { ascending: false }),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -234,6 +240,8 @@ function Dashboard({ session, profile }) {
     const settingsMap = {};
     (str.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
     setSettings(settingsMap);
+    setExpCats(ecr.data || []);
+    setOpex(opr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -476,6 +484,31 @@ function Dashboard({ session, profile }) {
     localStorage.setItem("kd-theme", theme);
     document.documentElement.setAttribute("data-theme", theme);
   }
+  async function addExpCat(name, parentId) {
+    const v = (name || "").trim();
+    if (!v) return;
+    const { error } = await supabase.from("expense_categories").insert({ name: v, parent_id: parentId || null });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Категории расходов", `Добавлено: ${v}`);
+    load();
+  }
+  async function removeExpCat(item) {
+    const { error } = await supabase.from("expense_categories").delete().eq("id", item.id);
+    if (error) { showToast("Ошибка: нельзя удалить — категория уже используется в расходах"); return; }
+    await logAction("Категории расходов", `Удалено: ${item.name}`);
+    load();
+  }
+  async function saveOpex(payload, existing) {
+    const res = existing ? await supabase.from("opex").update(payload).eq("id", existing.id) : await supabase.from("opex").insert({ ...payload, created_by: session.user.id });
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Расходы", `${existing ? "Изменено" : "Добавлено"}: ${fmt(payload.amount)} ₸`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function removeOpex(o) {
+    await supabase.from("opex").delete().eq("id", o.id);
+    await logAction("Расходы", `Удалено: ${fmt(o.amount)} ₸`);
+    showToast("Удалено"); load();
+  }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
@@ -658,6 +691,14 @@ function Dashboard({ session, profile }) {
         };
       }));
 
+      await addSheet("Операционные расходы", [
+        { header: "Категория", key: "category", width: 22 }, { header: "Подкатегория", key: "subcategory", width: 20 },
+        { header: "Сумма", key: "amount", width: 14, money: true }, { header: "Дата", key: "date", width: 12 }, { header: "Комментарий", key: "note", width: 30 },
+      ], opex.map((o) => ({
+        category: catName(o.category_id), subcategory: o.subcategory_id ? catName(o.subcategory_id) : "",
+        amount: o.amount, date: o.spent_date ? isoToRu(o.spent_date) : "", note: o.note || "",
+      })));
+
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
@@ -711,7 +752,15 @@ function Dashboard({ session, profile }) {
     const t = new Date(e.expense_date).getTime();
     return t >= range.start && t < range.end;
   }).reduce((s, e) => s + (Number(e.amount) || 0), 0);
-  const netProfit = fin.profit - expensesInRange;
+  const catName = (id) => (expCats.find((c) => c.id === id) || {}).name || "—";
+  const opexInRangeList = opex.filter((o) => {
+    if (pMode === "all") return true;
+    if (!o.spent_date) return false;
+    const t = new Date(o.spent_date).getTime();
+    return t >= range.start && t < range.end;
+  });
+  const opexInRange = opexInRangeList.reduce((s, o) => s + (Number(o.amount) || 0), 0);
+  const netProfit = fin.profit - expensesInRange - opexInRange;
 
   // ---- склад ----
   const inventory = chemicals.map((c) => {
@@ -751,6 +800,7 @@ function Dashboard({ session, profile }) {
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "finance", icon: Wallet, label: "Финансы" },
+    { id: "opex", icon: Receipt, label: "Расходы" },
     { id: "stock", icon: Package, label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
     { id: "team", icon: Users, label: "Дезинфекторы" },
     { id: "partners", icon: Handshake, label: "Партнёры" },
@@ -787,6 +837,7 @@ function Dashboard({ session, profile }) {
             {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}><Plus size={15} />Препарат</button>}
             {tab === "partners" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}><Plus size={15} />Партнёр</button>}
             {tab === "docs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}><Plus size={15} />Документ</button>}
+            {tab === "opex" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "opex" })}><Plus size={15} />Расход</button>}
             {isAdmin && <button className="kd-btn ghost" onClick={exportExcel}><Download size={15} />Выгрузить в Excel</button>}
           </div>
         </div>
@@ -937,6 +988,7 @@ function Dashboard({ session, profile }) {
                 <div className="kd-row"><span>Комиссия банка по QR (0.95%)</span><strong style={{ color: "#B42318" }}>− {fmt(fin.qrFees)} ₸</strong></div>
                 <div className="kd-row"><span>Прибыль по заявкам</span><strong>{fmt(fin.profit)} ₸</strong></div>
                 <div className="kd-row"><span>Выплаты сотрудникам (зарплата/дорожные)</span><strong style={{ color: "#B42318" }}>− {fmt(expensesInRange)} ₸</strong></div>
+                <div className="kd-row"><span>Операционные расходы</span><strong style={{ color: "#B42318" }}>− {fmt(opexInRange)} ₸</strong></div>
                 <div className="kd-row total"><span>Итоговая прибыль</span><strong style={{ color: netProfit >= 0 ? "#0E7C66" : "#B42318" }}>{fmt(netProfit)} ₸</strong></div>
               </div>
               <div className="kd-card">
@@ -978,6 +1030,63 @@ function Dashboard({ session, profile }) {
                   </div>
                 );
               })}
+            </div>
+          </>
+        )}
+
+        {!loading && tab === "opex" && (
+          <>
+            <div className="kd-periodbar">
+              <div className="kd-seg">
+                {[{ id: "all", label: "Всё время" }, { id: "week", label: "Неделя" }, { id: "month", label: "Месяц" }].map((p) => (
+                  <button key={p.id} className={`kd-segbtn ${pMode === p.id ? "on" : ""}`} onClick={() => { setPMode(p.id); setPOff(0); }}>{p.label}</button>
+                ))}
+              </div>
+              {pMode !== "all" && (
+                <div className="kd-pernav">
+                  <button className="kd-arrow" onClick={() => setPOff(pOff - 1)}><ChevronLeft size={18} /></button>
+                  <span className="kd-perlabel">{range.label}</span>
+                  <button className="kd-arrow" disabled={pOff >= 0} onClick={() => setPOff(pOff + 1)}><ChevronRight size={18} /></button>
+                </div>
+              )}
+            </div>
+
+            <div className="kd-card" style={{ marginBottom: 14 }}>
+              <div className="kd-section">Операционные расходы · {range.label}</div>
+              {(() => {
+                const byCat = {};
+                opexInRangeList.forEach((o) => {
+                  const cid = o.category_id || "none";
+                  if (!byCat[cid]) byCat[cid] = 0;
+                  byCat[cid] += Number(o.amount) || 0;
+                });
+                const rows = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+                if (rows.length === 0) return <div className="kd-muted">За период расходов нет.</div>;
+                return (<>
+                  {rows.map(([cid, sum]) => (
+                    <div className="kd-row" key={cid}><span>{cid === "none" ? "Без категории" : catName(cid)}</span><strong>{fmt(sum)} ₸</strong></div>
+                  ))}
+                  <div className="kd-row total"><span>Всего за период</span><strong style={{ color: "#B42318" }}>{fmt(opexInRange)} ₸</strong></div>
+                </>);
+              })()}
+            </div>
+
+            <div className="kd-list">
+              {opexInRangeList.length === 0 && <div className="kd-empty">Пока нет расходов за этот период. Добавь через «+ Расход» — аренда, реклама, налоги, зарплаты администрации и т.п.</div>}
+              {opexInRangeList.map((o) => (
+                <div key={o.id} className="kd-card">
+                  <div className="kd-card-head">
+                    <div className="kd-pest">{catName(o.category_id)}{o.subcategory_id ? " · " + catName(o.subcategory_id) : ""}</div>
+                    <strong style={{ color: "#B42318", fontSize: 16 }}>− {fmt(o.amount)} ₸</strong>
+                  </div>
+                  <div className="kd-meta"><span>{isoToRu(o.spent_date) || "без даты"}</span></div>
+                  {o.note && <div className="kd-notebox">📝 {o.note}</div>}
+                  <div className="kd-actions">
+                    <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "opex", opex: o })}><Pencil size={13} />Изменить</button>
+                    <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить расход «${catName(o.category_id)} · ${fmt(o.amount)} ₸»?`, () => removeOpex(o))}><Trash2 size={13} /></button>
+                  </div>
+                </div>
+              ))}
             </div>
           </>
         )}
@@ -1263,7 +1372,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "reportEquip" && <ReportEquipModal equip={modal.equip} status={modal.status} onClose={() => setModal(null)} onSave={(note) => reportEquipIssue(modal.handout, modal.status, note)} />}
       {modal?.kind === "settings" && (
         <SettingsModal
-          settings={settings} sources={sources} pestTypes={pestTypes}
+          settings={settings} sources={sources} pestTypes={pestTypes} expCats={expCats}
           onClose={() => setModal(null)}
           onSaveSetting={saveAppSetting}
           onSetTheme={setTheme}
@@ -1271,8 +1380,11 @@ function Dashboard({ session, profile }) {
           onRemoveSource={(item) => removeCatalogItem("client_sources", item)}
           onAddPest={(name) => addCatalogItem("pest_types", name)}
           onRemovePest={(item) => removeCatalogItem("pest_types", item)}
+          onAddExpCat={addExpCat}
+          onRemoveExpCat={removeExpCat}
         />
       )}
+      {modal?.kind === "opex" && <OpexModal opex={modal.opex} expCats={expCats} onClose={() => setModal(null)} onSave={saveOpex} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
@@ -2038,11 +2150,15 @@ function CatalogList({ items, onAdd, onRemove, placeholder }) {
   );
 }
 
-function SettingsModal({ settings, sources, pestTypes, onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest }) {
+function SettingsModal({ settings, sources, pestTypes, expCats, onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
   const [theme, setThemeLocal] = useState(localStorage.getItem("kd-theme") || "light");
   const [qrRate, setQrRate] = useState(settings.qr_fee_rate ?? 0.95);
   const [guarantee, setGuarantee] = useState(settings.default_guarantee_months ?? 6);
+  const [newCat, setNewCat] = useState("");
+  const [subInputs, setSubInputs] = useState({});
   function pickTheme(t) { setThemeLocal(t); onSetTheme(t); }
+  const parents = (expCats || []).filter((c) => !c.parent_id);
+  const subsOf = (pid) => (expCats || []).filter((c) => c.parent_id === pid);
   return (
     <ModalShell title="Настройки" onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Готово</button>}>
       <div className="kd-section">Оформление</div>
@@ -2058,12 +2174,77 @@ function SettingsModal({ settings, sources, pestTypes, onClose, onSaveSetting, o
       <div className="kd-section">Виды вредителей</div>
       <div style={{ marginBottom: 18 }}><CatalogList items={pestTypes} onAdd={onAddPest} onRemove={onRemovePest} placeholder="Напр.: Муравьи" /></div>
 
+      <div className="kd-section">Категории расходов</div>
+      <div className="kd-muted" style={{ marginBottom: 10 }}>Категория → внутри неё подкатегории. Например: «Реклама» → OLX, Instagram, Google.</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <input value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="Новая категория (напр.: Аренда)"
+          style={{ flex: 1, font: "inherit", fontWeight: 600, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "10px 12px", minHeight: 44 }} />
+        <button className="kd-btn primary sm" disabled={!newCat.trim()} onClick={() => { onAddExpCat(newCat, null); setNewCat(""); }}><Plus size={14} />Категория</button>
+      </div>
+      {parents.length === 0 && <div className="kd-muted" style={{ marginBottom: 18 }}>Категорий пока нет.</div>}
+      {parents.map((cat) => (
+        <div key={cat.id} className="kd-card" style={{ marginBottom: 10, padding: "13px 15px", boxShadow: "none" }}>
+          <div className="kd-card-head" style={{ marginBottom: 8 }}>
+            <div className="kd-pest" style={{ fontSize: 15 }}>{cat.name}</div>
+            <button className="kd-btn ghost danger sm" onClick={() => onRemoveExpCat(cat)}><Trash2 size={13} /></button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
+            {subsOf(cat.id).length === 0 && <span className="kd-muted">Без подкатегорий</span>}
+            {subsOf(cat.id).map((sub) => (
+              <span key={sub.id} className="kd-price" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                {sub.name}
+                <button onClick={() => onRemoveExpCat(sub)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", display: "flex" }}><X size={13} /></button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={subInputs[cat.id] || ""} onChange={(e) => setSubInputs({ ...subInputs, [cat.id]: e.target.value })} placeholder="Добавить подкатегорию"
+              style={{ flex: 1, font: "inherit", fontWeight: 600, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "9px 12px", minHeight: 40 }} />
+            <button className="kd-btn ghost sm" disabled={!(subInputs[cat.id] || "").trim()} onClick={() => { onAddExpCat(subInputs[cat.id], cat.id); setSubInputs({ ...subInputs, [cat.id]: "" }); }}><Plus size={13} /></button>
+          </div>
+        </div>
+      ))}
+      <div style={{ marginBottom: 8 }} />
+
       <div className="kd-section">Финансы по умолчанию</div>
       <div className="kd-grid2">
         <Field label="Комиссия банка по QR (%)"><input value={qrRate} onChange={(e) => setQrRate(e.target.value)} inputMode="decimal" onBlur={() => onSaveSetting("qr_fee_rate", Number(qrRate) || 0)} /></Field>
         <Field label="Гарантия по умолчанию (мес.)"><input value={guarantee} onChange={(e) => setGuarantee(e.target.value)} inputMode="numeric" onBlur={() => onSaveSetting("default_guarantee_months", Number(guarantee) || 6)} /></Field>
       </div>
       <div className="kd-muted">Сохраняется при выходе из поля. Значения применяются ко всем новым заявкам и расчётам.</div>
+    </ModalShell>
+  );
+}
+
+function OpexModal({ opex, expCats, onClose, onSave }) {
+  const [categoryId, setCategoryId] = useState(opex?.category_id || "");
+  const [subcategoryId, setSubcategoryId] = useState(opex?.subcategory_id || "");
+  const [amount, setAmount] = useState(opex?.amount ?? "");
+  const [spentDate, setSpentDate] = useState(opex?.spent_date || new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState(opex?.note || "");
+  const [saving, setSaving] = useState(false);
+  const parents = (expCats || []).filter((c) => !c.parent_id);
+  const subs = (expCats || []).filter((c) => c.parent_id === categoryId);
+  const ok = categoryId && Number(amount) > 0;
+  function onCat(e) { setCategoryId(e.target.value); setSubcategoryId(""); }
+  async function save() {
+    setSaving(true);
+    await onSave({ category_id: categoryId || null, subcategory_id: subcategoryId || null, amount: Number(amount) || 0, spent_date: spentDate || null, note: note || null }, opex);
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={opex ? "Изменить расход" : "Новый расход"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      {parents.length === 0 && <div className="kd-muted" style={{ marginBottom: 12 }}>Сначала заведи категории в Настройках (шестерёнка вверху) → «Категории расходов».</div>}
+      <Field label="Категория"><select value={categoryId} onChange={onCat}><option value="">— выбери —</option>{parents.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+      {subs.length > 0 && <Field label="Подкатегория"><select value={subcategoryId} onChange={(e) => setSubcategoryId(e.target.value)}><option value="">— без подкатегории —</option>{subs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>}
+      <div className="kd-grid2">
+        <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="50000" /></Field>
+        <Field label="Дата"><input type="date" value={spentDate} onChange={(e) => setSpentDate(e.target.value)} /></Field>
+      </div>
+      <Field label="Комментарий"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за что именно / за какой месяц" /></Field>
     </ModalShell>
   );
 }
