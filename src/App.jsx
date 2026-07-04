@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -36,6 +36,7 @@ const DOC_STATUS = { todo: { label: "В работе", color: "#2563EB", bg: "#E
 const EXPENSE_TYPES = { salary: "Зарплата", travel: "Дорожные", other: "Другое" };
 const EQUIP_CATEGORIES = { equipment: "Оборудование", siz: "СИЗ", container: "Тара", other: "Другое" };
 const EQUIP_STATUS = { with_tech: { label: "У сотрудника", color: "#0E7C66", bg: "#E4F3EE" }, returned: { label: "Возврат на склад", color: "#6E7871", bg: "#F7F9F6" }, broken: { label: "Сломано", color: "#B3261E", bg: "#FBE7E5" }, lost: { label: "Утеряно", color: "#B3261E", bg: "#FBE7E5" }, transferred: { label: "Передано", color: "#B4650B", bg: "#FBEDD9" } };
+const DEPOSIT_STATUS = { pending: { label: "Ожидает", color: "#B4650B", bg: "#FBEDD9" }, confirmed: { label: "Подтверждено", color: "#0E7C66", bg: "#E4F3EE" }, rejected: { label: "Отклонено", color: "#B3261E", bg: "#FBE7E5" } };
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -179,6 +180,7 @@ function Dashboard({ session, profile }) {
   const [settings, setSettings] = useState({});
   const [expCats, setExpCats] = useState([]);
   const [opex, setOpex] = useState([]);
+  const [deposits, setDeposits] = useState([]);
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -201,7 +203,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -219,6 +221,7 @@ function Dashboard({ session, profile }) {
       supabase.from("app_settings").select("*"),
       supabase.from("expense_categories").select("*").order("name"),
       supabase.from("opex").select("*").order("spent_date", { ascending: false }),
+      supabase.from("cash_deposits").select("*").order("requested_at", { ascending: false }),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -240,6 +243,7 @@ function Dashboard({ session, profile }) {
     setSettings(settingsMap);
     setExpCats(ecr.data || []);
     setOpex(opr.data || []);
+    setDeposits(dpr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -264,6 +268,14 @@ function Dashboard({ session, profile }) {
   const profileById = (id) => allProfiles.find((p) => p.id === id);
   const equipById = (id) => equipment.find((e) => e.id === id);
   const techEquipment = (techId) => equipHandouts.filter((h) => h.tech_id === techId && h.status === "with_tech").map((h) => ({ handout: h, equip: equipById(h.equipment_id) })).filter((r) => r.equip);
+  // Наличные, собранные дезинфектором со всех его выполненных заявок
+  const techCashCollected = (techId) => jobs.filter((j) => j.assigned_to === techId && j.status === "done").reduce((s, j) => s + (Number(j.report_cash) || 0), 0);
+  // Сумма уже подтверждённых внесений (деньги, которые точно дошли)
+  const techDepositedConfirmed = (techId) => deposits.filter((d) => d.tech_id === techId && d.status === "confirmed").reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  // Сумма ожидающих подтверждения внесений (деньги «в пути», ещё не подтверждены)
+  const techDepositedPending = (techId) => deposits.filter((d) => d.tech_id === techId && d.status === "pending").reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  // Наличные, реально лежащие на руках прямо сейчас = собрано − подтверждено − в ожидании
+  const techCashOnHand = (techId) => techCashCollected(techId) - techDepositedConfirmed(techId) - techDepositedPending(techId);
 
   async function ensureCatalog(table, list, value) {
     const v = (value || "").trim();
@@ -507,6 +519,24 @@ function Dashboard({ session, profile }) {
     await logAction("Расходы", `Удалено: ${fmt(o.amount)} ₸`);
     showToast("Удалено"); load();
   }
+  async function requestDeposit(amount, note) {
+    const { error } = await supabase.from("cash_deposits").insert({ tech_id: session.user.id, amount: Number(amount) || 0, status: "pending", note: note || null });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Касса", `Заявка на внесение: ${fmt(amount)} ₸ (ожидает подтверждения)`);
+    setModal(null); showToast("Отправлено на подтверждение"); load();
+  }
+  async function decideDeposit(dep, status, adminNote) {
+    const { error } = await supabase.from("cash_deposits").update({ status, decided_at: new Date().toISOString(), decided_by: session.user.id, admin_note: adminNote || null }).eq("id", dep.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    const who = techById(dep.tech_id)?.full_name || "?";
+    await logAction("Касса", `${status === "confirmed" ? "Подтверждено поступление" : "Отклонено"}: ${who} · ${fmt(dep.amount)} ₸`);
+    showToast(status === "confirmed" ? "Поступление подтверждено" : "Отклонено"); load();
+  }
+  async function cancelDeposit(dep) {
+    await supabase.from("cash_deposits").delete().eq("id", dep.id);
+    await logAction("Касса", `Отменена заявка на внесение: ${fmt(dep.amount)} ₸`);
+    showToast("Отменено"); load();
+  }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
@@ -697,6 +727,15 @@ function Dashboard({ session, profile }) {
         amount: o.amount, date: o.spent_date ? isoToRu(o.spent_date) : "", note: o.note || "",
       })));
 
+      await addSheet("Касса — внесения", [
+        { header: "Дезинфектор", key: "tech", width: 18 }, { header: "Сумма", key: "amount", width: 14, money: true },
+        { header: "Статус", key: "status", width: 14 }, { header: "Заявлено", key: "requested", width: 18 },
+        { header: "Решение", key: "decided", width: 18 }, { header: "Комментарий", key: "note", width: 24 }, { header: "Прим. админа", key: "adminNote", width: 24 },
+      ], deposits.map((d) => ({
+        tech: techById(d.tech_id)?.full_name || "", amount: d.amount, status: (DEPOSIT_STATUS[d.status] || {}).label || d.status,
+        requested: d.requested_at ? fmtTs(d.requested_at) : "", decided: d.decided_at ? fmtTs(d.decided_at) : "", note: d.note || "", adminNote: d.admin_note || "",
+      })));
+
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
@@ -799,6 +838,7 @@ function Dashboard({ session, profile }) {
     { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "finance", icon: Wallet, label: "Финансы" },
     { id: "opex", icon: Receipt, label: "Расходы" },
+    { id: "cash", icon: Banknote, label: `Касса${deposits.filter((d) => d.status === "pending").length ? " · " + deposits.filter((d) => d.status === "pending").length : ""}` },
     { id: "stock", icon: Package, label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
     { id: "team", icon: Users, label: "Дезинфекторы" },
     { id: "partners", icon: Handshake, label: "Партнёры" },
@@ -808,6 +848,7 @@ function Dashboard({ session, profile }) {
   ] : [
     { id: "jobs", icon: ClipboardList, label: `Мои заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
+    { id: "cash", icon: Banknote, label: "Касса" },
     { id: "myequip", icon: Wrench, label: "Моё оборудование" },
   ];
 
@@ -919,6 +960,92 @@ function Dashboard({ session, profile }) {
                 </div>
               ))}
           </>
+        )}
+
+        {!loading && tab === "cash" && !isAdmin && (
+          <div className="kd-list">
+            <div className="kd-card">
+              <div className="kd-section">Наличные на руках</div>
+              <div className="kd-row"><span>Собрано с заявок</span><strong>{fmt(techCashCollected(session.user.id))} ₸</strong></div>
+              <div className="kd-row"><span>Уже внесено (подтверждено)</span><strong style={{ color: "var(--primary-d)" }}>{fmt(techDepositedConfirmed(session.user.id))} ₸</strong></div>
+              {techDepositedPending(session.user.id) > 0 && <div className="kd-row"><span>Ожидает подтверждения</span><strong style={{ color: "#B4650B" }}>{fmt(techDepositedPending(session.user.id))} ₸</strong></div>}
+              <div className="kd-row total"><span>На руках сейчас</span><strong style={{ color: "var(--primary-d)", fontSize: 17 }}>{fmt(techCashOnHand(session.user.id))} ₸</strong></div>
+              <button className="kd-btn primary wide" disabled={techCashOnHand(session.user.id) <= 0} onClick={() => setModal({ kind: "deposit", max: techCashOnHand(session.user.id) })} style={{ marginTop: 12 }}><Banknote size={16} />Внести через банкомат</button>
+            </div>
+            <div className="kd-hint">Внесение через банкомат по ИИН <strong>980515351225 — Тыныс Қ.</strong> После внесения нажми кнопку выше — админ подтвердит поступление.</div>
+            <div className="kd-section" style={{ marginTop: 6 }}>История внесений</div>
+            {deposits.filter((d) => d.tech_id === session.user.id).length === 0 && <div className="kd-empty">Внесений пока не было.</div>}
+            {deposits.filter((d) => d.tech_id === session.user.id).map((d) => {
+              const st = DEPOSIT_STATUS[d.status] || DEPOSIT_STATUS.pending;
+              return (
+                <div key={d.id} className="kd-card">
+                  <div className="kd-card-head">
+                    <div className="kd-pest">{fmt(d.amount)} ₸</div>
+                    <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+                  </div>
+                  <div className="kd-meta"><span>{fmtTs(d.requested_at)}</span>{d.note && <><span>·</span><span>{d.note}</span></>}</div>
+                  {d.status === "rejected" && d.admin_note && <div className="kd-notebox" style={{ color: "#B42318" }}>Причина: {d.admin_note}</div>}
+                  {d.status === "pending" && <div className="kd-actions"><button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Отменить заявку на внесение ${fmt(d.amount)} ₸?`, () => cancelDeposit(d))}>Отменить</button></div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!loading && tab === "cash" && isAdmin && (
+          <div className="kd-list">
+            {deposits.filter((d) => d.status === "pending").length > 0 && (
+              <>
+                <div className="kd-section">Ожидают подтверждения · {deposits.filter((d) => d.status === "pending").length}</div>
+                {deposits.filter((d) => d.status === "pending").map((d) => (
+                  <div key={d.id} className="kd-card low">
+                    <div className="kd-card-head">
+                      <div className="kd-pest">{techById(d.tech_id)?.full_name || "?"}</div>
+                      <strong style={{ fontSize: 17, color: "var(--primary-d)" }}>{fmt(d.amount)} ₸</strong>
+                    </div>
+                    <div className="kd-meta"><span>Заявлено: {fmtTs(d.requested_at)}</span>{d.note && <><span>·</span><span>{d.note}</span></>}</div>
+                    <div className="kd-actions">
+                      <button className="kd-btn primary sm" onClick={() => askConfirm(`Подтвердить поступление ${fmt(d.amount)} ₸ от ${techById(d.tech_id)?.full_name || "?"}?`, () => decideDeposit(d, "confirmed"))}>Подтвердить</button>
+                      <button className="kd-btn ghost danger sm" onClick={() => setModal({ kind: "rejectDeposit", dep: d })}>Отклонить</button>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+            <div className="kd-section" style={{ marginTop: deposits.filter((d) => d.status === "pending").length ? 8 : 0 }}>Наличные у дезинфекторов</div>
+            {techs.length === 0 && <div className="kd-muted">Дезинфекторов пока нет.</div>}
+            {techs.map((t) => {
+              const onHand = techCashOnHand(t.id);
+              const pending = techDepositedPending(t.id);
+              return (
+                <div key={t.id} className="kd-card">
+                  <div className="kd-card-head">
+                    <div className="kd-pest">{t.full_name || "(без имени)"}</div>
+                    <strong style={{ fontSize: 16, color: onHand > 0 ? "#B4650B" : "var(--muted)" }}>{fmt(onHand)} ₸ на руках</strong>
+                  </div>
+                  <div className="kd-meta">
+                    <span>Собрано: {fmt(techCashCollected(t.id))} ₸</span><span>·</span>
+                    <span>Внесено: {fmt(techDepositedConfirmed(t.id))} ₸</span>
+                    {pending > 0 && <><span>·</span><span style={{ color: "#B4650B" }}>в ожидании: {fmt(pending)} ₸</span></>}
+                  </div>
+                </div>
+              );
+            })}
+            <div className="kd-section" style={{ marginTop: 8 }}>История внесений</div>
+            {deposits.filter((d) => d.status !== "pending").length === 0 && <div className="kd-muted">Подтверждённых или отклонённых внесений пока нет.</div>}
+            {deposits.filter((d) => d.status !== "pending").map((d) => {
+              const st = DEPOSIT_STATUS[d.status] || DEPOSIT_STATUS.pending;
+              return (
+                <div key={d.id} className="kd-histrow" style={{ cursor: "default" }}>
+                  <div>
+                    <div className="kd-histmain">{techById(d.tech_id)?.full_name || "?"} · {fmt(d.amount)} ₸</div>
+                    <div className="kd-muted">{d.decided_at ? fmtTs(d.decided_at) : fmtTs(d.requested_at)}{d.admin_note ? " · " + d.admin_note : ""}</div>
+                  </div>
+                  <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+                </div>
+              );
+            })}
+          </div>
         )}
 
         {!loading && tab === "myequip" && (
@@ -1383,6 +1510,8 @@ function Dashboard({ session, profile }) {
         />
       )}
       {modal?.kind === "opex" && <OpexModal opex={modal.opex} expCats={expCats} onClose={() => setModal(null)} onSave={saveOpex} />}
+      {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}
+      {modal?.kind === "rejectDeposit" && <RejectDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} onClose={() => setModal(null)} onSave={(adminNote) => { decideDeposit(modal.dep, "rejected", adminNote); setModal(null); }} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
@@ -2243,6 +2372,52 @@ function OpexModal({ opex, expCats, onClose, onSave }) {
         <Field label="Дата"><input type="date" value={spentDate} onChange={(e) => setSpentDate(e.target.value)} /></Field>
       </div>
       <Field label="Комментарий"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за что именно / за какой месяц" /></Field>
+    </ModalShell>
+  );
+}
+
+function DepositModal({ max, onClose, onSave }) {
+  const [mode, setMode] = useState("all");
+  const [amount, setAmount] = useState(String(max || 0));
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const value = mode === "all" ? max : Number(amount) || 0;
+  const ok = value > 0 && value <= max;
+  async function save() { setSaving(true); await onSave(value, note); setSaving(false); }
+  return (
+    <ModalShell title="Внести через банкомат" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Отправить на подтверждение"}</button>
+    </>}>
+      <div className="kd-hint">Перевод по ИИН <strong>980515351225 — Тыныс Қ.</strong></div>
+      <div className="kd-paytotal"><span>На руках сейчас</span><strong>{fmt(max)} ₸</strong></div>
+      <div className="kd-seg" style={{ width: "100%", marginBottom: 14 }}>
+        <button className={`kd-segbtn ${mode === "all" ? "on" : ""}`} onClick={() => setMode("all")}>Всю сумму</button>
+        <button className={`kd-segbtn ${mode === "part" ? "on" : ""}`} onClick={() => setMode("part")}>Часть</button>
+      </div>
+      {mode === "part" && (
+        <Field label={`Сумма к внесению (не больше ${fmt(max)} ₸)`}>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="50000" />
+        </Field>
+      )}
+      {mode === "part" && value > max && <div className="kd-err" style={{ marginTop: -6 }}>Нельзя внести больше, чем на руках.</div>}
+      <Field label="Комментарий (необязательно)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="номер чека / время внесения" /></Field>
+      <div className="kd-muted">После отправки заявка появится у админа. Он подтвердит поступление, когда проверит.</div>
+    </ModalShell>
+  );
+}
+
+function RejectDepositModal({ dep, techName, onClose, onSave }) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function save() { setSaving(true); await onSave(reason); setSaving(false); }
+  return (
+    <ModalShell title="Отклонить внесение" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary danger" disabled={saving} onClick={save}>{saving ? "…" : "Отклонить"}</button>
+    </>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>{techName || "Сотрудник"} · {fmt(dep.amount)} ₸. Сумма вернётся в «на руках» у сотрудника.</div>
+      <Field label="Причина (увидит сотрудник)"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="напр.: не вижу поступления" /></Field>
     </ModalShell>
   );
 }
