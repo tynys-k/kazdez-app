@@ -147,6 +147,7 @@ body{
 .kd-btn.primary.danger{background:var(--rust);}
 .kd-btn.primary.danger:hover{background:#8F1E17;}
 .kd-confirm-icon{width:52px;height:52px;border-radius:50%;background:var(--rust-tint);color:var(--rust);display:flex;align-items:center;justify-content:center;margin:0 auto;}
+.kd-confirm-icon.ok{background:var(--primary-tint);color:var(--primary-d);}
 .kd-success-icon{width:56px;height:56px;border-radius:50%;background:var(--primary-tint);color:var(--primary-d);display:flex;align-items:center;justify-content:center;margin:0 auto;}
 .kd-btn.ghost{background:var(--surface);border-color:var(--line);color:var(--ink);}
 .kd-btn.ghost:hover{border-color:var(--primary);color:var(--primary-d);}
