@@ -208,7 +208,7 @@ function Dashboard({ session, profile }) {
   const [tab, setTab] = useState("jobs");
   const [modal, setModal] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
-  const askConfirm = (message, onYes) => setConfirmState({ message, onYes });
+  const askConfirm = (message, onYes, opts = {}) => setConfirmState({ message, onYes, danger: opts.danger !== false, confirmLabel: opts.confirmLabel });
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [doneSortDir, setDoneSortDir] = useState("desc");
@@ -1085,7 +1085,7 @@ function Dashboard({ session, profile }) {
                   </div>
                   <div className="kd-meta"><span>{fmtTs(d.requested_at)}</span>{d.note && <><span>·</span><span>{d.note}</span></>}</div>
                   {d.status === "rejected" && d.admin_note && <div className="kd-notebox" style={{ color: "#B42318" }}>Причина: {d.admin_note}</div>}
-                  {d.status === "pending" && <div className="kd-actions"><button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Отменить заявку на внесение ${fmt(d.amount)} ₸?`, () => cancelDeposit(d))}>Отменить</button></div>}
+                  {d.status === "pending" && <div className="kd-actions"><button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Отменить заявку на внесение ${fmt(d.amount)} ₸?`, () => cancelDeposit(d), { confirmLabel: "Да, отменить" })}>Отменить</button></div>}
                 </div>
               );
             })}
@@ -1105,7 +1105,7 @@ function Dashboard({ session, profile }) {
                     </div>
                     <div className="kd-meta"><span>Заявлено: {fmtTs(d.requested_at)}</span>{d.note && <><span>·</span><span>{d.note}</span></>}</div>
                     <div className="kd-actions">
-                      <button className="kd-btn primary sm" onClick={() => askConfirm(`Подтвердить поступление ${fmt(d.amount)} ₸ от ${techById(d.tech_id)?.full_name || "?"}?`, () => decideDeposit(d, "confirmed"))}>Подтвердить</button>
+                      <button className="kd-btn primary sm" onClick={() => askConfirm(`Подтвердить поступление ${fmt(d.amount)} ₸ от ${techById(d.tech_id)?.full_name || "?"}?`, () => decideDeposit(d, "confirmed"), { danger: false, confirmLabel: "Да, подтвердить" })}>Подтвердить</button>
                       <button className="kd-btn ghost danger sm" onClick={() => setModal({ kind: "rejectDeposit", dep: d })}>Отклонить</button>
                     </div>
                   </div>
@@ -1691,7 +1691,7 @@ function Dashboard({ session, profile }) {
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
       {modal?.kind === "doc" && <DocModal doc={modal.doc} partners={partners} onClose={() => setModal(null)} onSave={saveDoc} />}
       {confirmState && (
-        <ConfirmModal message={confirmState.message}
+        <ConfirmModal message={confirmState.message} danger={confirmState.danger} confirmLabel={confirmState.confirmLabel}
           onCancel={() => setConfirmState(null)}
           onConfirm={() => { confirmState.onYes(); setConfirmState(null); }} />
       )}
@@ -1779,17 +1779,17 @@ function RepeatCard({ job, onSaveNote, onCreate, onFinish, repeatHint }) {
 }
 
 // ----------------------------- modals -----------------------------
-function ConfirmModal({ message, onCancel, onConfirm }) {
+function ConfirmModal({ message, onCancel, onConfirm, danger = true, confirmLabel }) {
   return (
     <div className="kd-overlay">
       <div className="kd-modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
         <div className="kd-modal-body" style={{ paddingTop: 22, textAlign: "center" }}>
-          <div className="kd-confirm-icon"><Trash2 size={22} /></div>
+          <div className={danger ? "kd-confirm-icon" : "kd-confirm-icon ok"}>{danger ? <Trash2 size={22} /> : <CheckCircle2 size={22} />}</div>
           <div style={{ fontWeight: 700, fontSize: 16, marginTop: 12, lineHeight: 1.4 }}>{message}</div>
         </div>
         <div className="kd-modal-foot" style={{ justifyContent: "center" }}>
           <button className="kd-btn ghost" onClick={onCancel}>Отмена</button>
-          <button className="kd-btn primary danger" onClick={onConfirm}>Да, удалить</button>
+          <button className={danger ? "kd-btn primary danger" : "kd-btn primary"} onClick={onConfirm}>{confirmLabel || (danger ? "Да, удалить" : "Подтвердить")}</button>
         </div>
       </div>
     </div>
