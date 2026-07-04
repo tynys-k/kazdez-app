@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -37,6 +37,8 @@ const EXPENSE_TYPES = { salary: "Зарплата", travel: "Дорожные", 
 const EQUIP_CATEGORIES = { equipment: "Оборудование", siz: "СИЗ", container: "Тара", other: "Другое" };
 const EQUIP_STATUS = { with_tech: { label: "У сотрудника", color: "#0E7C66", bg: "#E4F3EE" }, returned: { label: "Возврат на склад", color: "#6E7871", bg: "#F7F9F6" }, broken: { label: "Сломано", color: "#B3261E", bg: "#FBE7E5" }, lost: { label: "Утеряно", color: "#B3261E", bg: "#FBE7E5" }, transferred: { label: "Передано", color: "#B4650B", bg: "#FBEDD9" } };
 const DEPOSIT_STATUS = { pending: { label: "Ожидает", color: "#B4650B", bg: "#FBEDD9" }, confirmed: { label: "Подтверждено", color: "#0E7C66", bg: "#E4F3EE" }, rejected: { label: "Отклонено", color: "#B3261E", bg: "#FBE7E5" } };
+const TASK_TYPES = { errand: "Поручение", purchase: "Закупка", docs: "Документы", tender: "Тендер", other: "Прочее" };
+const TASK_STATUS = { new: { label: "Новая", color: "#2563EB", bg: "#EAF1FE" }, in_progress: { label: "В работе", color: "#B4650B", bg: "#FBEDD9" }, done: { label: "Сделана", color: "#0E7C66", bg: "#E4F3EE" } };
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -197,6 +199,9 @@ function Dashboard({ session, profile }) {
   const [expCats, setExpCats] = useState([]);
   const [opex, setOpex] = useState([]);
   const [deposits, setDeposits] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [taskFilter, setTaskFilter] = useState("open");
+  const [taskAssignee, setTaskAssignee] = useState("");
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -213,13 +218,15 @@ function Dashboard({ session, profile }) {
   const [brandFilter, setBrandFilter] = useState("all");
   const [pOff, setPOff] = useState(0);
   const isAdmin = profile?.role === "admin";
+  const isManager = profile?.role === "manager";
+  const canManageTasks = isAdmin || isManager;
   const actorName = profile?.full_name || (isAdmin ? "Админ" : session.user.email);
 
   function showToast(t) { setToast(t); setTimeout(() => setToast(""), 2200); }
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -238,6 +245,7 @@ function Dashboard({ session, profile }) {
       supabase.from("expense_categories").select("*").order("name"),
       supabase.from("opex").select("*").order("spent_date", { ascending: false }),
       supabase.from("cash_deposits").select("*").order("requested_at", { ascending: false }),
+      supabase.from("tasks").select("*").order("created_at", { ascending: false }),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -260,6 +268,7 @@ function Dashboard({ session, profile }) {
     setExpCats(ecr.data || []);
     setOpex(opr.data || []);
     setDeposits(dpr.data || []);
+    setTasks(tkr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -282,6 +291,8 @@ function Dashboard({ session, profile }) {
 
   const techById = (id) => techs.find((t) => t.id === id);
   const profileById = (id) => allProfiles.find((p) => p.id === id);
+  const personName = (id) => profileById(id)?.full_name || "—";
+  const assignableProfiles = allProfiles;
   const equipById = (id) => equipment.find((e) => e.id === id);
   const techEquipment = (techId) => equipHandouts.filter((h) => h.tech_id === techId && h.status === "with_tech").map((h) => ({ handout: h, equip: equipById(h.equipment_id) })).filter((r) => r.equip);
   // Наличные, собранные дезинфектором со всех его выполненных заявок
@@ -571,6 +582,23 @@ function Dashboard({ session, profile }) {
     await logAction("Касса", `Отменена заявка на внесение: ${fmt(dep.amount)} ₸`);
     showToast("Отменено"); load();
   }
+  async function saveTask(payload, existing) {
+    const res = existing ? await supabase.from("tasks").update(payload).eq("id", existing.id) : await supabase.from("tasks").insert({ ...payload, created_by: session.user.id });
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Задачи", `${existing ? "Изменена" : "Создана"}: ${payload.title}${payload.assignee_id ? " → " + personName(payload.assignee_id) : ""}`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function setTaskStatus(task, status) {
+    const { error } = await supabase.from("tasks").update({ status, done_at: status === "done" ? new Date().toISOString() : null }).eq("id", task.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Задачи", `${(TASK_STATUS[status] || {}).label || status}: ${task.title}`);
+    showToast("Обновлено"); load();
+  }
+  async function removeTask(task) {
+    await supabase.from("tasks").delete().eq("id", task.id);
+    await logAction("Задачи", `Удалена: ${task.title}`);
+    showToast("Удалено"); load();
+  }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
@@ -772,6 +800,14 @@ function Dashboard({ session, profile }) {
         requested: d.requested_at ? fmtTs(d.requested_at) : "", decided: d.decided_at ? fmtTs(d.decided_at) : "", note: d.note || "", adminNote: d.admin_note || "",
       })));
 
+      await addSheet("Задачи", [
+        { header: "Задача", key: "title", width: 30 }, { header: "Тип", key: "type", width: 14 }, { header: "Приоритет", key: "priority", width: 12 },
+        { header: "Исполнитель", key: "assignee", width: 18 }, { header: "Срок", key: "due", width: 12 }, { header: "Статус", key: "status", width: 12 }, { header: "Подробности", key: "desc", width: 34 },
+      ], tasks.map((t) => ({
+        title: t.title, type: TASK_TYPES[t.type] || t.type, priority: t.priority === "urgent" ? "Срочный" : "Обычный",
+        assignee: personName(t.assignee_id), due: t.due_date ? isoToRu(t.due_date) : "", status: (TASK_STATUS[t.status] || {}).label || t.status, desc: t.description || "",
+      })));
+
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
@@ -871,10 +907,27 @@ function Dashboard({ session, profile }) {
     return doneSortDir === "desc" ? db - da : da - db;
   });
   const doneGroups = groupByDate(doneSorted);
+  const myOpenTasks = tasks.filter((t) => t.assignee_id === session.user.id && t.status !== "done").length;
+  const allOpenTasks = tasks.filter((t) => t.status !== "done").length;
+  const visibleTasks = canManageTasks ? tasks : tasks.filter((t) => t.assignee_id === session.user.id);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const filteredTasks = visibleTasks.filter((t) => {
+    if (taskAssignee && t.assignee_id !== taskAssignee) return false;
+    if (taskFilter === "open") return t.status !== "done";
+    if (taskFilter === "today") return t.status !== "done" && t.due_date === todayIso;
+    if (taskFilter === "overdue") return t.status !== "done" && t.due_date && t.due_date < todayIso;
+    if (taskFilter === "done") return t.status === "done";
+    return true;
+  }).sort((a, b) => {
+    const rank = (t) => (t.status === "done" ? 2 : (t.due_date && t.due_date < todayIso ? 0 : 1));
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
+    return (a.due_date || "9999").localeCompare(b.due_date || "9999");
+  });
   const tabs = isAdmin ? [
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
+    { id: "tasks", icon: ListTodo, label: `Задачи${allOpenTasks ? " · " + allOpenTasks : ""}` },
     { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "finance", icon: Wallet, label: "Финансы" },
     { id: "opex", icon: Receipt, label: "Расходы" },
@@ -888,6 +941,7 @@ function Dashboard({ session, profile }) {
   ] : [
     { id: "jobs", icon: ClipboardList, label: `Мои заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
+    { id: "tasks", icon: ListTodo, label: `${canManageTasks ? "Задачи" : "Мои задачи"}${(canManageTasks ? allOpenTasks : myOpenTasks) ? " · " + (canManageTasks ? allOpenTasks : myOpenTasks) : ""}` },
     { id: "cash", icon: Banknote, label: "Касса" },
     { id: "myequip", icon: Wrench, label: "Моё оборудование" },
   ];
@@ -1111,6 +1165,55 @@ function Dashboard({ session, profile }) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {!loading && tab === "tasks" && (
+          <div className="kd-list">
+            {canManageTasks && (
+              <div className="kd-tabbar" style={{ marginBottom: 4 }}>
+                <div className="kd-title" style={{ fontSize: 18 }}>Задачи</div>
+                <button className="kd-btn primary" onClick={() => setModal({ kind: "task" })}><Plus size={15} />Новая задача</button>
+              </div>
+            )}
+            <div className="kd-seg" style={{ width: "100%", overflowX: "auto" }}>
+              {[{ id: "open", label: "Активные" }, { id: "today", label: "Сегодня" }, { id: "overdue", label: "Просрочено" }, { id: "done", label: "Сделаны" }, { id: "all", label: "Все" }].map((f) => (
+                <button key={f.id} className={`kd-segbtn ${taskFilter === f.id ? "on" : ""}`} onClick={() => setTaskFilter(f.id)}>{f.label}</button>
+              ))}
+            </div>
+            {canManageTasks && assignableProfiles.length > 0 && (
+              <select className="kd-techselect" value={taskAssignee} onChange={(e) => setTaskAssignee(e.target.value)} style={{ width: "100%" }}>
+                <option value="">Все исполнители</option>
+                {assignableProfiles.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.id.slice(0, 6)}</option>)}
+              </select>
+            )}
+            {filteredTasks.length === 0 && <div className="kd-empty">{taskFilter === "done" ? "Выполненных задач нет." : "Задач нет. Всё чисто 👌"}</div>}
+            {filteredTasks.map((t) => {
+              const st = TASK_STATUS[t.status] || TASK_STATUS.new;
+              const overdue = t.status !== "done" && t.due_date && t.due_date < todayIso;
+              const canEdit = canManageTasks || t.created_by === session.user.id;
+              return (
+                <div key={t.id} className={`kd-card ${t.status === "done" ? "done" : ""} ${overdue ? "low" : ""}`}>
+                  <div className="kd-card-head">
+                    <div className="kd-pest">{t.priority === "urgent" && <span style={{ color: "#B3261E" }}>🔴 </span>}{t.title}</div>
+                    <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+                  </div>
+                  <div className="kd-meta">
+                    <span className="kd-brandtag">{TASK_TYPES[t.type] || t.type}</span>
+                    {t.assignee_id && <span>👤 {personName(t.assignee_id)}</span>}
+                    {t.due_date && <span className="kd-datetimetag" style={overdue ? { color: "#B3261E", background: "#FBE7E5" } : {}}><Calendar size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{isoToRu(t.due_date)}{overdue ? " · просрочено" : ""}</span>}
+                  </div>
+                  {t.description && <div className="kd-notebox">{t.description}</div>}
+                  <div className="kd-actions">
+                    {t.status !== "done" && <button className="kd-btn primary sm" onClick={() => setTaskStatus(t, "done")}>Сделано</button>}
+                    {t.status === "new" && <button className="kd-btn ghost sm" onClick={() => setTaskStatus(t, "in_progress")}>В работу</button>}
+                    {t.status === "done" && <button className="kd-btn ghost sm" onClick={() => setTaskStatus(t, "new")}>Вернуть</button>}
+                    {canEdit && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "task", task: t })}><Pencil size={13} />Изменить</button>}
+                    {canEdit && <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить задачу «${t.title}»?`, () => removeTask(t))}><Trash2 size={13} /></button>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -1581,6 +1684,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "opex" && <OpexModal opex={modal.opex} expCats={expCats} onClose={() => setModal(null)} onSave={saveOpex} />}
       {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
+      {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "rejectDeposit" && <RejectDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} onClose={() => setModal(null)} onSave={(adminNote) => { decideDeposit(modal.dep, "rejected", adminNote); setModal(null); }} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
@@ -2239,17 +2343,25 @@ function ExpenseModal({ tech, onClose, onSave }) {
 function TechEditModal({ tech, onClose, onSave }) {
   const [fullName, setFullName] = useState(tech.full_name || "");
   const [phone, setPhone] = useState(tech.phone || "");
+  const [role, setRole] = useState(tech.role || "tech");
   const [saving, setSaving] = useState(false);
   const ok = fullName.trim();
-  async function save() { setSaving(true); await onSave({ full_name: fullName.trim(), phone: phone.trim() || null }); setSaving(false); }
+  async function save() { setSaving(true); await onSave({ full_name: fullName.trim(), phone: phone.trim() || null, role }); setSaving(false); }
   return (
-    <ModalShell title="Данные дезинфектора" onClose={onClose} footer={<>
+    <ModalShell title="Данные сотрудника" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
     </>}>
-      <div className="kd-muted" style={{ marginBottom: 12 }}>Логин и пароль этим не затрагиваются — меняется только отображаемое имя и телефон в приложении.</div>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Логин и пароль этим не затрагиваются — меняется только отображаемое имя, телефон и роль в приложении.</div>
       <Field label="Имя (как будет видно в приложении)"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Байсеит" /></Field>
       <Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 ..." /></Field>
+      <Field label="Роль">
+        <select value={role} onChange={(e) => setRole(e.target.value)}>
+          <option value="tech">Дезинфектор (заявки, своя касса, оборудование)</option>
+          <option value="manager">Менеджер (ставит задачи, без доступа к финансам)</option>
+        </select>
+      </Field>
+      <div className="kd-muted">Менеджер — «ключевой человек»: может создавать задачи и назначать их. Роль администратора меняется только напрямую в базе для безопасности.</div>
     </ModalShell>
   );
 }
@@ -2473,6 +2585,48 @@ function CancelJobModal({ job, onClose, onSave }) {
         </div>
       </div>
       <Field label="Причина / комментарий"><textarea className="kd-textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Что, где, как — своими словами" /></Field>
+    </ModalShell>
+  );
+}
+
+function TaskModal({ task, people, onClose, onSave }) {
+  const [title, setTitle] = useState(task?.title || "");
+  const [description, setDescription] = useState(task?.description || "");
+  const [type, setType] = useState(task?.type || "errand");
+  const [priority, setPriority] = useState(task?.priority || "normal");
+  const [assigneeId, setAssigneeId] = useState(task?.assignee_id || "");
+  const [dueMode, setDueMode] = useState(task?.due_date ? "date" : "none");
+  const [dueDate, setDueDate] = useState(task?.due_date || new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  const ok = title.trim();
+  const today = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  async function save() {
+    setSaving(true);
+    const due = dueMode === "today" ? today : dueMode === "tomorrow" ? tomorrow : dueMode === "date" ? (dueDate || null) : null;
+    await onSave({ title: title.trim(), description: description.trim() || null, type, priority, assignee_id: assigneeId || null, due_date: due }, task);
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={task ? "Изменить задачу" : "Новая задача"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <Field label="Что нужно сделать"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Забрать документы у FishProDex" /></Field>
+      <Field label="Подробности (необязательно)"><textarea className="kd-textarea" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Адрес, что именно, детали..." /></Field>
+      <div className="kd-grid2">
+        <Field label="Тип"><select value={type} onChange={(e) => setType(e.target.value)}>{Object.entries(TASK_TYPES).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></Field>
+        <Field label="Приоритет"><select value={priority} onChange={(e) => setPriority(e.target.value)}><option value="normal">Обычный</option><option value="urgent">🔴 Срочный</option></select></Field>
+      </div>
+      <Field label="Исполнитель"><select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}><option value="">— не назначен —</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.id.slice(0, 6)}</option>)}</select></Field>
+      <div className="kd-field"><span>Срок</span>
+        <div className="kd-seg" style={{ width: "100%" }}>
+          {[{ id: "none", label: "Без срока" }, { id: "today", label: "Сегодня" }, { id: "tomorrow", label: "Завтра" }, { id: "date", label: "Дата" }].map((m) => (
+            <button key={m.id} type="button" className={`kd-segbtn ${dueMode === m.id ? "on" : ""}`} onClick={() => setDueMode(m.id)}>{m.label}</button>
+          ))}
+        </div>
+      </div>
+      {dueMode === "date" && <Field label="Выбери дату"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
     </ModalShell>
   );
 }
