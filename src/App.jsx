@@ -290,6 +290,9 @@ function Dashboard({ session, profile }) {
   const [leads, setLeads] = useState([]);
   const [leadStages, setLeadStages] = useState([]);
   const [leadStageFilter, setLeadStageFilter] = useState("all");
+  const [mktChannels, setMktChannels] = useState([]);
+  const [mktTopups, setMktTopups] = useState([]);
+  const [opexView, setOpexView] = useState("accounts");
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [jobsDateFilter, setJobsDateFilter] = useState({ preset: "all" });
@@ -319,7 +322,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -347,6 +350,8 @@ function Dashboard({ session, profile }) {
       supabase.from("guarantee_returns").select("*").order("return_date", { ascending: false }),
       supabase.from("leads").select("*").order("updated_at", { ascending: false }),
       supabase.from("lead_stages").select("*").order("sort"),
+      supabase.from("mkt_channels").select("*").order("sort"),
+      supabase.from("mkt_topups").select("*").order("topup_date", { ascending: false }),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -378,6 +383,8 @@ function Dashboard({ session, profile }) {
     setGuaranteeReturns(grr.data || []);
     setLeads(ldr.data || []);
     setLeadStages(lsr.data || []);
+    setMktChannels(mcr.data || []);
+    setMktTopups(mtr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -895,6 +902,35 @@ function Dashboard({ session, profile }) {
     await supabase.from("lead_stages").update({ sort: b.sort }).eq("id", a.id);
     await supabase.from("lead_stages").update({ sort: a.sort }).eq("id", b.id);
     load();
+  }
+  async function saveMktChannel(payload, existing) {
+    const res = existing ? await supabase.from("mkt_channels").update(payload).eq("id", existing.id) : await supabase.from("mkt_channels").insert(payload);
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Маркетинг", `Канал ${existing ? "изменён" : "добавлен"}: ${payload.name}`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function removeMktChannel(ch) {
+    await supabase.from("mkt_channels").delete().eq("id", ch.id);
+    await logAction("Маркетинг", `Канал удалён: ${ch.name}`);
+    showToast("Удалено"); load();
+  }
+  async function addMktTopup(channelId, amount, date, accountId, note) {
+    const { error } = await supabase.from("mkt_topups").insert({ channel_id: channelId, amount: Number(amount) || 0, topup_date: date, account_id: accountId || null, note: note || null, created_by: session.user.id });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    // если указан счёт — списываем как расход (реклама уходит с реального счёта)
+    if (accountId) {
+      await supabase.from("money_moves").insert({
+        account_id: accountId, direction: "expense", amount: Number(amount) || 0, move_date: date,
+        note: `Реклама: ${(mktChannels.find((c) => c.id === channelId) || {}).name || ""}`, source: "manual", created_by: session.user.id,
+      });
+    }
+    await logAction("Маркетинг", `Пополнение ${fmt(amount)} ₸`);
+    setModal(null); showToast("Пополнение записано"); load();
+  }
+  async function removeMktTopup(t) {
+    await supabase.from("mkt_topups").delete().eq("id", t.id);
+    await logAction("Маркетинг", `Пополнение удалено: ${fmt(t.amount)} ₸`);
+    showToast("Удалено"); load();
   }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
@@ -1899,6 +1935,12 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "opex" && (
           <>
+            <div className="kd-seg" style={{ marginBottom: 14 }}>
+              <button className={`kd-segbtn ${opexView === "accounts" ? "on" : ""}`} onClick={() => setOpexView("accounts")}>Счета и движения</button>
+              <button className={`kd-segbtn ${opexView === "marketing" ? "on" : ""}`} onClick={() => setOpexView("marketing")}>Маркетинг</button>
+            </div>
+
+            {opexView === "accounts" && (<>
             <div className="kd-tabbar" style={{ marginBottom: 8 }}>
               <div className="kd-title" style={{ fontSize: 18 }}>Финансы · счета</div>
               <div className="kd-tabactions">
@@ -1983,6 +2025,98 @@ function Dashboard({ session, profile }) {
                               <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить движение на ${fmt(m.amount)} ₸?`, () => removeMove(m))}><Trash2 size={13} /></button>
                             </div>
                           )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
+            </>)}
+
+            {opexView === "marketing" && (() => {
+              const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+              const monthStartIso = isoOf(monthStart);
+              const goal = Number(settings.mkt_revenue_goal) || 15000000;
+              const adPct = Number(settings.mkt_ad_percent) || 10;
+              const budget = Math.round(goal * adPct / 100);
+              // выручка этого календарного месяца по источнику (done-заявки)
+              const revenueBySource = (srcKey) => {
+                if (!srcKey) return 0;
+                return jobs.filter((j) => j.status === "done" && j.scheduled_date && j.scheduled_date >= monthStartIso && norm(j.source) === norm(srcKey))
+                  .reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
+              };
+              const topupsThisMonth = (chId) => mktTopups.filter((t) => t.channel_id === chId && t.topup_date >= monthStartIso);
+              const spentThisMonth = (chId) => topupsThisMonth(chId).reduce((s, t) => s + (Number(t.amount) || 0), 0);
+              const totalPlan = mktChannels.reduce((s, c) => s + (Number(c.monthly_plan) || 0), 0);
+              const totalSpent = mktChannels.reduce((s, c) => s + spentThisMonth(c.id), 0);
+              const totalRevenue = jobs.filter((j) => j.status === "done" && j.scheduled_date && j.scheduled_date >= monthStartIso).reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
+              return (
+                <>
+                  <div className="kd-tabbar" style={{ marginBottom: 8 }}>
+                    <div className="kd-title" style={{ fontSize: 18 }}>Маркетинг · {monthStart.toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}</div>
+                    <button className="kd-btn primary" onClick={() => setModal({ kind: "mktChannel" })}><Plus size={15} />Канал</button>
+                  </div>
+
+                  {/* Цель и бюджет */}
+                  <div className="kd-card" style={{ marginBottom: 12 }}>
+                    <div className="kd-section">Цель месяца</div>
+                    <div className="kd-row"><span>Цель по выручке</span><strong>{fmt(goal)} ₸</strong></div>
+                    <div className="kd-row"><span>Доля на рекламу</span><strong>{adPct}%</strong></div>
+                    <div className="kd-row total"><span>Бюджет на рекламу</span><strong style={{ color: "var(--primary-d)" }}>{fmt(budget)} ₸</strong></div>
+                    <div className="kd-muted" style={{ marginTop: 8 }}>Изменить цель и % можно в Настройках → «Маркетинг».</div>
+                  </div>
+
+                  {/* Итоги месяца */}
+                  <div className="kd-card" style={{ marginBottom: 12 }}>
+                    <div className="kd-section">Факт этого месяца</div>
+                    <div className="kd-row"><span>План пополнений</span><strong>{fmt(totalPlan)} ₸</strong></div>
+                    <div className="kd-row"><span>Уже пополнено</span><strong style={{ color: totalSpent >= totalPlan ? "#0E7C66" : "#B4650B" }}>{fmt(totalSpent)} ₸</strong></div>
+                    <div className="kd-row"><span>Осталось пополнить</span><strong>{fmt(Math.max(0, totalPlan - totalSpent))} ₸</strong></div>
+                    <div className="kd-row"><span>Выручка (done-заявки)</span><strong>{fmt(totalRevenue)} ₸</strong></div>
+                    <div className="kd-row total"><span>Общий ROI</span><strong style={{ color: totalSpent > 0 && totalRevenue / totalSpent >= 10 ? "#0E7C66" : "#B4650B" }}>{totalSpent > 0 ? (totalRevenue / totalSpent).toFixed(1) + "×" : "—"}</strong></div>
+                    <div className="kd-muted" style={{ marginTop: 8 }}>Ориентир: каждый 1 ₸ рекламы должен вернуть ≥10 ₸ выручки.</div>
+                  </div>
+
+                  {/* Каналы */}
+                  <div className="kd-list">
+                    {mktChannels.length === 0 && <div className="kd-empty">Каналов нет. Добавь через «+ Канал».</div>}
+                    {mktChannels.map((ch) => {
+                      const spent = spentThisMonth(ch.id);
+                      const plan = Number(ch.monthly_plan) || 0;
+                      const rev = revenueBySource(ch.source_key);
+                      const roi = spent > 0 ? rev / spent : null;
+                      const filled = plan > 0 ? Math.min(100, Math.round(spent / plan * 100)) : 0;
+                      const topups = topupsThisMonth(ch.id);
+                      return (
+                        <div key={ch.id} className="kd-card">
+                          <div className="kd-card-head">
+                            <div className="kd-pest">{ch.name}{ch.is_fixed && <span className="kd-brandtag" style={{ marginLeft: 8 }}>фикс</span>}</div>
+                            <span className="kd-badge" style={{ color: filled >= 100 ? "#0E7C66" : "#B4650B", background: filled >= 100 ? "#E4F3EE" : "#FBEDD9" }}>{filled}% плана</span>
+                          </div>
+                          <div className="kd-mktbar"><div className="kd-mktbarfill" style={{ width: `${filled}%` }} /></div>
+                          <div className="kd-tenderfin">
+                            <div><span className="kd-muted">План/мес</span><strong>{fmt(plan)} ₸</strong></div>
+                            <div><span className="kd-muted">Пополнено</span><strong>{fmt(spent)} ₸</strong></div>
+                            {ch.source_key && <div><span className="kd-muted">Выручка ({ch.source_key})</span><strong>{fmt(rev)} ₸</strong></div>}
+                            {ch.source_key && <div><span className="kd-muted">ROI</span><strong style={{ color: roi != null && roi >= 10 ? "#0E7C66" : roi != null ? "#B42318" : "var(--muted)" }}>{roi != null ? roi.toFixed(1) + "×" : "—"}</strong></div>}
+                          </div>
+                          {topups.length > 0 && (
+                            <div className="kd-returns" style={{ marginTop: 8 }}>
+                              {topups.map((t) => (
+                                <div key={t.id} className="kd-returnrow">
+                                  <span>✓ {fmt(t.amount)} ₸ · {isoToRu(t.topup_date)}{t.account_id ? " · " + (accountById(t.account_id)?.name || "") : ""}</span>
+                                  <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить пополнение ${fmt(t.amount)} ₸?`, () => removeMktTopup(t))}><X size={12} /></button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="kd-actions">
+                            <button className="kd-btn primary sm" onClick={() => setModal({ kind: "mktTopup", channel: ch })}><Plus size={13} />Пополнил</button>
+                            <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "mktChannel", item: ch })}><Pencil size={13} />Изменить</button>
+                            <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить канал «${ch.name}»? Пополнения тоже удалятся.`, () => removeMktChannel(ch))}><Trash2 size={13} /></button>
+                          </div>
+                          {!ch.source_key && <div className="kd-muted" style={{ marginTop: 6 }}>ROI не считается — не привязан источник. Укажи его в «Изменить», чтобы видеть отдачу.</div>}
                         </div>
                       );
                     })}
@@ -2320,6 +2454,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
       {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} onClose={() => setModal(null)} onSave={saveLead} />}
+      {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}
+      {modal?.kind === "mktTopup" && <MktTopupModal channel={modal.channel} accounts={accounts} onClose={() => setModal(null)} onSave={(amount, date, accId, note) => addMktTopup(modal.channel.id, amount, date, accId, note)} />}
       {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} onClose={() => setModal(null)} onPick={(sid) => { setLeadStage(modal.lead, sid); setModal(null); }} />}
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
@@ -3251,6 +3387,14 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
           )}
           <div className="kd-muted">QR-оплаты по заявкам автоматически приходят на выбранный счёт (минус комиссия). Сдача налички дезинфектором — на второй счёт, когда ты подтверждаешь поступление.</div>
         </SettingsSection>
+
+        <SettingsSection title="Маркетинг" subtitle="Цель выручки и % на рекламу" open={openSection === "marketing"} onToggle={() => toggle("marketing")}>
+          <div className="kd-grid2">
+            <Field label="Цель по выручке в месяц (₸)"><input defaultValue={settings.mkt_revenue_goal ?? 15000000} inputMode="numeric" onBlur={(e) => onSaveSetting("mkt_revenue_goal", Number(e.target.value) || 0)} /></Field>
+            <Field label="Доля на рекламу (%)"><input defaultValue={settings.mkt_ad_percent ?? 10} inputMode="decimal" onBlur={(e) => onSaveSetting("mkt_ad_percent", Number(e.target.value) || 0)} /></Field>
+          </div>
+          <div className="kd-muted">Бюджет на рекламу = цель × %. Напр.: 15 000 000 × 10% = 1 500 000 ₸. Сами каналы и пополнения — во вкладке «Финансы» → «Маркетинг». Сохраняется при выходе из поля.</div>
+        </SettingsSection>
       </div>
     </ModalShell>
   );
@@ -3439,6 +3583,57 @@ function TaskModal({ task, people, onClose, onSave }) {
         </div>
       </div>
       {dueMode === "date" && <Field label="Выбери дату"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+    </ModalShell>
+  );
+}
+
+function MktChannelModal({ item, sources, onClose, onSave }) {
+  const [name, setName] = useState(item?.name || "");
+  const [sourceKey, setSourceKey] = useState(item?.source_key || "");
+  const [plan, setPlan] = useState(item?.monthly_plan ?? "");
+  const [isFixed, setIsFixed] = useState(item?.is_fixed || false);
+  const [saving, setSaving] = useState(false);
+  const ok = name.trim();
+  async function save() {
+    setSaving(true);
+    await onSave({ name: name.trim(), source_key: sourceKey.trim() || null, monthly_plan: Number(plan) || 0, is_fixed: isFixed }, item);
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={item ? "Канал" : "Новый канал"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <Field label="Название канала"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="2ГИС / OLX / Instagram / TikTok" /></Field>
+      <datalist id="kd-mkt-sources">{sources.map((s) => <option key={s.id} value={s.name} />)}</datalist>
+      <Field label="Источник заявок для ROI (из справочника)"><input list="kd-mkt-sources" value={sourceKey} onChange={(e) => setSourceKey(e.target.value)} placeholder="напр.: 2gis / olx / instagram" /></Field>
+      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 12 }}>Система посчитает выручку по заявкам с этим источником. Если не указать — ROI не считается (для «Резерв» можно оставить пустым).</div>
+      <Field label="Плановый бюджет в месяц (₸)"><input value={plan} onChange={(e) => setPlan(e.target.value)} inputMode="numeric" placeholder="450000" /></Field>
+      <label className="kd-check"><input type="checkbox" checked={isFixed} onChange={(e) => setIsFixed(e.target.checked)} /> Фиксированный (сумма не меняется, напр. 2ГИС)</label>
+    </ModalShell>
+  );
+}
+
+function MktTopupModal({ channel, accounts, onClose, onSave }) {
+  const [amount, setAmount] = useState(String(channel?.monthly_plan || ""));
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [accId, setAccId] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = Number(amount) > 0 && date;
+  async function save() { setSaving(true); await onSave(Number(amount) || 0, date, accId || null, note.trim() || null); setSaving(false); }
+  return (
+    <ModalShell title={`Пополнение · ${channel.name}`} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Записать пополнение"}</button>
+    </>}>
+      <div className="kd-grid2">
+        <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="200000" /></Field>
+        <Field label="Дата пополнения"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      </div>
+      <Field label="С какого счёта (необязательно)"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— не списывать со счёта —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 12 }}>Если выберешь счёт — сумма спишется с него как расход в «Финансах».</div>
+      <Field label="Комментарий"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="напр.: первая половина месяца" /></Field>
     </ModalShell>
   );
 }
