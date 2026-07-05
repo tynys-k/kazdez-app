@@ -2579,74 +2579,96 @@ function CatalogList({ items, onAdd, onRemove, placeholder }) {
   );
 }
 
+function SettingsSection({ title, subtitle, open, onToggle, children }) {
+  return (
+    <div className="kd-setsection">
+      <button className="kd-sethead" onClick={onToggle}>
+        <div>
+          <div className="kd-setname">{title}</div>
+          {subtitle && <div className="kd-setsub">{subtitle}</div>}
+        </div>
+        <ChevronRight size={18} className="kd-setchevron" style={{ transform: open ? "rotate(90deg)" : "none" }} />
+      </button>
+      {open && <div className="kd-setbody">{children}</div>}
+    </div>
+  );
+}
+
 function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
   const [theme, setThemeLocal] = useState(localStorage.getItem("kd-theme") || "light");
   const [qrRate, setQrRate] = useState(settings.qr_fee_rate ?? 0.95);
   const [guarantee, setGuarantee] = useState(settings.default_guarantee_months ?? 6);
   const [newCat, setNewCat] = useState("");
   const [subInputs, setSubInputs] = useState({});
+  const [openSection, setOpenSection] = useState("appearance");
+  const toggle = (id) => setOpenSection(openSection === id ? "" : id);
   function pickTheme(t) { setThemeLocal(t); onSetTheme(t); }
   const parents = (expCats || []).filter((c) => !c.parent_id);
   const subsOf = (pid) => (expCats || []).filter((c) => c.parent_id === pid);
+  const inputStyle = { flex: 1, font: "inherit", fontWeight: 600, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "10px 12px", minHeight: 44 };
   return (
     <ModalShell title="Настройки" onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Готово</button>}>
-      <div className="kd-section">Оформление</div>
-      <div className="kd-seg" style={{ marginBottom: 18 }}>
-        <button className={`kd-segbtn ${theme === "light" ? "on" : ""}`} onClick={() => pickTheme("light")}>Светлая</button>
-        <button className={`kd-segbtn ${theme === "dark" ? "on" : ""}`} onClick={() => pickTheme("dark")}>Тёмная</button>
-      </div>
-      <div className="kd-muted" style={{ marginTop: -10, marginBottom: 18 }}>Применяется на этом устройстве сразу, без перезагрузки.</div>
-
-      <div className="kd-section">Источники клиентов</div>
-      <div style={{ marginBottom: 18 }}><CatalogList items={sources} onAdd={onAddSource} onRemove={onRemoveSource} placeholder="Напр.: Facebook" /></div>
-
-      <div className="kd-section">Виды вредителей</div>
-      <div style={{ marginBottom: 18 }}><CatalogList items={pestTypes} onAdd={onAddPest} onRemove={onRemovePest} placeholder="Напр.: Муравьи" /></div>
-
-      <div className="kd-section">Категории расходов</div>
-      <div className="kd-muted" style={{ marginBottom: 10 }}>Категория → внутри неё подкатегории. Например: «Реклама» → OLX, Instagram, Google.</div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <input value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="Новая категория (напр.: Аренда)"
-          style={{ flex: 1, font: "inherit", fontWeight: 600, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "10px 12px", minHeight: 44 }} />
-        <button className="kd-btn primary sm" disabled={!newCat.trim()} onClick={() => { onAddExpCat(newCat, null); setNewCat(""); }}><Plus size={14} />Категория</button>
-      </div>
-      {parents.length === 0 && <div className="kd-muted" style={{ marginBottom: 18 }}>Категорий пока нет.</div>}
-      {parents.map((cat) => (
-        <div key={cat.id} className="kd-card" style={{ marginBottom: 10, padding: "13px 15px", boxShadow: "none" }}>
-          <div className="kd-card-head" style={{ marginBottom: 8 }}>
-            <div className="kd-pest" style={{ fontSize: 15 }}>{cat.name}</div>
-            <button className="kd-btn ghost danger sm" onClick={() => onRemoveExpCat(cat)}><Trash2 size={13} /></button>
+      <div className="kd-setlist">
+        <SettingsSection title="Оформление" subtitle="Тема приложения" open={openSection === "appearance"} onToggle={() => toggle("appearance")}>
+          <div className="kd-seg" style={{ width: "100%", marginBottom: 10 }}>
+            <button className={`kd-segbtn ${theme === "light" ? "on" : ""}`} onClick={() => pickTheme("light")}>Светлая</button>
+            <button className={`kd-segbtn ${theme === "dark" ? "on" : ""}`} onClick={() => pickTheme("dark")}>Тёмная</button>
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
-            {subsOf(cat.id).length === 0 && <span className="kd-muted">Без подкатегорий</span>}
-            {subsOf(cat.id).map((sub) => (
-              <span key={sub.id} className="kd-price" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                {sub.name}
-                <button onClick={() => onRemoveExpCat(sub)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", display: "flex" }}><X size={13} /></button>
-              </span>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input value={subInputs[cat.id] || ""} onChange={(e) => setSubInputs({ ...subInputs, [cat.id]: e.target.value })} placeholder="Добавить подкатегорию"
-              style={{ flex: 1, font: "inherit", fontWeight: 600, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "9px 12px", minHeight: 40 }} />
-            <button className="kd-btn ghost sm" disabled={!(subInputs[cat.id] || "").trim()} onClick={() => { onAddExpCat(subInputs[cat.id], cat.id); setSubInputs({ ...subInputs, [cat.id]: "" }); }}><Plus size={13} /></button>
-          </div>
-        </div>
-      ))}
-      <div style={{ marginBottom: 8 }} />
+          <div className="kd-muted">Применяется на этом устройстве сразу, без перезагрузки.</div>
+        </SettingsSection>
 
-      <div className="kd-section">Финансы по умолчанию</div>
-      <div className="kd-grid2">
-        <Field label="Комиссия банка по QR (%)"><input value={qrRate} onChange={(e) => setQrRate(e.target.value)} inputMode="decimal" onBlur={() => onSaveSetting("qr_fee_rate", Number(qrRate) || 0)} /></Field>
-        <Field label="Гарантия по умолчанию (мес.)"><input value={guarantee} onChange={(e) => setGuarantee(e.target.value)} inputMode="numeric" onBlur={() => onSaveSetting("default_guarantee_months", Number(guarantee) || 6)} /></Field>
+        <SettingsSection title="Источники клиентов" subtitle={`${sources.length} шт. · откуда пришёл клиент`} open={openSection === "sources"} onToggle={() => toggle("sources")}>
+          <CatalogList items={sources} onAdd={onAddSource} onRemove={onRemoveSource} placeholder="Напр.: Facebook" />
+        </SettingsSection>
+
+        <SettingsSection title="Виды вредителей" subtitle={`${pestTypes.length} шт.`} open={openSection === "pests"} onToggle={() => toggle("pests")}>
+          <CatalogList items={pestTypes} onAdd={onAddPest} onRemove={onRemovePest} placeholder="Напр.: Муравьи" />
+        </SettingsSection>
+
+        <SettingsSection title="Категории расходов" subtitle={`${parents.length} категорий · для учёта в Финансах`} open={openSection === "expcats"} onToggle={() => toggle("expcats")}>
+          <div className="kd-muted" style={{ marginBottom: 10 }}>Категория → внутри неё подкатегории. Например: «Реклама» → OLX, Instagram, Google.</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <input value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="Новая категория (напр.: Аренда)" style={inputStyle} />
+            <button className="kd-btn primary sm" disabled={!newCat.trim()} onClick={() => { onAddExpCat(newCat, null); setNewCat(""); }}><Plus size={14} />Добавить</button>
+          </div>
+          {parents.length === 0 && <div className="kd-muted">Категорий пока нет.</div>}
+          {parents.map((cat) => (
+            <div key={cat.id} className="kd-catbox">
+              <div className="kd-card-head" style={{ marginBottom: 8 }}>
+                <div className="kd-pest" style={{ fontSize: 15 }}>{cat.name}</div>
+                <button className="kd-btn ghost danger sm" onClick={() => onRemoveExpCat(cat)}><Trash2 size={13} /></button>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
+                {subsOf(cat.id).length === 0 && <span className="kd-muted">Без подкатегорий</span>}
+                {subsOf(cat.id).map((sub) => (
+                  <span key={sub.id} className="kd-price" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                    {sub.name}
+                    <button onClick={() => onRemoveExpCat(sub)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", display: "flex" }}><X size={13} /></button>
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input value={subInputs[cat.id] || ""} onChange={(e) => setSubInputs({ ...subInputs, [cat.id]: e.target.value })} placeholder="Добавить подкатегорию" style={{ ...inputStyle, minHeight: 40, padding: "9px 12px" }} />
+                <button className="kd-btn ghost sm" disabled={!(subInputs[cat.id] || "").trim()} onClick={() => { onAddExpCat(subInputs[cat.id], cat.id); setSubInputs({ ...subInputs, [cat.id]: "" }); }}><Plus size={13} /></button>
+              </div>
+            </div>
+          ))}
+        </SettingsSection>
+
+        <SettingsSection title="Финансы" subtitle="Комиссия, гарантия, счета для авто-зачисления" open={openSection === "finance"} onToggle={() => toggle("finance")}>
+          <div className="kd-grid2">
+            <Field label="Комиссия банка по QR (%)"><input value={qrRate} onChange={(e) => setQrRate(e.target.value)} inputMode="decimal" onBlur={() => onSaveSetting("qr_fee_rate", Number(qrRate) || 0)} /></Field>
+            <Field label="Гарантия по умолчанию (мес.)"><input value={guarantee} onChange={(e) => setGuarantee(e.target.value)} inputMode="numeric" onBlur={() => onSaveSetting("default_guarantee_months", Number(guarantee) || 6)} /></Field>
+          </div>
+          {accounts.length > 0 && (
+            <div className="kd-grid2">
+              <Field label="Счёт для QR-оплат (Kaspi Pay)"><select value={settings.qr_account_id || ""} onChange={(e) => onSaveSetting("qr_account_id", e.target.value || null)}><option value="">— не выбран —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+              <Field label="Счёт для сдачи налички (Kaspi Gold)"><select value={settings.cash_account_id || ""} onChange={(e) => onSaveSetting("cash_account_id", e.target.value || null)}><option value="">— не выбран —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+            </div>
+          )}
+          <div className="kd-muted">QR-оплаты по заявкам автоматически приходят на выбранный счёт (минус комиссия). Сдача налички дезинфектором — на второй счёт, когда ты подтверждаешь поступление.</div>
+        </SettingsSection>
       </div>
-      {accounts.length > 0 && (
-        <div className="kd-grid2">
-          <Field label="Счёт для QR-оплат (Kaspi Pay)"><select value={settings.qr_account_id || ""} onChange={(e) => onSaveSetting("qr_account_id", e.target.value || null)}><option value="">— не выбран —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
-          <Field label="Счёт для сдачи налички (Kaspi Gold)"><select value={settings.cash_account_id || ""} onChange={(e) => onSaveSetting("cash_account_id", e.target.value || null)}><option value="">— не выбран —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
-        </div>
-      )}
-      <div className="kd-muted">QR-оплаты по заявкам автоматически приходят на выбранный счёт (минус комиссия). Сдача налички дезинфектором — на второй счёт, когда ты подтверждаешь поступление. Сохраняется при выходе из поля.</div>
     </ModalShell>
   );
 }
