@@ -156,6 +156,10 @@ body{
 .kd-setchevron{color:var(--muted);flex-shrink:0;transition:transform .18s ease;}
 .kd-setbody{padding:16px;border-top:1px solid var(--line);}
 .kd-catbox{background:var(--surface-sunk);border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:13px 15px;margin-bottom:10px;}
+.kd-orderrow{display:flex;align-items:center;gap:12px;padding:9px 11px;background:var(--surface-sunk);border:1px solid var(--line-soft);border-radius:var(--radius-sm);margin-bottom:7px;}
+.kd-ordernum{width:24px;height:24px;border-radius:50%;background:var(--surface);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--muted);flex-shrink:0;}
+.kd-ordername{flex:1;font-weight:700;font-size:14.5px;}
+.kd-orderbtns{display:flex;gap:6px;}
 .kd-tenderfin{display:flex;flex-wrap:wrap;gap:18px;padding:12px 0;margin:8px 0;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);}
 .kd-tenderfin>div{display:flex;flex-direction:column;gap:2px;}
 .kd-tenderfin strong{font-size:16px;}
