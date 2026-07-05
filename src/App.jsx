@@ -907,21 +907,30 @@ function Dashboard({ session, profile }) {
   const accountById = (id) => accounts.find((a) => a.id === id);
   const qrAccountId = settings.qr_account_id || null;
   const cashDepositAccountId = settings.cash_account_id || null;
-  // авто-доход QR и комиссия по всем выполненным заявкам (виртуально, не пишем в money_moves)
-  const qrAutoIncome = jobs.filter((j) => j.status === "done").reduce((s, j) => s + (Number(j.report_qr) || 0), 0);
-  const qrAutoFee = jobs.filter((j) => j.status === "done").reduce((s, j) => s + (Number(j.report_qr) || 0) * qrFeeRate, 0);
+  // авто-доход QR по выполненным заявкам ПОСЛЕ даты начального остатка QR-счёта (иначе задвоение)
+  const qrAcc = qrAccountId ? accountById(qrAccountId) : null;
+  const qrOpeningDate = qrAcc?.opening_date || null;
+  const qrJobsForAuto = jobs.filter((j) => {
+    if (j.status !== "done" || !(Number(j.report_qr) > 0)) return false;
+    if (!qrOpeningDate) return true;
+    return (j.scheduled_date || "") >= qrOpeningDate;
+  });
+  const qrAutoIncome = qrJobsForAuto.reduce((s, j) => s + (Number(j.report_qr) || 0), 0);
+  const qrAutoFee = qrJobsForAuto.reduce((s, j) => s + (Number(j.report_qr) || 0) * qrFeeRate, 0);
   const accountBalance = (accId) => {
-    let bal = moves.reduce((s, m) => {
-      let d = 0;
-      if (m.direction === "income" && m.account_id === accId) d += Number(m.amount) || 0;
-      if (m.direction === "expense" && m.account_id === accId) d -= Number(m.amount) || 0;
+    const acc = accountById(accId);
+    const openDate = acc?.opening_date || null;
+    // движения считаем начиная с даты начального остатка (или все, если дата не задана)
+    const afterOpen = (d) => !openDate || (d || "") >= openDate;
+    let bal = Number(acc?.opening_balance) || 0;
+    moves.forEach((m) => {
+      if (m.direction === "income" && m.account_id === accId && afterOpen(m.move_date)) bal += Number(m.amount) || 0;
+      if (m.direction === "expense" && m.account_id === accId && afterOpen(m.move_date)) bal -= Number(m.amount) || 0;
       if (m.direction === "transfer") {
-        if (m.account_id === accId) d -= Number(m.amount) || 0;
-        if (m.to_account_id === accId) d += Number(m.amount) || 0;
+        if (m.account_id === accId && afterOpen(m.move_date)) bal -= Number(m.amount) || 0;
+        if (m.to_account_id === accId && afterOpen(m.move_date)) bal += Number(m.amount) || 0;
       }
-      return s + d;
-    }, 0);
-    // на QR-счёт автоматически приходят QR-оплаты минус комиссия банка
+    });
     if (accId && accId === qrAccountId) bal += qrAutoIncome - qrAutoFee;
     return bal;
   };
@@ -1411,8 +1420,11 @@ function Dashboard({ session, profile }) {
                     <button onClick={() => setModal({ kind: "account", item: a })} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", display: "flex" }}><Pencil size={13} /></button>
                   </div>
                   <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20, color: accountBalance(a.id) < 0 ? "#B3261E" : "var(--ink)" }}>{fmt(accountBalance(a.id))} ₸</div>
-                  {a.id === qrAccountId && <span className="kd-srctag" style={{ marginTop: 6, display: "inline-block" }}>сюда падают QR</span>}
-                  {a.id === cashDepositAccountId && <span className="kd-brandtag" style={{ marginTop: 6, display: "inline-block" }}>сдача налички</span>}
+                  {(Number(a.opening_balance) > 0 || a.opening_date) && <div className="kd-muted" style={{ fontSize: 12, marginTop: 3 }}>старт: {fmt(Number(a.opening_balance) || 0)} ₸{a.opening_date ? ` с ${isoToRu(a.opening_date)}` : ""}</div>}
+                  <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {a.id === qrAccountId && <span className="kd-srctag">сюда падают QR</span>}
+                    {a.id === cashDepositAccountId && <span className="kd-brandtag">сдача налички</span>}
+                  </div>
                 </div>
               ))}
             </div>
@@ -2725,9 +2737,11 @@ function MoveModal({ move, accounts, expCats, onClose, onSave }) {
 function AccountModal({ item, onClose, onSave, onRemove }) {
   const [name, setName] = useState(item?.name || "");
   const [kind, setKind] = useState(item?.kind || "bank");
+  const [openingBalance, setOpeningBalance] = useState(item?.opening_balance ?? "");
+  const [openingDate, setOpeningDate] = useState(item?.opening_date || new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const ok = name.trim();
-  async function save() { setSaving(true); await onSave({ name: name.trim(), kind }, item); setSaving(false); }
+  async function save() { setSaving(true); await onSave({ name: name.trim(), kind, opening_balance: Number(openingBalance) || 0, opening_date: openingDate || null }, item); setSaving(false); }
   return (
     <ModalShell title={item ? "Счёт" : "Новый счёт"} onClose={onClose} footer={<>
       {item && <button className="kd-btn ghost danger" onClick={() => onRemove(item)} style={{ marginRight: "auto" }}>Удалить</button>}
@@ -2736,6 +2750,11 @@ function AccountModal({ item, onClose, onSave, onRemove }) {
     </>}>
       <Field label="Название счёта"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Напр.: Halyk Bank" /></Field>
       <Field label="Тип"><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="bank">Банковский счёт</option><option value="cash">Наличные</option><option value="other">Другое</option></select></Field>
+      <div className="kd-hint">Начальный остаток — сколько реально лежит на счёте на указанную дату. С неё система начнёт считать. Так баланс в приложении сойдётся с банком.</div>
+      <div className="kd-grid2">
+        <Field label="Начальный остаток (₸)"><input value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
+        <Field label="На дату"><input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} /></Field>
+      </div>
     </ModalShell>
   );
 }
