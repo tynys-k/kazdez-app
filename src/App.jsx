@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -41,8 +41,15 @@ const TASK_TYPES = { errand: "Поручение", purchase: "Закупка", d
 const TASK_STATUS = { new: { label: "Новая", color: "#2563EB", bg: "#EAF1FE" }, in_progress: { label: "В работе", color: "#B4650B", bg: "#FBEDD9" }, done: { label: "Сделана", color: "#0E7C66", bg: "#E4F3EE" } };
 const TENDER_STATUS = { participating: { label: "Участвуем", color: "#2563EB", bg: "#EAF1FE" }, won: { label: "Выиграли", color: "#0E7C66", bg: "#E4F3EE" }, executing: { label: "Исполняется", color: "#B4650B", bg: "#FBEDD9" }, closed: { label: "Закрыт", color: "#6E7871", bg: "#F0F0EE" }, lost: { label: "Проигран", color: "#B3261E", bg: "#FBE7E5" } };
 const GUARANTEE_KINDS = { application: "Обеспечение заявки", dumping: "Демпинговое обеспечение", other: "Другое" };
-const TAB_LABELS = { jobs: "Заявки", done: "Выполненные", canceled: "Отменённые", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", journal: "Журнал", trash: "Корзина" };
-const ADMIN_TAB_ORDER = ["jobs", "done", "canceled", "tasks", "tenders", "repeats", "finance", "opex", "cash", "stock", "team", "partners", "docs", "journal", "trash"];
+const DRIVE_LINKS = [
+  { key: "drive_tenders", label: "Тендеры", desc: "Документы по тендерам", emoji: "📁" },
+  { key: "drive_contracts", label: "Договоры", desc: "Договоры и приложения", emoji: "📄" },
+  { key: "drive_marketing", label: "Маркетинг", desc: "Реклама, баннеры, макеты", emoji: "📣" },
+  { key: "drive_safety", label: "Техника безопасности", desc: "Инструкции по ТБ", emoji: "🦺" },
+  { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓" },
+];
+const TAB_LABELS = { jobs: "Заявки", done: "Выполненные", canceled: "Отменённые", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", journal: "Журнал", trash: "Корзина" };
+const ADMIN_TAB_ORDER = ["jobs", "done", "canceled", "tasks", "tenders", "repeats", "finance", "opex", "cash", "stock", "team", "partners", "docs", "materials", "journal", "trash"];
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -1095,6 +1102,7 @@ function Dashboard({ session, profile }) {
     { id: "team", icon: Users, label: "Дезинфекторы" },
     { id: "partners", icon: Handshake, label: "Партнёры" },
     { id: "docs", icon: FileText, label: "Документы" },
+    { id: "materials", icon: FolderOpen, label: "Материалы" },
     { id: "journal", icon: History, label: "Журнал" },
     { id: "trash", icon: Trash2, label: `Корзина${trash.length ? " · " + trash.length : ""}` },
   ] : [
@@ -1102,6 +1110,7 @@ function Dashboard({ session, profile }) {
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `${canManageTasks ? "Задачи" : "Мои задачи"}${(canManageTasks ? allOpenTasks : myOpenTasks) ? " · " + (canManageTasks ? allOpenTasks : myOpenTasks) : ""}` },
     { id: "cash", icon: Banknote, label: "Касса" },
+    { id: "materials", icon: FolderOpen, label: "Материалы" },
     { id: "myequip", icon: Wrench, label: "Моё оборудование" },
   ];
   // применяем сохранённый общий порядок (админ задаёт в Настройках). Новые вкладки — в конец.
@@ -1339,7 +1348,10 @@ function Dashboard({ session, profile }) {
           <div className="kd-list">
             <div className="kd-tabbar" style={{ marginBottom: 4 }}>
               <div className="kd-title" style={{ fontSize: 18 }}>Тендеры</div>
-              <button className="kd-btn primary" onClick={() => setModal({ kind: "tender" })}><Plus size={15} />Новый тендер</button>
+              <div className="kd-tabactions">
+                {settings.drive_tenders && <a className="kd-btn ghost" href={settings.drive_tenders} target="_blank" rel="noopener noreferrer"><FolderOpen size={15} />Папка на Диске</a>}
+                <button className="kd-btn primary" onClick={() => setModal({ kind: "tender" })}><Plus size={15} />Новый тендер</button>
+              </div>
             </div>
             {tenderOverdue > 0 && <div className="kd-hint" style={{ background: "#FBE7E5", borderColor: "#F1C4BF", color: "#B3261E" }}>⚠ Есть просроченные обработки ({tenderOverdue}). Просрочка грозит штрафом и блокировкой участия — проверь график ниже.</div>}
             {tenders.length === 0 && <div className="kd-empty">Тендеров пока нет. Добавь первый через «Новый тендер».</div>}
@@ -1868,6 +1880,28 @@ function Dashboard({ session, profile }) {
                     </div>
                   )}
                 </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!loading && tab === "materials" && (
+          <div className="kd-list">
+            <div className="kd-title" style={{ fontSize: 18, marginBottom: 4 }}>Материалы компании</div>
+            <div className="kd-muted" style={{ marginBottom: 8 }}>Ссылки на общие папки Google Диск.{isAdmin ? " Изменить ссылки можно в Настройках → «Ссылки на Google Диск»." : ""}</div>
+            {DRIVE_LINKS.filter((l) => l.key !== "drive_tenders").map((l) => {
+              const url = settings[l.key];
+              return (
+                <a key={l.key} href={url || undefined} target="_blank" rel="noopener noreferrer"
+                  className={`kd-drivecard ${url ? "" : "disabled"}`}
+                  onClick={(e) => { if (!url) e.preventDefault(); }}>
+                  <div className="kd-driveemoji">{l.emoji}</div>
+                  <div style={{ flex: 1 }}>
+                    <div className="kd-drivename">{l.label}</div>
+                    <div className="kd-drivedesc">{url ? l.desc : "Ссылка не задана" + (isAdmin ? " — добавь в Настройках" : "")}</div>
+                  </div>
+                  {url && <ExternalLink size={18} className="kd-driveicon" />}
+                </a>
               );
             })}
           </div>
@@ -2830,6 +2864,18 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
               </div>
             </div>
           ))}
+        </SettingsSection>
+
+        <SettingsSection title="Ссылки на Google Диск" subtitle="Тендеры, договоры, маркетинг, ТБ, обучение" open={openSection === "drivelinks"} onToggle={() => toggle("drivelinks")}>
+          <div className="kd-muted" style={{ marginBottom: 12 }}>Вставь ссылку на папку Google Диск для каждого раздела. Пустые не показываются сотрудникам. Тендерная ссылка появится кнопкой во вкладке «Тендеры», остальные — во вкладке «Материалы».</div>
+          {DRIVE_LINKS.map((l) => (
+            <div key={l.key} className="kd-field">
+              <span>{l.emoji} {l.label}</span>
+              <input defaultValue={settings[l.key] || ""} placeholder="https://drive.google.com/..."
+                onBlur={(e) => { const v = e.target.value.trim(); if (v !== (settings[l.key] || "")) onSaveSetting(l.key, v || null); }} />
+            </div>
+          ))}
+          <div className="kd-muted">Сохраняется при выходе из поля.</div>
         </SettingsSection>
 
         <SettingsSection title="Источники клиентов" subtitle={`${sources.length} шт. · откуда пришёл клиент`} open={openSection === "sources"} onToggle={() => toggle("sources")}>
