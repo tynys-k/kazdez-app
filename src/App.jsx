@@ -230,6 +230,7 @@ function Dashboard({ session, profile }) {
   const [tenders, setTenders] = useState([]);
   const [tenderGuarantees, setTenderGuarantees] = useState([]);
   const [tenderServices, setTenderServices] = useState([]);
+  const [guaranteeReturns, setGuaranteeReturns] = useState([]);
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [audit, setAudit] = useState([]);
@@ -256,7 +257,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -281,6 +282,7 @@ function Dashboard({ session, profile }) {
       supabase.from("tenders").select("*").order("created_at", { ascending: false }),
       supabase.from("tender_guarantees").select("*"),
       supabase.from("tender_services").select("*").order("seq"),
+      supabase.from("guarantee_returns").select("*").order("return_date", { ascending: false }),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -309,6 +311,7 @@ function Dashboard({ session, profile }) {
     setTenders(tndr.data || []);
     setTenderGuarantees(tgr.data || []);
     setTenderServices(tsr.data || []);
+    setGuaranteeReturns(grr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -702,16 +705,47 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Сохранено"); load();
   }
   async function removeGuarantee(g) {
+    // удаляем связанные движения по счетам (внесение + возвраты этого обеспечения)
+    const retIds = guaranteeReturns.filter((r) => r.guarantee_id === g.id).map((r) => r.id);
+    await supabase.from("money_moves").delete().eq("source", "tender_pledge").eq("ref_id", g.id);
+    if (retIds.length) await supabase.from("money_moves").delete().eq("source", "tender_return").in("ref_id", retIds);
     await supabase.from("tender_guarantees").delete().eq("id", g.id);
-    await logAction("Тендеры", `Обеспечение удалено`);
-    load();
+    await logAction("Тендеры", `Обеспечение удалено: ${fmt(g.amount)} ₸`);
+    showToast("Удалено"); load();
   }
-  async function toggleGuaranteeFlag(g, field, val) {
-    const patch = { [field]: val };
-    if (field === "paid" && val && !g.paid_date) patch.paid_date = new Date().toISOString().slice(0, 10);
-    if (field === "returned" && val && !g.return_date) patch.return_date = new Date().toISOString().slice(0, 10);
-    await supabase.from("tender_guarantees").update(patch).eq("id", g.id);
-    load();
+  // Отметить обеспечение внесённым: списание с указанного счёта (замороженные деньги)
+  async function markGuaranteePaid(g, accountId, paidDate) {
+    await supabase.from("tender_guarantees").update({ paid: true, account_id: accountId || null, paid_date: paidDate || new Date().toISOString().slice(0, 10) }).eq("id", g.id);
+    if (accountId) {
+      const exists = moves.some((m) => m.source === "tender_pledge" && m.ref_id === g.id);
+      if (!exists) {
+        await supabase.from("money_moves").insert({
+          account_id: accountId, direction: "expense", amount: g.amount, move_date: paidDate || new Date().toISOString().slice(0, 10),
+          note: `Обеспечение (залог) по тендеру`, source: "tender_pledge", ref_id: g.id, created_by: session.user.id,
+        });
+      }
+    }
+    await logAction("Тендеры", `Внесено обеспечение ${fmt(g.amount)} ₸${accountId ? " со счёта " + (accountById(accountId)?.name || "") : ""}`);
+    setModal(null); showToast("Отмечено как внесённое"); load();
+  }
+  // Добавить частичный возврат: приход на указанный счёт
+  async function addGuaranteeReturn(g, amount, retDate, accountId, note) {
+    const { data, error } = await supabase.from("guarantee_returns").insert({ guarantee_id: g.id, amount: Number(amount) || 0, return_date: retDate || null, account_id: accountId || null, note: note || null, created_by: session.user.id }).select().single();
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    if (accountId) {
+      await supabase.from("money_moves").insert({
+        account_id: accountId, direction: "income", amount: Number(amount) || 0, move_date: retDate || new Date().toISOString().slice(0, 10),
+        note: `Возврат обеспечения по тендеру`, source: "tender_return", ref_id: data.id, created_by: session.user.id,
+      });
+    }
+    await logAction("Тендеры", `Возврат обеспечения ${fmt(amount)} ₸${accountId ? " на счёт " + (accountById(accountId)?.name || "") : ""}`);
+    setModal(null); showToast("Возврат добавлен"); load();
+  }
+  async function removeGuaranteeReturn(r) {
+    await supabase.from("money_moves").delete().eq("source", "tender_return").eq("ref_id", r.id);
+    await supabase.from("guarantee_returns").delete().eq("id", r.id);
+    await logAction("Тендеры", `Возврат удалён: ${fmt(r.amount)} ₸`);
+    showToast("Удалено"); load();
   }
   async function setServiceDone(s, done) {
     await supabase.from("tender_services").update({ done, done_date: done ? new Date().toISOString().slice(0, 10) : null }).eq("id", s.id);
@@ -936,7 +970,7 @@ function Dashboard({ session, profile }) {
       })));
 
       await addSheet("Тендеры", [
-        { header: "Номер договора", key: "no", width: 18 }, { header: "Название", key: "title", width: 24 }, { header: "Адрес", key: "address", width: 28 },
+        { header: "Номер договора", key: "no", width: 18 }, { header: "Заказчик", key: "customer", width: 22 }, { header: "Название", key: "title", width: 24 }, { header: "Адрес", key: "address", width: 28 },
         { header: "Сумма договора", key: "amount", width: 16, money: true }, { header: "Наша доля %", key: "pct", width: 12 }, { header: "Наша доля ₸", key: "ourAmt", width: 16, money: true },
         { header: "Партнёр", key: "partner", width: 18 }, { header: "Статус", key: "status", width: 14 },
         { header: "Обработок сделано", key: "svcDone", width: 16 }, { header: "Заморожено в залогах", key: "frozen", width: 18, money: true },
@@ -945,7 +979,7 @@ function Dashboard({ session, profile }) {
         const gtees = tenderGuarantees.filter((g) => g.tender_id === t.id);
         const frozen = gtees.filter((g) => g.paid && !g.returned).reduce((s, g) => s + (Number(g.amount) || 0), 0);
         return {
-          no: t.contract_no || "", title: t.title || "", address: t.address || "", amount: t.amount, pct: t.our_share_pct,
+          no: t.contract_no || "", customer: t.customer || "", title: t.title || "", address: t.address || "", amount: t.amount, pct: t.our_share_pct,
           ourAmt: Math.round((Number(t.amount) || 0) * (Number(t.our_share_pct) || 0) / 100),
           partner: partnerById(t.partner_id)?.name || "", status: (TENDER_STATUS[t.status] || {}).label || t.status,
           svcDone: `${svcs.filter((s) => s.done).length}/${svcs.length}`, frozen,
@@ -1377,7 +1411,10 @@ function Dashboard({ session, profile }) {
               const svcs = servicesOf(t.id);
               const gtees = guaranteesOf(t.id);
               const doneCount = svcs.filter((s) => s.done).length;
-              const frozen = gtees.filter((g) => g.paid && !g.returned).reduce((s, g) => s + (Number(g.amount) || 0), 0);
+              const returnsOfG = (gid) => guaranteeReturns.filter((r) => r.guarantee_id === gid);
+              const returnedSum = (gid) => returnsOfG(gid).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+              // заморожено = внесённые обеспечения минус уже возвращённое
+              const frozen = gtees.filter((g) => g.paid).reduce((s, g) => s + Math.max(0, (Number(g.amount) || 0) - returnedSum(g.id)), 0);
               return (
                 <div key={t.id} className="kd-card">
                   <div className="kd-card-head">
@@ -1385,6 +1422,7 @@ function Dashboard({ session, profile }) {
                     <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
                   </div>
                   <div className="kd-meta">
+                    {t.customer && <span>🏢 {t.customer}</span>}
                     {t.title && t.contract_no && <span>{t.title}</span>}
                     {t.partner_id && <span>🤝 {partnerById(t.partner_id)?.name || "?"}</span>}
                     {(t.start_date || t.end_date) && <span><Calendar size={12} style={{ verticalAlign: -2, marginRight: 3 }} />{isoToRu(t.start_date) || "?"} — {isoToRu(t.end_date) || "?"}</span>}
@@ -1401,22 +1439,41 @@ function Dashboard({ session, profile }) {
                   <div className="kd-tsub">
                     <div className="kd-tsubhead"><ShieldCheck size={14} /> Обеспечения (залоги)</div>
                     {gtees.length === 0 && <span className="kd-muted">Не добавлены</span>}
-                    {gtees.map((g) => (
-                      <div key={g.id} className="kd-guarantee">
-                        <div>
-                          <div style={{ fontWeight: 700 }}>{GUARANTEE_KINDS[g.kind] || g.kind} · {fmt(g.amount)} ₸</div>
-                          <div className="kd-muted" style={{ fontSize: 12 }}>
-                            {g.paid ? `внесено ${isoToRu(g.paid_date) || ""}` : "не внесено"}
-                            {g.returned ? ` · возвращено ${isoToRu(g.return_date) || ""}` : g.paid ? " · ждём возврата" : ""}
+                    {gtees.map((g) => {
+                      const rets = returnsOfG(g.id);
+                      const retSum = returnedSum(g.id);
+                      const remaining = Math.max(0, (Number(g.amount) || 0) - retSum);
+                      return (
+                        <div key={g.id} className="kd-guaranteebox">
+                          <div className="kd-guarantee">
+                            <div>
+                              <div style={{ fontWeight: 700 }}>{GUARANTEE_KINDS[g.kind] || g.kind} · {fmt(g.amount)} ₸</div>
+                              <div className="kd-muted" style={{ fontSize: 12 }}>
+                                {g.paid ? `внесено ${isoToRu(g.paid_date) || ""}${g.account_id ? " · " + (accountById(g.account_id)?.name || "") : ""}` : "не внесено"}
+                                {g.paid && retSum > 0 && ` · возвращено ${fmt(retSum)} ₸`}
+                                {g.paid && remaining > 0 && ` · заморожено ${fmt(remaining)} ₸`}
+                                {g.paid && remaining === 0 && retSum > 0 && " · возвращено полностью ✓"}
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              {!g.paid && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "payGuarantee", g })}>Внести</button>}
+                              {g.paid && remaining > 0 && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "returnGuarantee", g, remaining })}>Возврат</button>}
+                              <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить обеспечение «${GUARANTEE_KINDS[g.kind] || g.kind}» на ${fmt(g.amount)} ₸? Связанные движения по счетам тоже удалятся.`, () => removeGuarantee(g))}><X size={13} /></button>
+                            </div>
                           </div>
+                          {rets.length > 0 && (
+                            <div className="kd-returns">
+                              {rets.map((r) => (
+                                <div key={r.id} className="kd-returnrow">
+                                  <span>↩ {fmt(r.amount)} ₸ · {isoToRu(r.return_date) || "без даты"}{r.account_id ? " · " + (accountById(r.account_id)?.name || "") : ""}</span>
+                                  <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить запись возврата ${fmt(r.amount)} ₸?`, () => removeGuaranteeReturn(r))}><X size={12} /></button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          {!g.paid && <button className="kd-btn ghost sm" onClick={() => toggleGuaranteeFlag(g, "paid", true)}>Внёс</button>}
-                          {g.paid && !g.returned && <button className="kd-btn ghost sm" onClick={() => toggleGuaranteeFlag(g, "returned", true)}>Вернули</button>}
-                          <button className="kd-btn ghost danger sm" onClick={() => removeGuarantee(g)}><X size={13} /></button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     <button className="kd-btn ghost sm" style={{ marginTop: 8 }} onClick={() => setModal({ kind: "guarantee", tenderId: t.id })}><Plus size={13} />Обеспечение</button>
                   </div>
 
@@ -1435,8 +1492,8 @@ function Dashboard({ session, profile }) {
                             {s.done && <span className="kd-muted" style={{ marginLeft: 8 }}>✓ {isoToRu(s.done_date) || ""}</span>}
                           </div>
                           <div style={{ display: "flex", gap: 6 }}>
-                            <button className={`kd-btn sm ${s.done ? "ghost" : "primary"}`} onClick={() => setServiceDone(s, !s.done)}>{s.done ? "Отменить" : "Сделано"}</button>
-                            <button className="kd-btn ghost danger sm" onClick={() => removeService(s)}><X size={13} /></button>
+                            <button className={`kd-btn sm ${s.done ? "ghost" : "primary"}`} onClick={() => { if (s.done) askConfirm(`Снять отметку выполнения с обработки №${s.seq}?`, () => setServiceDone(s, false), { danger: false, confirmLabel: "Да, снять" }); else setServiceDone(s, true); }}>{s.done ? "Отменить" : "Сделано"}</button>
+                            <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить обработку №${s.seq} из графика?`, () => removeService(s))}><X size={13} /></button>
                           </div>
                         </div>
                       );
@@ -2040,6 +2097,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
+      {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
+      {modal?.kind === "returnGuarantee" && <ReturnGuaranteeModal g={modal.g} remaining={modal.remaining} accounts={accounts} onClose={() => setModal(null)} onConfirm={(amount, date, accId, note) => addGuaranteeReturn(modal.g, amount, date, accId, note)} />}
       {modal?.kind === "rejectDeposit" && <RejectDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} onClose={() => setModal(null)} onSave={(adminNote) => { decideDeposit(modal.dep, "rejected", adminNote); setModal(null); }} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
@@ -3140,6 +3199,7 @@ function TaskModal({ task, people, onClose, onSave }) {
 
 function TenderModal({ tender, partners, onClose, onSave }) {
   const [contractNo, setContractNo] = useState(tender?.contract_no || "");
+  const [customer, setCustomer] = useState(tender?.customer || "");
   const [title, setTitle] = useState(tender?.title || "");
   const [address, setAddress] = useState(tender?.address || "");
   const [amount, setAmount] = useState(tender?.amount ?? "");
@@ -3172,7 +3232,7 @@ function TenderModal({ tender, partners, onClose, onSave }) {
 
   async function save() {
     setSaving(true);
-    const payload = { contract_no: contractNo.trim() || null, title: title.trim() || null, address: address.trim() || null, amount: Number(amount) || 0, our_share_pct: Number(ourShare) || 0, partner_id: partnerId || null, status, start_date: startDate || null, end_date: endDate || null, note: note.trim() || null };
+    const payload = { contract_no: contractNo.trim() || null, customer: customer.trim() || null, title: title.trim() || null, address: address.trim() || null, amount: Number(amount) || 0, our_share_pct: Number(ourShare) || 0, partner_id: partnerId || null, status, start_date: startDate || null, end_date: endDate || null, note: note.trim() || null };
     await onSave(payload, tender ? null : buildServices(), tender);
     setSaving(false);
   }
@@ -3185,6 +3245,7 @@ function TenderModal({ tender, partners, onClose, onSave }) {
         <Field label="Номер договора"><input value={contractNo} onChange={(e) => setContractNo(e.target.value)} placeholder="№ 123-45" /></Field>
         <Field label="Статус"><select value={status} onChange={(e) => setStatus(e.target.value)}>{Object.entries(TENDER_STATUS).map(([code, s]) => <option key={code} value={code}>{s.label}</option>)}</select></Field>
       </div>
+      <Field label="Заказчик"><input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Напр.: ГУ «Управление ...»" /></Field>
       <Field label="Название / предмет"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Дезинфекция объекта ..." /></Field>
       <Field label="Адрес объекта"><input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="г. Алматы, ..." /></Field>
       <div className="kd-grid2">
@@ -3226,6 +3287,51 @@ function GuaranteeModal({ tenderId, onClose, onSave }) {
       <Field label="Тип обеспечения"><select value={kind} onChange={(e) => setKind(e.target.value)}>{Object.entries(GUARANTEE_KINDS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></Field>
       <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="50000" /></Field>
       <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="реквизиты / условия возврата" /></Field>
+    </ModalShell>
+  );
+}
+
+function PayGuaranteeModal({ g, accounts, onClose, onConfirm }) {
+  const [accId, setAccId] = useState(accounts[0]?.id || "");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  async function save() { setSaving(true); await onConfirm(accId || null, date || null); setSaving(false); }
+  return (
+    <ModalShell title="Внести обеспечение" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Да, внести"}</button>
+    </>}>
+      <div className="kd-paytotal"><span>{GUARANTEE_KINDS[g.kind] || g.kind}</span><strong>{fmt(g.amount)} ₸</strong></div>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Деньги спишутся с выбранного счёта как замороженный залог (уменьшат его остаток в «Финансах»).</div>
+      <Field label="С какого счёта внесено"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— не привязывать к счёту —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      <Field label="Дата внесения"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+    </ModalShell>
+  );
+}
+
+function ReturnGuaranteeModal({ g, remaining, accounts, onClose, onConfirm }) {
+  const [amount, setAmount] = useState(String(remaining || ""));
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [accId, setAccId] = useState(g.account_id || accounts[0]?.id || "");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const val = Number(amount) || 0;
+  const ok = val > 0 && val <= remaining;
+  async function save() { setSaving(true); await onConfirm(val, date || null, accId || null, note.trim() || null); setSaving(false); }
+  return (
+    <ModalShell title="Возврат обеспечения" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Да, добавить возврат"}</button>
+    </>}>
+      <div className="kd-paytotal"><span>Осталось вернуть</span><strong style={{ color: "#B4650B" }}>{fmt(remaining)} ₸</strong></div>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Государство возвращает частями — добавляй каждый возврат отдельно. Деньги придут на выбранный счёт (увеличат его остаток).</div>
+      <div className="kd-grid2">
+        <Field label={`Сумма возврата (макс ${fmt(remaining)})`}><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="25000" /></Field>
+        <Field label="Дата возврата"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      </div>
+      {val > remaining && <div className="kd-err" style={{ marginTop: -6 }}>Нельзя вернуть больше, чем заморожено.</div>}
+      <Field label="На какой счёт вернулось"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— не привязывать к счёту —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      <Field label="Примечание (необязательно)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="напр.: после 1-й обработки" /></Field>
     </ModalShell>
   );
 }
