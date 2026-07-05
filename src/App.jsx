@@ -67,6 +67,33 @@ function parseIso(iso) {
   if (!y || !m || !d) return null;
   const dt = new Date(y, m - 1, d); dt.setHours(0, 0, 0, 0); return dt;
 }
+const isoOf = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+// Возвращает {from, to} (ISO-строки включительно) для пресета, или null (=всё время)
+function datePresetRange(preset) {
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const iso = (d) => isoOf(d);
+  const shift = (base, days) => { const d = new Date(base); d.setDate(d.getDate() + days); return d; };
+  switch (preset) {
+    case "today": return { from: iso(now), to: iso(now) };
+    case "tomorrow": { const d = shift(now, 1); return { from: iso(d), to: iso(d) }; }
+    case "yesterday": { const d = shift(now, -1); return { from: iso(d), to: iso(d) }; }
+    case "week": { const day = (now.getDay() + 6) % 7; const mon = shift(now, -day); const sun = shift(mon, 6); return { from: iso(mon), to: iso(sun) }; }
+    case "month": { const f = new Date(now.getFullYear(), now.getMonth(), 1); const t = new Date(now.getFullYear(), now.getMonth() + 1, 0); return { from: iso(f), to: iso(t) }; }
+    case "quarter": { const q = Math.floor(now.getMonth() / 3); const f = new Date(now.getFullYear(), q * 3, 1); const t = new Date(now.getFullYear(), q * 3 + 3, 0); return { from: iso(f), to: iso(t) }; }
+    default: return null;
+  }
+}
+// filter = { preset, from, to } — проверяет ISO-дату заявки
+function dateInFilter(dateIso, filter) {
+  if (!filter || filter.preset === "all") return true;
+  if (!dateIso) return false;
+  let from, to;
+  if (filter.preset === "custom") { from = filter.from || null; to = filter.to || filter.from || null; }
+  else { const r = datePresetRange(filter.preset); if (!r) return true; from = r.from; to = r.to; }
+  if (from && dateIso < from) return false;
+  if (to && dateIso > to) return false;
+  return true;
+}
 function periodRange(mode, offset) {
   if (mode === "all") return { start: -Infinity, end: Infinity, label: "Всё время" };
   const now = new Date(); now.setHours(0, 0, 0, 0);
@@ -123,6 +150,34 @@ function AddressText({ text }) {
       <a href={url} target="_blank" rel="noopener noreferrer" className="kd-maplink" onClick={(e) => e.stopPropagation()}>📍 Открыть на карте</a>
       {after && <span> {after}</span>}
     </>
+  );
+}
+function DateFilterBar({ filter, onChange }) {
+  const [showCustom, setShowCustom] = useState(filter.preset === "custom");
+  const presets = [
+    { id: "all", label: "Всё" }, { id: "today", label: "Сегодня" }, { id: "tomorrow", label: "Завтра" },
+    { id: "yesterday", label: "Вчера" }, { id: "week", label: "Неделя" }, { id: "month", label: "Месяц" }, { id: "quarter", label: "Квартал" },
+  ];
+  function pick(id) { setShowCustom(false); onChange({ preset: id }); }
+  return (
+    <div className="kd-datefilter">
+      <div className="kd-datechips">
+        {presets.map((p) => (
+          <button key={p.id} className={`kd-datechip ${filter.preset === p.id ? "on" : ""}`} onClick={() => pick(p.id)}>{p.label}</button>
+        ))}
+        <button className={`kd-datechip ${filter.preset === "custom" ? "on" : ""}`} onClick={() => { setShowCustom((v) => !v); if (filter.preset !== "custom") onChange({ preset: "custom", from: "", to: "" }); }}>
+          <Calendar size={13} style={{ verticalAlign: -2, marginRight: 3 }} />Дата
+        </button>
+      </div>
+      {(showCustom || filter.preset === "custom") && (
+        <div className="kd-daterange">
+          <input type="date" value={filter.from || ""} onChange={(e) => onChange({ preset: "custom", from: e.target.value, to: filter.to || "" })} />
+          <span className="kd-muted">—</span>
+          <input type="date" value={filter.to || ""} onChange={(e) => onChange({ preset: "custom", from: filter.from || "", to: e.target.value })} />
+          <span className="kd-muted" style={{ fontSize: 12 }}>оставь второе пустым — один день</span>
+        </div>
+      )}
+    </div>
   );
 }
 function DriveLinkCard({ link, url, isAdmin }) {
@@ -233,6 +288,9 @@ function Dashboard({ session, profile }) {
   const [guaranteeReturns, setGuaranteeReturns] = useState([]);
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
+  const [jobsDateFilter, setJobsDateFilter] = useState({ preset: "all" });
+  const [doneDateFilter, setDoneDateFilter] = useState({ preset: "all" });
+  const [canceledDateFilter, setCanceledDateFilter] = useState({ preset: "all" });
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1105,16 +1163,17 @@ function Dashboard({ session, profile }) {
     return norm(j.address).includes(q) || norm(j.pest).includes(q) || norm(j.client_phone).includes(q);
   }
   const statusMatched = statusFilter === "all" ? activeJobs : activeJobs.filter((j) => j.status === statusFilter);
-  const filteredActive = statusMatched.filter(matchSearch);
+  const filteredActive = statusMatched.filter(matchSearch).filter((j) => dateInFilter(j.scheduled_date, jobsDateFilter));
   const sorted = [...filteredActive].sort((a, b) => jobTime(a) - jobTime(b));
   const groups = groupByDate(sorted);
-  const doneFiltered = doneJobs.filter(matchSearch);
+  const doneFiltered = doneJobs.filter(matchSearch).filter((j) => dateInFilter(j.scheduled_date, doneDateFilter));
   const doneSorted = [...doneFiltered].sort((a, b) => {
     const da = new Date(a.scheduled_date || a.reported_at || 0).getTime();
     const db = new Date(b.scheduled_date || b.reported_at || 0).getTime();
     return doneSortDir === "desc" ? db - da : da - db;
   });
   const doneGroups = groupByDate(doneSorted);
+  const canceledFiltered = canceledJobs.filter((j) => dateInFilter(j.scheduled_date, canceledDateFilter));
   const myOpenTasks = tasks.filter((t) => t.assignee_id === session.user.id && t.status !== "done").length;
   const allOpenTasks = tasks.filter((t) => t.status !== "done").length;
   const todayIsoT = new Date().toISOString().slice(0, 10);
@@ -1228,6 +1287,7 @@ function Dashboard({ session, profile }) {
                 ))}
               </div>
             )}
+            <DateFilterBar filter={jobsDateFilter} onChange={setJobsDateFilter} />
             {filteredActive.length === 0 ? <div className="kd-empty">{activeJobs.length === 0 ? "Активных заявок нет — все выполнены. Загляни во вкладку «Выполненные»." : "По этому фильтру ничего не найдено."}</div> :
               groups.map((g) => (
                 <div key={g.key} className="kd-group">
@@ -1261,6 +1321,7 @@ function Dashboard({ session, profile }) {
               <button className={`kd-segbtn ${doneSortDir === "desc" ? "on" : ""}`} onClick={() => setDoneSortDir("desc")}>Сначала новые</button>
               <button className={`kd-segbtn ${doneSortDir === "asc" ? "on" : ""}`} onClick={() => setDoneSortDir("asc")}>Сначала старые</button>
             </div>
+            <DateFilterBar filter={doneDateFilter} onChange={setDoneDateFilter} />
             {doneFiltered.length === 0 ? <div className="kd-empty">{doneJobs.length === 0 ? "Выполненных заявок пока нет." : "По этому поиску ничего не найдено."}</div> :
               doneGroups.map((g) => (
                 <div key={g.key} className="kd-group">
@@ -1563,8 +1624,10 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "canceled" && (
           <div className="kd-list">
+            <DateFilterBar filter={canceledDateFilter} onChange={setCanceledDateFilter} />
             {canceledJobs.length === 0 ? <div className="kd-empty">Отменённых заявок нет.</div> :
-              [...canceledJobs].sort((a, b) => new Date(b.canceled_at || 0) - new Date(a.canceled_at || 0)).map((j) => (
+              canceledFiltered.length === 0 ? <div className="kd-empty">По этому фильтру ничего не найдено.</div> :
+              [...canceledFiltered].sort((a, b) => new Date(b.canceled_at || 0) - new Date(a.canceled_at || 0)).map((j) => (
                 <JobCard key={j.id} job={j} isAdmin={isAdmin} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat="" share={partnerShareAmt(j)}
                   onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                   onReport={() => setModal({ kind: "report", job: j })}
