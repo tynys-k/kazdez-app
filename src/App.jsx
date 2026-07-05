@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -39,6 +39,8 @@ const EQUIP_STATUS = { with_tech: { label: "У сотрудника", color: "#0
 const DEPOSIT_STATUS = { pending: { label: "Ожидает", color: "#B4650B", bg: "#FBEDD9" }, confirmed: { label: "Подтверждено", color: "#0E7C66", bg: "#E4F3EE" }, rejected: { label: "Отклонено", color: "#B3261E", bg: "#FBE7E5" } };
 const TASK_TYPES = { errand: "Поручение", purchase: "Закупка", docs: "Документы", tender: "Тендер", other: "Прочее" };
 const TASK_STATUS = { new: { label: "Новая", color: "#2563EB", bg: "#EAF1FE" }, in_progress: { label: "В работе", color: "#B4650B", bg: "#FBEDD9" }, done: { label: "Сделана", color: "#0E7C66", bg: "#E4F3EE" } };
+const TENDER_STATUS = { participating: { label: "Участвуем", color: "#2563EB", bg: "#EAF1FE" }, won: { label: "Выиграли", color: "#0E7C66", bg: "#E4F3EE" }, executing: { label: "Исполняется", color: "#B4650B", bg: "#FBEDD9" }, closed: { label: "Закрыт", color: "#6E7871", bg: "#F0F0EE" }, lost: { label: "Проигран", color: "#B3261E", bg: "#FBE7E5" } };
+const GUARANTEE_KINDS = { application: "Обеспечение заявки", dumping: "Демпинговое обеспечение", other: "Другое" };
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -202,6 +204,9 @@ function Dashboard({ session, profile }) {
   const [tasks, setTasks] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [moves, setMoves] = useState([]);
+  const [tenders, setTenders] = useState([]);
+  const [tenderGuarantees, setTenderGuarantees] = useState([]);
+  const [tenderServices, setTenderServices] = useState([]);
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [audit, setAudit] = useState([]);
@@ -228,7 +233,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -250,6 +255,9 @@ function Dashboard({ session, profile }) {
       supabase.from("tasks").select("*").order("created_at", { ascending: false }),
       supabase.from("accounts").select("*").order("sort"),
       supabase.from("money_moves").select("*").order("move_date", { ascending: false }),
+      supabase.from("tenders").select("*").order("created_at", { ascending: false }),
+      supabase.from("tender_guarantees").select("*"),
+      supabase.from("tender_services").select("*").order("seq"),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -275,6 +283,9 @@ function Dashboard({ session, profile }) {
     setTasks(tkr.data || []);
     setAccounts(accr.data || []);
     setMoves(mvr.data || []);
+    setTenders(tndr.data || []);
+    setTenderGuarantees(tgr.data || []);
+    setTenderServices(tsr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -639,6 +650,59 @@ function Dashboard({ session, profile }) {
     await logAction("Задачи", `Удалена: ${task.title}`);
     showToast("Удалено"); load();
   }
+  async function saveTender(payload, services, existing) {
+    let tenderId = existing?.id;
+    if (existing) {
+      const { error } = await supabase.from("tenders").update(payload).eq("id", existing.id);
+      if (error) { showToast("Ошибка: " + error.message); return; }
+    } else {
+      const { data, error } = await supabase.from("tenders").insert({ ...payload, created_by: session.user.id }).select().single();
+      if (error) { showToast("Ошибка: " + error.message); return; }
+      tenderId = data.id;
+      // создаём график обработок, если задан
+      if (services && services.length) {
+        await supabase.from("tender_services").insert(services.map((s, i) => ({ tender_id: tenderId, seq: i + 1, due_date: s.due_date || null })));
+      }
+    }
+    await logAction("Тендеры", `${existing ? "Изменён" : "Создан"}: ${payload.contract_no || payload.title || "тендер"}`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function removeTender(t) {
+    await supabase.from("tenders").delete().eq("id", t.id);
+    await logAction("Тендеры", `Удалён: ${t.contract_no || t.title || "тендер"}`);
+    setModal(null); showToast("Удалено"); load();
+  }
+  async function saveGuarantee(payload, existing) {
+    const res = existing ? await supabase.from("tender_guarantees").update(payload).eq("id", existing.id) : await supabase.from("tender_guarantees").insert(payload);
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Тендеры", `Обеспечение ${existing ? "изменено" : "добавлено"}: ${fmt(payload.amount)} ₸`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function removeGuarantee(g) {
+    await supabase.from("tender_guarantees").delete().eq("id", g.id);
+    await logAction("Тендеры", `Обеспечение удалено`);
+    load();
+  }
+  async function toggleGuaranteeFlag(g, field, val) {
+    const patch = { [field]: val };
+    if (field === "paid" && val && !g.paid_date) patch.paid_date = new Date().toISOString().slice(0, 10);
+    if (field === "returned" && val && !g.return_date) patch.return_date = new Date().toISOString().slice(0, 10);
+    await supabase.from("tender_guarantees").update(patch).eq("id", g.id);
+    load();
+  }
+  async function setServiceDone(s, done) {
+    await supabase.from("tender_services").update({ done, done_date: done ? new Date().toISOString().slice(0, 10) : null }).eq("id", s.id);
+    await logAction("Тендеры", `Обработка №${s.seq} ${done ? "выполнена" : "снята отметка"}`);
+    load();
+  }
+  async function addService(tenderId, seq, dueDate) {
+    await supabase.from("tender_services").insert({ tender_id: tenderId, seq, due_date: dueDate || null });
+    load();
+  }
+  async function removeService(s) {
+    await supabase.from("tender_services").delete().eq("id", s.id);
+    load();
+  }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
@@ -848,6 +912,23 @@ function Dashboard({ session, profile }) {
         assignee: personName(t.assignee_id), due: t.due_date ? isoToRu(t.due_date) : "", status: (TASK_STATUS[t.status] || {}).label || t.status, desc: t.description || "",
       })));
 
+      await addSheet("Тендеры", [
+        { header: "Номер договора", key: "no", width: 18 }, { header: "Название", key: "title", width: 24 }, { header: "Адрес", key: "address", width: 28 },
+        { header: "Сумма договора", key: "amount", width: 16, money: true }, { header: "Наша доля %", key: "pct", width: 12 }, { header: "Наша доля ₸", key: "ourAmt", width: 16, money: true },
+        { header: "Партнёр", key: "partner", width: 18 }, { header: "Статус", key: "status", width: 14 },
+        { header: "Обработок сделано", key: "svcDone", width: 16 }, { header: "Заморожено в залогах", key: "frozen", width: 18, money: true },
+      ], tenders.map((t) => {
+        const svcs = tenderServices.filter((s) => s.tender_id === t.id);
+        const gtees = tenderGuarantees.filter((g) => g.tender_id === t.id);
+        const frozen = gtees.filter((g) => g.paid && !g.returned).reduce((s, g) => s + (Number(g.amount) || 0), 0);
+        return {
+          no: t.contract_no || "", title: t.title || "", address: t.address || "", amount: t.amount, pct: t.our_share_pct,
+          ourAmt: Math.round((Number(t.amount) || 0) * (Number(t.our_share_pct) || 0) / 100),
+          partner: partnerById(t.partner_id)?.name || "", status: (TENDER_STATUS[t.status] || {}).label || t.status,
+          svcDone: `${svcs.filter((s) => s.done).length}/${svcs.length}`, frozen,
+        };
+      }));
+
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
@@ -979,6 +1060,11 @@ function Dashboard({ session, profile }) {
   const doneGroups = groupByDate(doneSorted);
   const myOpenTasks = tasks.filter((t) => t.assignee_id === session.user.id && t.status !== "done").length;
   const allOpenTasks = tasks.filter((t) => t.status !== "done").length;
+  const todayIsoT = new Date().toISOString().slice(0, 10);
+  const tenderOverdue = tenderServices.filter((s) => !s.done && s.due_date && s.due_date < todayIsoT).length;
+  const activeTenders = tenders.filter((t) => t.status !== "closed" && t.status !== "lost").length;
+  const servicesOf = (tid) => tenderServices.filter((s) => s.tender_id === tid).sort((a, b) => a.seq - b.seq);
+  const guaranteesOf = (tid) => tenderGuarantees.filter((g) => g.tender_id === tid);
   const visibleTasks = canManageTasks ? tasks : tasks.filter((t) => t.assignee_id === session.user.id);
   const todayIso = new Date().toISOString().slice(0, 10);
   const filteredTasks = visibleTasks.filter((t) => {
@@ -998,6 +1084,7 @@ function Dashboard({ session, profile }) {
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `Задачи${allOpenTasks ? " · " + allOpenTasks : ""}` },
+    { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : (activeTenders ? " · " + activeTenders : "")}` },
     { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "finance", icon: Wallet, label: "Аналитика" },
     { id: "opex", icon: Landmark, label: "Финансы" },
@@ -1235,6 +1322,98 @@ function Dashboard({ session, profile }) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {!loading && tab === "tenders" && (
+          <div className="kd-list">
+            <div className="kd-tabbar" style={{ marginBottom: 4 }}>
+              <div className="kd-title" style={{ fontSize: 18 }}>Тендеры</div>
+              <button className="kd-btn primary" onClick={() => setModal({ kind: "tender" })}><Plus size={15} />Новый тендер</button>
+            </div>
+            {tenderOverdue > 0 && <div className="kd-hint" style={{ background: "#FBE7E5", borderColor: "#F1C4BF", color: "#B3261E" }}>⚠ Есть просроченные обработки ({tenderOverdue}). Просрочка грозит штрафом и блокировкой участия — проверь график ниже.</div>}
+            {tenders.length === 0 && <div className="kd-empty">Тендеров пока нет. Добавь первый через «Новый тендер».</div>}
+            {tenders.map((t) => {
+              const st = TENDER_STATUS[t.status] || TENDER_STATUS.participating;
+              const ourAmount = Math.round((Number(t.amount) || 0) * (Number(t.our_share_pct) || 0) / 100);
+              const svcs = servicesOf(t.id);
+              const gtees = guaranteesOf(t.id);
+              const doneCount = svcs.filter((s) => s.done).length;
+              const frozen = gtees.filter((g) => g.paid && !g.returned).reduce((s, g) => s + (Number(g.amount) || 0), 0);
+              return (
+                <div key={t.id} className="kd-card">
+                  <div className="kd-card-head">
+                    <div className="kd-pest">{t.contract_no ? `№ ${t.contract_no}` : (t.title || "Тендер")}</div>
+                    <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+                  </div>
+                  <div className="kd-meta">
+                    {t.title && t.contract_no && <span>{t.title}</span>}
+                    {t.partner_id && <span>🤝 {partnerById(t.partner_id)?.name || "?"}</span>}
+                    {(t.start_date || t.end_date) && <span><Calendar size={12} style={{ verticalAlign: -2, marginRight: 3 }} />{isoToRu(t.start_date) || "?"} — {isoToRu(t.end_date) || "?"}</span>}
+                  </div>
+                  {t.address && <div className="kd-addr" style={{ marginTop: 4 }}><AddressText text={t.address} /></div>}
+
+                  <div className="kd-tenderfin">
+                    <div><span className="kd-muted">Сумма договора</span><strong>{fmt(t.amount)} ₸</strong></div>
+                    <div><span className="kd-muted">Наша доля {t.our_share_pct}%</span><strong style={{ color: "var(--primary-d)" }}>{fmt(ourAmount)} ₸</strong></div>
+                    {frozen > 0 && <div><span className="kd-muted">Заморожено в залогах</span><strong style={{ color: "#B4650B" }}>{fmt(frozen)} ₸</strong></div>}
+                  </div>
+
+                  {/* Обеспечения */}
+                  <div className="kd-tsub">
+                    <div className="kd-tsubhead"><ShieldCheck size={14} /> Обеспечения (залоги)</div>
+                    {gtees.length === 0 && <span className="kd-muted">Не добавлены</span>}
+                    {gtees.map((g) => (
+                      <div key={g.id} className="kd-guarantee">
+                        <div>
+                          <div style={{ fontWeight: 700 }}>{GUARANTEE_KINDS[g.kind] || g.kind} · {fmt(g.amount)} ₸</div>
+                          <div className="kd-muted" style={{ fontSize: 12 }}>
+                            {g.paid ? `внесено ${isoToRu(g.paid_date) || ""}` : "не внесено"}
+                            {g.returned ? ` · возвращено ${isoToRu(g.return_date) || ""}` : g.paid ? " · ждём возврата" : ""}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {!g.paid && <button className="kd-btn ghost sm" onClick={() => toggleGuaranteeFlag(g, "paid", true)}>Внёс</button>}
+                          {g.paid && !g.returned && <button className="kd-btn ghost sm" onClick={() => toggleGuaranteeFlag(g, "returned", true)}>Вернули</button>}
+                          <button className="kd-btn ghost danger sm" onClick={() => removeGuarantee(g)}><X size={13} /></button>
+                        </div>
+                      </div>
+                    ))}
+                    <button className="kd-btn ghost sm" style={{ marginTop: 8 }} onClick={() => setModal({ kind: "guarantee", tenderId: t.id })}><Plus size={13} />Обеспечение</button>
+                  </div>
+
+                  {/* График обработок */}
+                  <div className="kd-tsub">
+                    <div className="kd-tsubhead"><RefreshCw size={14} /> График обработок {svcs.length > 0 && `· ${doneCount}/${svcs.length}`}</div>
+                    {svcs.length === 0 && <span className="kd-muted">Не задан</span>}
+                    {svcs.map((s) => {
+                      const overdue = !s.done && s.due_date && s.due_date < todayIsoT;
+                      return (
+                        <div key={s.id} className={`kd-svcrow ${overdue ? "overdue" : ""}`}>
+                          <div>
+                            <span style={{ fontWeight: 700 }}>№{s.seq}</span>
+                            <span style={{ marginLeft: 8 }}>{isoToRu(s.due_date) || "без даты"}</span>
+                            {overdue && <span className="kd-svcwarn"> · просрочено!</span>}
+                            {s.done && <span className="kd-muted" style={{ marginLeft: 8 }}>✓ {isoToRu(s.done_date) || ""}</span>}
+                          </div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button className={`kd-btn sm ${s.done ? "ghost" : "primary"}`} onClick={() => setServiceDone(s, !s.done)}>{s.done ? "Отменить" : "Сделано"}</button>
+                            <button className="kd-btn ghost danger sm" onClick={() => removeService(s)}><X size={13} /></button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <button className="kd-btn ghost sm" style={{ marginTop: 8 }} onClick={() => addService(t.id, svcs.length + 1, "")}><Plus size={13} />Обработку</button>
+                  </div>
+
+                  {t.note && <div className="kd-notebox" style={{ marginTop: 10 }}>📝 {t.note}</div>}
+                  <div className="kd-actions">
+                    <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "tender", tender: t })}><Pencil size={13} />Изменить</button>
+                    <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить тендер «${t.contract_no || t.title || ""}»? Вместе с обеспечениями и графиком.`, () => removeTender(t))}><Trash2 size={13} />Удалить</button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -1797,6 +1976,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
+      {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
+      {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "rejectDeposit" && <RejectDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} onClose={() => setModal(null)} onSave={(adminNote) => { decideDeposit(modal.dep, "rejected", adminNote); setModal(null); }} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
@@ -2856,6 +3037,98 @@ function TaskModal({ task, people, onClose, onSave }) {
         </div>
       </div>
       {dueMode === "date" && <Field label="Выбери дату"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+    </ModalShell>
+  );
+}
+
+function TenderModal({ tender, partners, onClose, onSave }) {
+  const [contractNo, setContractNo] = useState(tender?.contract_no || "");
+  const [title, setTitle] = useState(tender?.title || "");
+  const [address, setAddress] = useState(tender?.address || "");
+  const [amount, setAmount] = useState(tender?.amount ?? "");
+  const [ourShare, setOurShare] = useState(tender?.our_share_pct ?? "");
+  const [partnerId, setPartnerId] = useState(tender?.partner_id || "");
+  const [status, setStatus] = useState(tender?.status || "participating");
+  const [startDate, setStartDate] = useState(tender?.start_date || "");
+  const [endDate, setEndDate] = useState(tender?.end_date || "");
+  const [note, setNote] = useState(tender?.note || "");
+  const [freq, setFreq] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = (contractNo.trim() || title.trim()) && Number(amount) >= 0;
+  const ourAmount = Math.round((Number(amount) || 0) * (Number(ourShare) || 0) / 100);
+
+  // равномерные даты обработок по кратности в пределах start..end
+  function buildServices() {
+    const n = Number(freq) || 0;
+    if (!n || n < 1 || !startDate) return [];
+    const start = new Date(startDate);
+    const end = endDate ? new Date(endDate) : new Date(new Date(startDate).setFullYear(start.getFullYear() + 1));
+    const span = end.getTime() - start.getTime();
+    const step = span / n;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const d = new Date(start.getTime() + step * i + step / 2);
+      out.push({ due_date: d.toISOString().slice(0, 10) });
+    }
+    return out;
+  }
+
+  async function save() {
+    setSaving(true);
+    const payload = { contract_no: contractNo.trim() || null, title: title.trim() || null, address: address.trim() || null, amount: Number(amount) || 0, our_share_pct: Number(ourShare) || 0, partner_id: partnerId || null, status, start_date: startDate || null, end_date: endDate || null, note: note.trim() || null };
+    await onSave(payload, tender ? null : buildServices(), tender);
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={tender ? "Изменить тендер" : "Новый тендер"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <div className="kd-grid2">
+        <Field label="Номер договора"><input value={contractNo} onChange={(e) => setContractNo(e.target.value)} placeholder="№ 123-45" /></Field>
+        <Field label="Статус"><select value={status} onChange={(e) => setStatus(e.target.value)}>{Object.entries(TENDER_STATUS).map(([code, s]) => <option key={code} value={code}>{s.label}</option>)}</select></Field>
+      </div>
+      <Field label="Название / предмет"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Дезинфекция объекта ..." /></Field>
+      <Field label="Адрес объекта"><input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="г. Алматы, ..." /></Field>
+      <div className="kd-grid2">
+        <Field label="Сумма договора (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="1000000" /></Field>
+        <Field label="Наша доля (%)"><input value={ourShare} onChange={(e) => setOurShare(e.target.value)} inputMode="numeric" placeholder="25" /></Field>
+      </div>
+      {Number(amount) > 0 && Number(ourShare) > 0 && <div className="kd-paytotal"><span>Наша доля составит</span><strong style={{ color: "var(--primary-d)" }}>{fmt(ourAmount)} ₸</strong></div>}
+      <Field label="Партнёр (выиграл через нас)"><select value={partnerId} onChange={(e) => setPartnerId(e.target.value)}><option value="">— не выбран —</option>{partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+      <div className="kd-grid2">
+        <Field label="Начало действия"><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+        <Field label="Конец действия"><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>
+      </div>
+      {!tender && (
+        <Field label="Кратность обработок (сколько раз за период)">
+          <input value={freq} onChange={(e) => setFreq(e.target.value)} inputMode="numeric" placeholder="напр. 4" />
+        </Field>
+      )}
+      {!tender && Number(freq) > 0 && startDate && <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>Создам {freq} обработок с равномерными датами — потом сможешь поправить каждую в карточке тендера.</div>}
+      {!tender && Number(freq) > 0 && !startDate && <div className="kd-err" style={{ marginTop: -6 }}>Укажи «Начало действия», чтобы построить график.</div>}
+      <Field label="Примечание"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Условия, детали..." /></Field>
+      {tender && <div className="kd-muted">График обработок и обеспечения редактируются прямо в карточке тендера.</div>}
+    </ModalShell>
+  );
+}
+
+function GuaranteeModal({ tenderId, onClose, onSave }) {
+  const [kind, setKind] = useState("application");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = Number(amount) > 0;
+  async function save() { setSaving(true); await onSave({ tender_id: tenderId, kind, amount: Number(amount) || 0, note: note.trim() || null }); setSaving(false); }
+  return (
+    <ModalShell title="Обеспечение (залог)" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Добавить"}</button>
+    </>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Залог — это временно замороженные деньги, которые потом возвращаются. Не доход и не расход.</div>
+      <Field label="Тип обеспечения"><select value={kind} onChange={(e) => setKind(e.target.value)}>{Object.entries(GUARANTEE_KINDS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></Field>
+      <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="50000" /></Field>
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="реквизиты / условия возврата" /></Field>
     </ModalShell>
   );
 }
