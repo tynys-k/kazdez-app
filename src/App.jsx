@@ -840,6 +840,11 @@ function Dashboard({ session, profile }) {
     await logAction("CRM", `Лид ${existing ? "изменён" : "создан"}: ${payload.name || payload.phone || "без имени"}`);
     setModal(null); showToast("Сохранено"); load();
   }
+  async function touchLead(lead) {
+    await supabase.from("leads").update({ updated_at: new Date().toISOString() }).eq("id", lead.id);
+    await logAction("CRM", `Касание с клиентом: ${lead.name || lead.phone || "?"}`);
+    showToast("Отмечено касание"); load();
+  }
   async function setLeadStage(lead, stageId) {
     await supabase.from("leads").update({ stage_id: stageId, updated_at: new Date().toISOString() }).eq("id", lead.id);
     const stName = leadStages.find((s) => s.id === stageId)?.name || "";
@@ -1552,7 +1557,8 @@ function Dashboard({ session, profile }) {
               </div>
             )}
             {[...leadStages].sort((a, b) => a.sort - b.sort).filter((st) => leadStageFilter === "all" || st.id === leadStageFilter).map((st) => {
-              const stageLeads = leads.filter((l) => l.stage_id === st.id && !l.converted_job_id);
+              const stageLeads = leads.filter((l) => l.stage_id === st.id && !l.converted_job_id)
+                .sort((a, b) => new Date(a.updated_at || 0) - new Date(b.updated_at || 0));
               if (leadStageFilter === "all" && stageLeads.length === 0) return null;
               const sortedStages = [...leadStages].sort((a, b) => a.sort - b.sort);
               const stIdx = sortedStages.findIndex((x) => x.id === st.id);
@@ -1573,12 +1579,25 @@ function Dashboard({ session, profile }) {
                           {l.phone && <a href={`tel:${(l.phone || "").replace(/\s/g, "")}`} style={{ color: "var(--primary-d)", fontWeight: 700 }}>{l.phone}</a>}
                         </div>
                         {l.address && <div className="kd-addr" style={{ marginTop: 2 }}><AddressText text={l.address} /></div>}
+                        {(() => {
+                          const d = daysSince(l.updated_at);
+                          const stale = d >= 7;
+                          return (
+                            <div className="kd-touch" style={stale ? { color: "#B3261E" } : {}}>
+                              <Calendar size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+                              Последнее касание: {isoToRu((l.updated_at || "").slice(0, 10)) || "—"}
+                              <span style={{ marginLeft: 6, fontWeight: 700 }}>· {d === 0 ? "сегодня" : d === 1 ? "вчера" : `${d} дн. назад`}</span>
+                              {stale && <span style={{ marginLeft: 6 }}>⚠ давно не связывались</span>}
+                            </div>
+                          );
+                        })()}
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 2px" }}>
                           {l.kp_url && <a className="kd-btn ghost sm" href={l.kp_url} target="_blank" rel="noopener noreferrer"><FileText size={13} />КП клиента</a>}
                         </div>
                         {l.note && <div className="kd-notebox">📝 {l.note}</div>}
                         <div className="kd-actions">
                           {nextStage && <button className="kd-btn primary sm" onClick={() => setLeadStage(l, nextStage.id)}>{nextStage.name}<ArrowRight size={13} /></button>}
+                          <button className="kd-btn ghost sm" onClick={() => touchLead(l)}>Касание сегодня</button>
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l })}>Стадия</button>
                           <button className="kd-btn ghost sm" onClick={() => askConfirm(`Создать заявку из клиента «${l.name || l.phone || "?"}»? Перенесём телефон, адрес и источник.`, () => convertLeadToJob(l), { danger: false, confirmLabel: "Да, создать" })}><Plus size={13} />Заявка</button>
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "lead", lead: l })}><Pencil size={13} /></button>
