@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -42,14 +42,14 @@ const TASK_STATUS = { new: { label: "Новая", color: "#2563EB", bg: "#EAF1FE
 const TENDER_STATUS = { participating: { label: "Участвуем", color: "#2563EB", bg: "#EAF1FE" }, won: { label: "Выиграли", color: "#0E7C66", bg: "#E4F3EE" }, executing: { label: "Исполняется", color: "#B4650B", bg: "#FBEDD9" }, closed: { label: "Закрыт", color: "#6E7871", bg: "#F0F0EE" }, lost: { label: "Проигран", color: "#B3261E", bg: "#FBE7E5" } };
 const GUARANTEE_KINDS = { application: "Обеспечение заявки", dumping: "Демпинговое обеспечение", other: "Другое" };
 const DRIVE_LINKS = [
-  { key: "drive_tenders", label: "Тендеры", desc: "Документы по тендерам", emoji: "📁" },
-  { key: "drive_contracts", label: "Договоры", desc: "Договоры и приложения", emoji: "📄" },
-  { key: "drive_marketing", label: "Маркетинг", desc: "Реклама, баннеры, макеты", emoji: "📣" },
-  { key: "drive_safety", label: "Техника безопасности", desc: "Инструкции по ТБ", emoji: "🦺" },
-  { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓" },
+  { key: "drive_tenders", label: "Тендеры", desc: "Документы по тендерам", emoji: "📁", place: "tenders" },
+  { key: "drive_contracts", label: "Договоры", desc: "Договоры и приложения", emoji: "📄", place: "docs" },
+  { key: "drive_marketing", label: "Маркетинг", desc: "Реклама, баннеры, макеты", emoji: "📣", place: "materials" },
+  { key: "drive_safety", label: "Техника безопасности", desc: "Инструкции по ТБ", emoji: "🦺", place: "materials" },
+  { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓", place: "knowledge" },
 ];
-const TAB_LABELS = { jobs: "Заявки", done: "Выполненные", canceled: "Отменённые", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", journal: "Журнал", trash: "Корзина" };
-const ADMIN_TAB_ORDER = ["jobs", "done", "canceled", "tasks", "tenders", "repeats", "finance", "opex", "cash", "stock", "team", "partners", "docs", "materials", "journal", "trash"];
+const TAB_LABELS = { jobs: "Заявки", done: "Выполненные", canceled: "Отменённые", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
+const ADMIN_TAB_ORDER = ["jobs", "done", "canceled", "tasks", "tenders", "repeats", "finance", "opex", "cash", "stock", "team", "partners", "docs", "materials", "knowledge", "journal", "trash"];
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -123,6 +123,20 @@ function AddressText({ text }) {
       <a href={url} target="_blank" rel="noopener noreferrer" className="kd-maplink" onClick={(e) => e.stopPropagation()}>📍 Открыть на карте</a>
       {after && <span> {after}</span>}
     </>
+  );
+}
+function DriveLinkCard({ link, url, isAdmin }) {
+  return (
+    <a href={url || undefined} target="_blank" rel="noopener noreferrer"
+      className={`kd-drivecard ${url ? "" : "disabled"}`}
+      onClick={(e) => { if (!url) e.preventDefault(); }}>
+      <div className="kd-driveemoji">{link.emoji}</div>
+      <div style={{ flex: 1 }}>
+        <div className="kd-drivename">{link.label}</div>
+        <div className="kd-drivedesc">{url ? link.desc : "Ссылка не задана" + (isAdmin ? " — добавь в Настройках" : "")}</div>
+      </div>
+      {url && <ExternalLink size={18} className="kd-driveicon" />}
+    </a>
   );
 }
 function buildMsg(job, header) {
@@ -1103,6 +1117,7 @@ function Dashboard({ session, profile }) {
     { id: "partners", icon: Handshake, label: "Партнёры" },
     { id: "docs", icon: FileText, label: "Документы" },
     { id: "materials", icon: FolderOpen, label: "Материалы" },
+    { id: "knowledge", icon: GraduationCap, label: "База знаний" },
     { id: "journal", icon: History, label: "Журнал" },
     { id: "trash", icon: Trash2, label: `Корзина${trash.length ? " · " + trash.length : ""}` },
   ] : [
@@ -1111,6 +1126,7 @@ function Dashboard({ session, profile }) {
     { id: "tasks", icon: ListTodo, label: `${canManageTasks ? "Задачи" : "Мои задачи"}${(canManageTasks ? allOpenTasks : myOpenTasks) ? " · " + (canManageTasks ? allOpenTasks : myOpenTasks) : ""}` },
     { id: "cash", icon: Banknote, label: "Касса" },
     { id: "materials", icon: FolderOpen, label: "Материалы" },
+    { id: "knowledge", icon: GraduationCap, label: "База знаний" },
     { id: "myequip", icon: Wrench, label: "Моё оборудование" },
   ];
   // применяем сохранённый общий порядок (админ задаёт в Настройках). Новые вкладки — в конец.
@@ -1888,22 +1904,20 @@ function Dashboard({ session, profile }) {
         {!loading && tab === "materials" && (
           <div className="kd-list">
             <div className="kd-title" style={{ fontSize: 18, marginBottom: 4 }}>Материалы компании</div>
-            <div className="kd-muted" style={{ marginBottom: 8 }}>Ссылки на общие папки Google Диск.{isAdmin ? " Изменить ссылки можно в Настройках → «Ссылки на Google Диск»." : ""}</div>
-            {DRIVE_LINKS.filter((l) => l.key !== "drive_tenders").map((l) => {
-              const url = settings[l.key];
-              return (
-                <a key={l.key} href={url || undefined} target="_blank" rel="noopener noreferrer"
-                  className={`kd-drivecard ${url ? "" : "disabled"}`}
-                  onClick={(e) => { if (!url) e.preventDefault(); }}>
-                  <div className="kd-driveemoji">{l.emoji}</div>
-                  <div style={{ flex: 1 }}>
-                    <div className="kd-drivename">{l.label}</div>
-                    <div className="kd-drivedesc">{url ? l.desc : "Ссылка не задана" + (isAdmin ? " — добавь в Настройках" : "")}</div>
-                  </div>
-                  {url && <ExternalLink size={18} className="kd-driveicon" />}
-                </a>
-              );
-            })}
+            <div className="kd-muted" style={{ marginBottom: 8 }}>Маркетинг и техника безопасности.{isAdmin ? " Ссылки меняются в Настройках → «Ссылки на Google Диск»." : ""}</div>
+            {DRIVE_LINKS.filter((l) => l.place === "materials").map((l) => (
+              <DriveLinkCard key={l.key} link={l} url={settings[l.key]} isAdmin={isAdmin} />
+            ))}
+          </div>
+        )}
+
+        {!loading && tab === "knowledge" && (
+          <div className="kd-list">
+            <div className="kd-title" style={{ fontSize: 18, marginBottom: 4 }}>База знаний</div>
+            <div className="kd-muted" style={{ marginBottom: 8 }}>Обучение: скрипты продаж и разговора с клиентами.{isAdmin ? " Ссылки меняются в Настройках → «Ссылки на Google Диск»." : ""}</div>
+            {DRIVE_LINKS.filter((l) => l.place === "knowledge").map((l) => (
+              <DriveLinkCard key={l.key} link={l} url={settings[l.key]} isAdmin={isAdmin} />
+            ))}
           </div>
         )}
 
@@ -1913,6 +1927,9 @@ function Dashboard({ session, profile }) {
           const pending = total - paid;
           return (
             <div className="kd-list">
+              {DRIVE_LINKS.filter((l) => l.place === "docs").map((l) => (
+                <DriveLinkCard key={l.key} link={l} url={settings[l.key]} isAdmin={isAdmin} />
+              ))}
               <div className="kd-card">
                 <div className="kd-section">Отдельный отчёт по документам (не входит в заработок команды)</div>
                 <div className="kd-row"><span>Всего начислено</span><strong>{fmt(total)} ₸</strong></div>
