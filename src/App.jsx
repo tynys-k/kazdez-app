@@ -464,6 +464,12 @@ function Dashboard({ session, profile }) {
     await logAction("Повтор", `Завершена (отказ от повтора) · ${job.pest} · ${job.address}`);
     showToast("Заявка завершена"); load();
   }
+  async function unsetRepeat(job) {
+    const { error } = await supabase.from("jobs").update({ repeat_state: null, repeat_since: null }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Повтор", `Убрана с повтора · ${job.pest} · ${job.address}`);
+    showToast("Заявка возвращена в «Выполненные»"); load();
+  }
   async function createRepeatJob(job) {
     const ins = await supabase.from("jobs").insert({
       type: "Вторичная", scheduled_date: null, scheduled_time: "", address: job.address, floor: job.floor,
@@ -1370,7 +1376,7 @@ function Dashboard({ session, profile }) {
                         onAssign={() => setModal({ kind: "assign", job: j })}
                         onView={() => setModal({ kind: "view", job: j })}
                         onEdit={() => setModal({ kind: "edit", job: j })}
-                        onRepeat={() => putOnRepeat(j)}
+                        onRepeat={() => askConfirm(`Отправить заявку «${j.pest} · ${j.address}» на повтор? Она уйдёт во вкладку «Повторы».`, () => putOnRepeat(j), { danger: false, confirmLabel: "Да, на повтор" })}
                         onPayPartner={(paid) => markPartnerPaid(j, paid)}
                         onCompPaid={(paid) => markCompPaid(j, paid)}
                         onCancel={() => setModal({ kind: "cancelJob", job: j })}
@@ -1404,7 +1410,7 @@ function Dashboard({ session, profile }) {
                       onAssign={() => setModal({ kind: "assign", job: j })}
                       onView={() => setModal({ kind: "view", job: j })}
                       onEdit={() => setModal({ kind: "edit", job: j })}
-                      onRepeat={() => putOnRepeat(j)}
+                      onRepeat={() => askConfirm(`Отправить заявку «${j.pest} · ${j.address}» на повтор? Она уйдёт во вкладку «Повторы».`, () => putOnRepeat(j), { danger: false, confirmLabel: "Да, на повтор" })}
                       onPayPartner={(paid) => markPartnerPaid(j, paid)}
                         onCompPaid={(paid) => markCompPaid(j, paid)}
                         onCancel={() => setModal({ kind: "cancelJob", job: j })}
@@ -1766,7 +1772,7 @@ function Dashboard({ session, profile }) {
                   onAssign={() => setModal({ kind: "assign", job: j })}
                   onView={() => setModal({ kind: "view", job: j })}
                   onEdit={() => setModal({ kind: "edit", job: j })}
-                  onRepeat={() => putOnRepeat(j)}
+                  onRepeat={() => askConfirm(`Отправить заявку «${j.pest} · ${j.address}» на повтор? Она уйдёт во вкладку «Повторы».`, () => putOnRepeat(j), { danger: false, confirmLabel: "Да, на повтор" })}
                   onPayPartner={(paid) => markPartnerPaid(j, paid)}
                   onCompPaid={(paid) => markCompPaid(j, paid)}
                   onCancel={() => setModal({ kind: "cancelJob", job: j })}
@@ -1785,7 +1791,9 @@ function Dashboard({ session, profile }) {
             {jobs.filter((j) => j.repeat_state === "on_repeat")
               .sort((a, b) => new Date(a.repeat_since || 0) - new Date(b.repeat_since || 0))
               .map((j) => (
-                <RepeatCard key={j.id} job={j} onSaveNote={saveRepeatNote} onCreate={createRepeatJob} onFinish={finishRepeat}
+                <RepeatCard key={j.id} job={j} onSaveNote={saveRepeatNote} onCreate={createRepeatJob}
+                  onFinish={(job) => askConfirm(`Завершить повтор по заявке «${job.pest} · ${job.address}»? Клиент отказался от повторной обработки. Заявка вернётся в «Выполненные».`, () => finishRepeat(job), { danger: false, confirmLabel: "Да, завершить" })}
+                  onUnset={(job) => askConfirm(`Убрать заявку «${job.pest} · ${job.address}» с повтора и вернуть в «Выполненные»?`, () => unsetRepeat(job), { danger: false, confirmLabel: "Да, убрать" })}
                   repeatHint={j.brand === "partner" && partnerById(j.partner_id) ? `Повтор у партнёра ${partnerById(j.partner_id).name}: ${repeatLabel(partnerById(j.partner_id).repeat_policy)}` : "Повтор: 50% от первичной (стандарт)"} />
               ))}
           </div>
@@ -2363,7 +2371,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
   );
 }
 
-function RepeatCard({ job, onSaveNote, onCreate, onFinish, repeatHint }) {
+function RepeatCard({ job, onSaveNote, onCreate, onFinish, onUnset, repeatHint }) {
   const [note, setNote] = useState(job.repeat_note || "");
   const days = daysSince(job.repeat_since);
   const due = days >= 5;
@@ -2385,6 +2393,7 @@ function RepeatCard({ job, onSaveNote, onCreate, onFinish, repeatHint }) {
         <button className="kd-btn ghost sm" onClick={() => onSaveNote(job, note)}>Сохранить заметку</button>
         <button className="kd-btn primary sm" onClick={() => onCreate(job)}>Создать повторную заявку</button>
         <button className="kd-btn ghost danger sm" onClick={() => onFinish(job)}>Отказался — завершить</button>
+        <button className="kd-btn ghost sm" onClick={() => onUnset(job)}>Убрать с повтора</button>
       </div>
     </div>
   );
