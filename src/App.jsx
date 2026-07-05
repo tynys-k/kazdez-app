@@ -41,6 +41,8 @@ const TASK_TYPES = { errand: "Поручение", purchase: "Закупка", d
 const TASK_STATUS = { new: { label: "Новая", color: "#2563EB", bg: "#EAF1FE" }, in_progress: { label: "В работе", color: "#B4650B", bg: "#FBEDD9" }, done: { label: "Сделана", color: "#0E7C66", bg: "#E4F3EE" } };
 const TENDER_STATUS = { participating: { label: "Участвуем", color: "#2563EB", bg: "#EAF1FE" }, won: { label: "Выиграли", color: "#0E7C66", bg: "#E4F3EE" }, executing: { label: "Исполняется", color: "#B4650B", bg: "#FBEDD9" }, closed: { label: "Закрыт", color: "#6E7871", bg: "#F0F0EE" }, lost: { label: "Проигран", color: "#B3261E", bg: "#FBE7E5" } };
 const GUARANTEE_KINDS = { application: "Обеспечение заявки", dumping: "Демпинговое обеспечение", other: "Другое" };
+const TAB_LABELS = { jobs: "Заявки", done: "Выполненные", canceled: "Отменённые", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", journal: "Журнал", trash: "Корзина" };
+const ADMIN_TAB_ORDER = ["jobs", "done", "canceled", "tasks", "tenders", "repeats", "finance", "opex", "cash", "stock", "team", "partners", "docs", "journal", "trash"];
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -1079,7 +1081,7 @@ function Dashboard({ session, profile }) {
     if (rank(a) !== rank(b)) return rank(a) - rank(b);
     return (a.due_date || "9999").localeCompare(b.due_date || "9999");
   });
-  const tabs = isAdmin ? [
+  const baseTabs = isAdmin ? [
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
@@ -1102,6 +1104,14 @@ function Dashboard({ session, profile }) {
     { id: "cash", icon: Banknote, label: "Касса" },
     { id: "myequip", icon: Wrench, label: "Моё оборудование" },
   ];
+  // применяем сохранённый общий порядок (админ задаёт в Настройках). Новые вкладки — в конец.
+  const savedOrder = Array.isArray(settings.tab_order) ? settings.tab_order : [];
+  const tabs = savedOrder.length
+    ? [...baseTabs].sort((a, b) => {
+        const ia = savedOrder.indexOf(a.id), ib = savedOrder.indexOf(b.id);
+        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+      })
+    : baseTabs;
 
   return (
     <div className="kd-app">
@@ -1958,6 +1968,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "settings" && (
         <SettingsModal
           settings={settings} sources={sources} pestTypes={pestTypes} expCats={expCats} accounts={accounts}
+          tabOrder={savedOrder.length ? [...ADMIN_TAB_ORDER].sort((a, b) => { const ia = savedOrder.indexOf(a), ib = savedOrder.indexOf(b); return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib); }) : ADMIN_TAB_ORDER}
           onClose={() => setModal(null)}
           onSaveSetting={saveAppSetting}
           onSetTheme={setTheme}
@@ -2775,15 +2786,24 @@ function SettingsSection({ title, subtitle, open, onToggle, children }) {
   );
 }
 
-function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
+function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], tabOrder = [], onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
   const [theme, setThemeLocal] = useState(localStorage.getItem("kd-theme") || "light");
   const [qrRate, setQrRate] = useState(settings.qr_fee_rate ?? 0.95);
   const [guarantee, setGuarantee] = useState(settings.default_guarantee_months ?? 6);
   const [newCat, setNewCat] = useState("");
   const [subInputs, setSubInputs] = useState({});
   const [openSection, setOpenSection] = useState("appearance");
+  const [order, setOrder] = useState(tabOrder);
   const toggle = (id) => setOpenSection(openSection === id ? "" : id);
   function pickTheme(t) { setThemeLocal(t); onSetTheme(t); }
+  function moveTab(idx, dir) {
+    const ni = idx + dir;
+    if (ni < 0 || ni >= order.length) return;
+    const next = [...order];
+    [next[idx], next[ni]] = [next[ni], next[idx]];
+    setOrder(next);
+    onSaveSetting("tab_order", next);
+  }
   const parents = (expCats || []).filter((c) => !c.parent_id);
   const subsOf = (pid) => (expCats || []).filter((c) => c.parent_id === pid);
   const inputStyle = { flex: 1, font: "inherit", fontWeight: 600, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "10px 12px", minHeight: 44 };
@@ -2796,6 +2816,20 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], o
             <button className={`kd-segbtn ${theme === "dark" ? "on" : ""}`} onClick={() => pickTheme("dark")}>Тёмная</button>
           </div>
           <div className="kd-muted">Применяется на этом устройстве сразу, без перезагрузки.</div>
+        </SettingsSection>
+
+        <SettingsSection title="Порядок вкладок" subtitle="Общий для всех — двигай вверх/вниз" open={openSection === "taborder"} onToggle={() => toggle("taborder")}>
+          <div className="kd-muted" style={{ marginBottom: 10 }}>Порядок верхнего меню. Меняется сразу для всех сотрудников.</div>
+          {order.map((id, i) => (
+            <div key={id} className="kd-orderrow">
+              <span className="kd-ordernum">{i + 1}</span>
+              <span className="kd-ordername">{TAB_LABELS[id] || id}</span>
+              <div className="kd-orderbtns">
+                <button className="kd-btn ghost sm" disabled={i === 0} onClick={() => moveTab(i, -1)} aria-label="Вверх"><ChevronRight size={16} style={{ transform: "rotate(-90deg)" }} /></button>
+                <button className="kd-btn ghost sm" disabled={i === order.length - 1} onClick={() => moveTab(i, 1)} aria-label="Вниз"><ChevronRight size={16} style={{ transform: "rotate(90deg)" }} /></button>
+              </div>
+            </div>
+          ))}
         </SettingsSection>
 
         <SettingsSection title="Источники клиентов" subtitle={`${sources.length} шт. · откуда пришёл клиент`} open={openSection === "sources"} onToggle={() => toggle("sources")}>
