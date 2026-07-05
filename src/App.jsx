@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -47,9 +47,10 @@ const DRIVE_LINKS = [
   { key: "drive_marketing", label: "Маркетинг", desc: "Реклама, баннеры, макеты", emoji: "📣", place: "materials" },
   { key: "drive_safety", label: "Техника безопасности", desc: "Инструкции по ТБ", emoji: "🦺", place: "materials" },
   { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓", place: "knowledge" },
+  { key: "drive_kp", label: "КП клиентов", desc: "Папка со всеми коммерческими предложениями", emoji: "📑", place: "leads" },
 ];
-const TAB_LABELS = { jobs: "Заявки", done: "Выполненные", canceled: "Отменённые", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
-const ADMIN_TAB_ORDER = ["jobs", "done", "canceled", "tasks", "tenders", "repeats", "finance", "opex", "cash", "stock", "team", "partners", "docs", "materials", "knowledge", "journal", "trash"];
+const TAB_LABELS = { jobs: "Заявки", done: "Выполненные", canceled: "Отменённые", leads: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
+const ADMIN_TAB_ORDER = ["jobs", "done", "canceled", "leads", "tasks", "tenders", "repeats", "finance", "opex", "cash", "stock", "team", "partners", "docs", "materials", "knowledge", "journal", "trash"];
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -286,6 +287,9 @@ function Dashboard({ session, profile }) {
   const [tenderGuarantees, setTenderGuarantees] = useState([]);
   const [tenderServices, setTenderServices] = useState([]);
   const [guaranteeReturns, setGuaranteeReturns] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [leadStages, setLeadStages] = useState([]);
+  const [leadStageFilter, setLeadStageFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [jobsDateFilter, setJobsDateFilter] = useState({ preset: "all" });
@@ -315,7 +319,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -341,6 +345,8 @@ function Dashboard({ session, profile }) {
       supabase.from("tender_guarantees").select("*"),
       supabase.from("tender_services").select("*").order("seq"),
       supabase.from("guarantee_returns").select("*").order("return_date", { ascending: false }),
+      supabase.from("leads").select("*").order("updated_at", { ascending: false }),
+      supabase.from("lead_stages").select("*").order("sort"),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -370,6 +376,8 @@ function Dashboard({ session, profile }) {
     setTenderGuarantees(tgr.data || []);
     setTenderServices(tsr.data || []);
     setGuaranteeReturns(grr.data || []);
+    setLeads(ldr.data || []);
+    setLeadStages(lsr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -818,6 +826,65 @@ function Dashboard({ session, profile }) {
     await supabase.from("tender_services").delete().eq("id", s.id);
     load();
   }
+  async function saveLead(payload, existing) {
+    const res = existing
+      ? await supabase.from("leads").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", existing.id)
+      : await supabase.from("leads").insert({ ...payload, created_by: session.user.id });
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("CRM", `Лид ${existing ? "изменён" : "создан"}: ${payload.name || payload.phone || "без имени"}`);
+    setModal(null); showToast("Сохранено"); load();
+  }
+  async function setLeadStage(lead, stageId) {
+    await supabase.from("leads").update({ stage_id: stageId, updated_at: new Date().toISOString() }).eq("id", lead.id);
+    const stName = leadStages.find((s) => s.id === stageId)?.name || "";
+    await logAction("CRM", `Лид «${lead.name || lead.phone || "?"}» → ${stName}`);
+    load();
+  }
+  async function removeLead(lead) {
+    await supabase.from("leads").delete().eq("id", lead.id);
+    await logAction("CRM", `Лид удалён: ${lead.name || lead.phone || "?"}`);
+    showToast("Удалено"); load();
+  }
+  async function convertLeadToJob(lead) {
+    // создаём заявку из лида: телефон, адрес, источник
+    const payload = {
+      type: "Первичная", scheduled_date: null, address: lead.address || "", source: lead.source || "",
+      client_phone: lead.phone || "+7 ", brand: "KazDez", guarantee_months: defaultGuarantee,
+      pest: "", price_options: [], note: lead.name ? `Клиент: ${lead.name}` : null, created_by: session.user.id,
+    };
+    const { data, error } = await supabase.from("jobs").insert(payload).select().single();
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    // помечаем лид как сконвертированный + двигаем в финальную стадию, если есть
+    const finalStage = leadStages.find((s) => s.is_final && !s.is_lost);
+    await supabase.from("leads").update({ converted_job_id: data.id, stage_id: finalStage?.id || lead.stage_id, updated_at: new Date().toISOString() }).eq("id", lead.id);
+    await ensureCatalog("client_sources", sources, lead.source);
+    await logAction("CRM", `Лид «${lead.name || lead.phone || "?"}» → создана заявка`);
+    setModal(null); showToast("Заявка создана из лида"); setTab("jobs"); load();
+  }
+  async function addLeadStage(name) {
+    const v = (name || "").trim();
+    if (!v) return;
+    const maxSort = Math.max(0, ...leadStages.map((s) => s.sort || 0));
+    await supabase.from("lead_stages").insert({ name: v, sort: maxSort + 10 });
+    await logAction("CRM", `Стадия добавлена: ${v}`);
+    load();
+  }
+  async function removeLeadStage(stage) {
+    const { error } = await supabase.from("lead_stages").delete().eq("id", stage.id);
+    if (error) { showToast("Ошибка: на этой стадии есть лиды — сначала перенеси их"); return; }
+    await logAction("CRM", `Стадия удалена: ${stage.name}`);
+    load();
+  }
+  async function moveLeadStage(stage, dir) {
+    const sorted = [...leadStages].sort((a, b) => a.sort - b.sort);
+    const idx = sorted.findIndex((s) => s.id === stage.id);
+    const ni = idx + dir;
+    if (ni < 0 || ni >= sorted.length) return;
+    const a = sorted[idx], b = sorted[ni];
+    await supabase.from("lead_stages").update({ sort: b.sort }).eq("id", a.id);
+    await supabase.from("lead_stages").update({ sort: a.sort }).eq("id", b.id);
+    load();
+  }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
@@ -1179,6 +1246,8 @@ function Dashboard({ session, profile }) {
   const todayIsoT = new Date().toISOString().slice(0, 10);
   const tenderOverdue = tenderServices.filter((s) => !s.done && s.due_date && s.due_date < todayIsoT).length;
   const activeTenders = tenders.filter((t) => t.status !== "closed" && t.status !== "lost").length;
+  const leadStageById = (id) => leadStages.find((s) => s.id === id);
+  const activeLeads = leads.filter((l) => { const st = leadStageById(l.stage_id); return !l.converted_job_id && !(st && st.is_lost); }).length;
   const servicesOf = (tid) => tenderServices.filter((s) => s.tender_id === tid).sort((a, b) => a.seq - b.seq);
   const guaranteesOf = (tid) => tenderGuarantees.filter((g) => g.tender_id === tid);
   const visibleTasks = canManageTasks ? tasks : tasks.filter((t) => t.assignee_id === session.user.id);
@@ -1200,6 +1269,7 @@ function Dashboard({ session, profile }) {
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `Задачи${allOpenTasks ? " · " + allOpenTasks : ""}` },
+    { id: "leads", icon: Contact, label: `Клиенты${activeLeads ? " · " + activeLeads : ""}` },
     { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : (activeTenders ? " · " + activeTenders : "")}` },
     { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "finance", icon: Wallet, label: "Аналитика" },
@@ -1452,6 +1522,68 @@ function Dashboard({ session, profile }) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {!loading && tab === "leads" && (
+          <div className="kd-list">
+            <div className="kd-tabbar" style={{ marginBottom: 4 }}>
+              <div className="kd-title" style={{ fontSize: 18 }}>Клиенты · воронка</div>
+              <div className="kd-tabactions">
+                {settings.drive_kp && <a className="kd-btn ghost" href={settings.drive_kp} target="_blank" rel="noopener noreferrer"><FolderOpen size={15} />Папка КП</a>}
+                <button className="kd-btn primary" onClick={() => setModal({ kind: "lead" })}><Plus size={15} />Новый клиент</button>
+              </div>
+            </div>
+            {leadStages.length === 0 && <div className="kd-empty">Стадии воронки не заданы. Добавь их в Настройках → «Стадии воронки».</div>}
+            {/* фильтр по стадии */}
+            {leadStages.length > 0 && (
+              <div className="kd-datechips" style={{ marginBottom: 6 }}>
+                <button className={`kd-datechip ${leadStageFilter === "all" ? "on" : ""}`} onClick={() => setLeadStageFilter("all")}>Все стадии</button>
+                {[...leadStages].sort((a, b) => a.sort - b.sort).map((st) => {
+                  const cnt = leads.filter((l) => l.stage_id === st.id && !l.converted_job_id).length;
+                  return <button key={st.id} className={`kd-datechip ${leadStageFilter === st.id ? "on" : ""}`} onClick={() => setLeadStageFilter(st.id)}>{st.name}{cnt ? ` · ${cnt}` : ""}</button>;
+                })}
+              </div>
+            )}
+            {[...leadStages].sort((a, b) => a.sort - b.sort).filter((st) => leadStageFilter === "all" || st.id === leadStageFilter).map((st) => {
+              const stageLeads = leads.filter((l) => l.stage_id === st.id && !l.converted_job_id);
+              if (leadStageFilter === "all" && stageLeads.length === 0) return null;
+              const sortedStages = [...leadStages].sort((a, b) => a.sort - b.sort);
+              const stIdx = sortedStages.findIndex((x) => x.id === st.id);
+              const nextStage = sortedStages.slice(stIdx + 1).find((x) => !x.is_lost);
+              return (
+                <div key={st.id} className="kd-group">
+                  <div className="kd-datehead"><span>{st.name}{st.is_lost ? " ✕" : ""}</span><span className="kd-datecount">{stageLeads.length}</span></div>
+                  <div className="kd-list">
+                    {stageLeads.length === 0 && <div className="kd-muted" style={{ padding: "2px 2px 8px" }}>Пусто</div>}
+                    {stageLeads.map((l) => (
+                      <div key={l.id} className="kd-card">
+                        <div className="kd-card-head">
+                          <div className="kd-pest">{l.name || l.phone || "Без имени"}</div>
+                          <span className="kd-badge" style={{ color: l.client_type === "company" ? "#2557B0" : "#6E3FCF", background: l.client_type === "company" ? "#E9F0FC" : "#F0EAFC" }}>{l.client_type === "company" ? "Юрлицо" : "Физлицо"}</span>
+                        </div>
+                        <div className="kd-meta">
+                          {l.source && <span>{l.source}</span>}
+                          {l.phone && <a href={`tel:${(l.phone || "").replace(/\s/g, "")}`} style={{ color: "var(--primary-d)", fontWeight: 700 }}>{l.phone}</a>}
+                        </div>
+                        {l.address && <div className="kd-addr" style={{ marginTop: 2 }}><AddressText text={l.address} /></div>}
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 2px" }}>
+                          {l.kp_url && <a className="kd-btn ghost sm" href={l.kp_url} target="_blank" rel="noopener noreferrer"><FileText size={13} />КП клиента</a>}
+                        </div>
+                        {l.note && <div className="kd-notebox">📝 {l.note}</div>}
+                        <div className="kd-actions">
+                          {nextStage && <button className="kd-btn primary sm" onClick={() => setLeadStage(l, nextStage.id)}>{nextStage.name}<ArrowRight size={13} /></button>}
+                          <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l })}>Стадия</button>
+                          <button className="kd-btn ghost sm" onClick={() => askConfirm(`Создать заявку из клиента «${l.name || l.phone || "?"}»? Перенесём телефон, адрес и источник.`, () => convertLeadToJob(l), { danger: false, confirmLabel: "Да, создать" })}><Plus size={13} />Заявка</button>
+                          <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "lead", lead: l })}><Pencil size={13} /></button>
+                          <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить клиента «${l.name || l.phone || "?"}» из воронки?`, () => removeLead(l))}><Trash2 size={13} /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -2140,6 +2272,7 @@ function Dashboard({ session, profile }) {
         <SettingsModal
           settings={settings} sources={sources} pestTypes={pestTypes} expCats={expCats} accounts={accounts}
           tabOrder={savedOrder.length ? [...ADMIN_TAB_ORDER].sort((a, b) => { const ia = savedOrder.indexOf(a), ib = savedOrder.indexOf(b); return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib); }) : ADMIN_TAB_ORDER}
+          leadStages={leadStages} onAddLeadStage={addLeadStage} onRemoveLeadStage={removeLeadStage} onMoveLeadStage={moveLeadStage}
           onClose={() => setModal(null)}
           onSaveSetting={saveAppSetting}
           onSetTheme={setTheme}
@@ -2159,6 +2292,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
+      {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} onClose={() => setModal(null)} onSave={saveLead} />}
+      {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} onClose={() => setModal(null)} onPick={(sid) => { setLeadStage(modal.lead, sid); setModal(null); }} />}
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
       {modal?.kind === "returnGuarantee" && <ReturnGuaranteeModal g={modal.g} remaining={modal.remaining} accounts={accounts} onClose={() => setModal(null)} onConfirm={(amount, date, accId, note) => addGuaranteeReturn(modal.g, amount, date, accId, note)} />}
@@ -2959,7 +3094,8 @@ function SettingsSection({ title, subtitle, open, onToggle, children }) {
   );
 }
 
-function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], tabOrder = [], onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
+function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], tabOrder = [], leadStages = [], onAddLeadStage, onRemoveLeadStage, onMoveLeadStage, onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
+  const [newStage, setNewStage] = useState("");
   const [theme, setThemeLocal] = useState(localStorage.getItem("kd-theme") || "light");
   const [qrRate, setQrRate] = useState(settings.qr_fee_rate ?? 0.95);
   const [guarantee, setGuarantee] = useState(settings.default_guarantee_months ?? 6);
@@ -3005,8 +3141,8 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
           ))}
         </SettingsSection>
 
-        <SettingsSection title="Ссылки на Google Диск" subtitle="Тендеры, договоры, маркетинг, ТБ, обучение" open={openSection === "drivelinks"} onToggle={() => toggle("drivelinks")}>
-          <div className="kd-muted" style={{ marginBottom: 12 }}>Вставь ссылку на папку Google Диск для каждого раздела. Пустые не показываются сотрудникам. Тендерная ссылка появится кнопкой во вкладке «Тендеры», остальные — во вкладке «Материалы».</div>
+        <SettingsSection title="Ссылки на Google Диск" subtitle="Тендеры, договоры, маркетинг, ТБ, обучение, КП" open={openSection === "drivelinks"} onToggle={() => toggle("drivelinks")}>
+          <div className="kd-muted" style={{ marginBottom: 12 }}>Вставь ссылку на папку Google Диск для каждого раздела. Пустые не показываются сотрудникам. Тендерная — во вкладке «Тендеры», КП — во вкладке «Клиенты», остальные — в «Материалах» и «Базе знаний».</div>
           {DRIVE_LINKS.map((l) => (
             <div key={l.key} className="kd-field">
               <span>{l.emoji} {l.label}</span>
@@ -3015,6 +3151,25 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
             </div>
           ))}
           <div className="kd-muted">Сохраняется при выходе из поля.</div>
+        </SettingsSection>
+
+        <SettingsSection title="Стадии воронки" subtitle={`${leadStages.length} стадий · CRM «Клиенты»`} open={openSection === "leadstages"} onToggle={() => toggle("leadstages")}>
+          <div className="kd-muted" style={{ marginBottom: 10 }}>Этапы, по которым клиент движется в воронке. Двигай порядок стрелками. Физлица обычно пропускают «КП выдано» и «Договор».</div>
+          {[...leadStages].sort((a, b) => a.sort - b.sort).map((st, i, arr) => (
+            <div key={st.id} className="kd-orderrow">
+              <span className="kd-ordernum">{i + 1}</span>
+              <span className="kd-ordername">{st.name}{st.is_lost ? " ✕" : ""}</span>
+              <div className="kd-orderbtns">
+                <button className="kd-btn ghost sm" disabled={i === 0} onClick={() => onMoveLeadStage(st, -1)}><ChevronRight size={16} style={{ transform: "rotate(-90deg)" }} /></button>
+                <button className="kd-btn ghost sm" disabled={i === arr.length - 1} onClick={() => onMoveLeadStage(st, 1)}><ChevronRight size={16} style={{ transform: "rotate(90deg)" }} /></button>
+                <button className="kd-btn ghost danger sm" onClick={() => onRemoveLeadStage(st)}><Trash2 size={13} /></button>
+              </div>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <input value={newStage} onChange={(e) => setNewStage(e.target.value)} placeholder="Новая стадия" style={{ flex: 1, font: "inherit", fontWeight: 600, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "10px 12px", minHeight: 44 }} />
+            <button className="kd-btn primary sm" disabled={!newStage.trim()} onClick={() => { onAddLeadStage(newStage); setNewStage(""); }}><Plus size={14} />Добавить</button>
+          </div>
         </SettingsSection>
 
         <SettingsSection title="Источники клиентов" subtitle={`${sources.length} шт. · откуда пришёл клиент`} open={openSection === "sources"} onToggle={() => toggle("sources")}>
@@ -3256,6 +3411,58 @@ function TaskModal({ task, people, onClose, onSave }) {
         </div>
       </div>
       {dueMode === "date" && <Field label="Выбери дату"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+    </ModalShell>
+  );
+}
+
+function LeadModal({ lead, stages, sources, onClose, onSave }) {
+  const [name, setName] = useState(lead?.name || "");
+  const [clientType, setClientType] = useState(lead?.client_type || "person");
+  const [phone, setPhone] = useState(lead?.phone || "+7 ");
+  const [address, setAddress] = useState(lead?.address || "");
+  const [source, setSource] = useState(lead?.source || "");
+  const [stageId, setStageId] = useState(lead?.stage_id || (stages[0]?.id || ""));
+  const [kpUrl, setKpUrl] = useState(lead?.kp_url || "");
+  const [note, setNote] = useState(lead?.note || "");
+  const [saving, setSaving] = useState(false);
+  const ok = (name.trim() || (phone.trim() && phone.trim() !== "+7"));
+  async function save() {
+    setSaving(true);
+    await onSave({ name: name.trim() || null, client_type: clientType, phone: phone.trim() || null, address: address.trim() || null, source: source.trim() || null, stage_id: stageId || null, kp_url: kpUrl.trim() || null, note: note.trim() || null }, lead);
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={lead ? "Клиент" : "Новый клиент"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <div className="kd-seg" style={{ width: "100%", marginBottom: 14 }}>
+        <button className={`kd-segbtn ${clientType === "person" ? "on" : ""}`} onClick={() => setClientType("person")}>Физлицо</button>
+        <button className={`kd-segbtn ${clientType === "company" ? "on" : ""}`} onClick={() => setClientType("company")}>Юрлицо</button>
+      </div>
+      <Field label={clientType === "company" ? "Название организации" : "Имя клиента"}><input value={name} onChange={(e) => setName(e.target.value)} placeholder={clientType === "company" ? "ТОО ..." : "Иван"} /></Field>
+      <div className="kd-grid2">
+        <Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 ..." /></Field>
+        <Field label="Стадия"><select value={stageId} onChange={(e) => setStageId(e.target.value)}>{[...stages].sort((a, b) => a.sort - b.sort).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+      </div>
+      <Field label="Адрес"><input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="г. Алматы, ..." /></Field>
+      <datalist id="kd-lead-sources">{sources.map((s) => <option key={s.id} value={s.name} />)}</datalist>
+      <Field label="Источник"><input list="kd-lead-sources" value={source} onChange={(e) => setSource(e.target.value)} placeholder="OLX / Instagram / рекомендация" /></Field>
+      <Field label="Ссылка на файл КП (Google Диск)"><input value={kpUrl} onChange={(e) => setKpUrl(e.target.value)} placeholder="https://drive.google.com/... (файл этого клиента)" /></Field>
+      <Field label="Заметка"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что обсудили, детали..." /></Field>
+    </ModalShell>
+  );
+}
+
+function LeadStageSelectModal({ lead, stages, onClose, onPick }) {
+  return (
+    <ModalShell title="Перевести на стадию" onClose={onClose} footer={<button className="kd-btn ghost" onClick={onClose}>Закрыть</button>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>{lead.name || lead.phone || "Клиент"} — выбери стадию:</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {[...stages].sort((a, b) => a.sort - b.sort).map((s) => (
+          <button key={s.id} className={`kd-btn ${lead.stage_id === s.id ? "primary" : "ghost"}`} style={{ justifyContent: "flex-start" }} onClick={() => onPick(s.id)}>{s.name}{lead.stage_id === s.id ? " ✓" : ""}</button>
+        ))}
+      </div>
     </ModalShell>
   );
 }
