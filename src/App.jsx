@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -49,8 +49,8 @@ const DRIVE_LINKS = [
   { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓", place: "knowledge" },
   { key: "drive_kp", label: "КП клиентов", desc: "Папка со всеми коммерческими предложениями", emoji: "📑", place: "leads" },
 ];
-const TAB_LABELS = { jobs: "Заявки", done: "Выполненные", canceled: "Отменённые", leads: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
-const ADMIN_TAB_ORDER = ["jobs", "done", "canceled", "leads", "tasks", "tenders", "repeats", "finance", "opex", "cash", "stock", "team", "partners", "docs", "materials", "knowledge", "journal", "trash"];
+const TAB_LABELS = { jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
+const ADMIN_TAB_ORDER = ["jobs", "schedule", "done", "canceled", "leads", "tasks", "tenders", "repeats", "finance", "opex", "cash", "stock", "team", "partners", "docs", "materials", "knowledge", "journal", "trash"];
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -122,6 +122,14 @@ const STATUS = {
 
 function timeStart(t) { const m = (t || "").match(/^(\d{1,2}):(\d{2})/); return m ? `${m[1].padStart(2, "0")}:${m[2]}` : "00:00"; }
 function jobTime(j) { if (!j.scheduled_date) return Infinity; return new Date(`${j.scheduled_date}T${timeStart(j.scheduled_time)}`).getTime(); }
+// Разбор "14:00–15:30" → { from: 840, to: 930 } (минуты от полуночи); null если времени нет
+function timeRangeMin(t) {
+  const all = [...String(t || "").matchAll(/(\d{1,2}):(\d{2})/g)];
+  if (!all.length) return null;
+  const from = Number(all[0][1]) * 60 + Number(all[0][2]);
+  const to = all[1] ? Number(all[1][1]) * 60 + Number(all[1][2]) : from + 60; // без конца — час по умолчанию
+  return { from, to: Math.max(to, from + 30) };
+}
 function dateGroupLabel(iso) {
   const date = parseIso(iso); if (!date) return "Без даты";
   const diff = Math.round((date.getTime() - todayStart()) / 86400000); const ru = isoToRu(iso);
@@ -293,6 +301,7 @@ function Dashboard({ session, profile }) {
   const [mktChannels, setMktChannels] = useState([]);
   const [mktTopups, setMktTopups] = useState([]);
   const [opexView, setOpexView] = useState("accounts");
+  const [scheduleDate, setScheduleDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [jobsDateFilter, setJobsDateFilter] = useState({ preset: "all" });
@@ -1313,6 +1322,7 @@ function Dashboard({ session, profile }) {
   });
   const baseTabs = isAdmin ? [
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
+    { id: "schedule", icon: CalendarClock, label: "График" },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `Задачи${allOpenTasks ? " · " + allOpenTasks : ""}` },
@@ -1431,6 +1441,75 @@ function Dashboard({ session, profile }) {
               ))}
           </>
         )}
+
+        {!loading && tab === "schedule" && (() => {
+          const DAY_START = 7 * 60, DAY_END = 21 * 60; // 07:00–21:00
+          const dayJobs = jobs.filter((j) => j.scheduled_date === scheduleDate && j.status !== "canceled");
+          const cols = [...techs.map((t) => ({ id: t.id, name: t.full_name || "—" })), { id: null, name: "Не назначено" }];
+          const shiftDay = (d) => { const x = parseIso(scheduleDate) || new Date(); x.setDate(x.getDate() + d); setScheduleDate(isoOf(x)); };
+          const isToday = scheduleDate === new Date().toISOString().slice(0, 10);
+          const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+          const hours = []; for (let h = 7; h <= 21; h++) hours.push(h);
+          return (
+            <>
+              <div className="kd-tabbar" style={{ marginBottom: 10 }}>
+                <div className="kd-title" style={{ fontSize: 18 }}>График · {isoToRu(scheduleDate)}{isToday ? " (сегодня)" : ""}</div>
+                <div className="kd-tabactions">
+                  <button className="kd-arrow" onClick={() => shiftDay(-1)}><ChevronLeft size={18} /></button>
+                  <button className="kd-btn ghost sm" onClick={() => setScheduleDate(new Date().toISOString().slice(0, 10))}>Сегодня</button>
+                  <button className="kd-arrow" onClick={() => shiftDay(1)}><ChevronRight size={18} /></button>
+                  <input type="date" value={scheduleDate} onChange={(e) => e.target.value && setScheduleDate(e.target.value)} className="kd-tldate" />
+                </div>
+              </div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>Нажми на заявку, чтобы открыть и перенести. Прокручивай вбок, если колонки не помещаются.</div>
+              <div className="kd-timeline">
+                <div className="kd-tlgrid" style={{ gridTemplateColumns: `56px repeat(${cols.length}, minmax(220px, 1fr))` }}>
+                  {/* шапка */}
+                  <div className="kd-tlhead kd-tlcorner"></div>
+                  {cols.map((c) => {
+                    const cnt = dayJobs.filter((j) => (j.assigned_to || null) === c.id).length;
+                    return <div key={c.id || "none"} className="kd-tlhead">{c.name}{cnt ? <span className="kd-tlcnt">{cnt}</span> : null}</div>;
+                  })}
+                  {/* ось времени */}
+                  <div className="kd-tlaxis" style={{ height: DAY_END - DAY_START }}>
+                    {hours.map((h) => <div key={h} className="kd-tlhour" style={{ top: h * 60 - DAY_START }}>{String(h).padStart(2, "0")}:00</div>)}
+                  </div>
+                  {/* колонки */}
+                  {cols.map((c) => {
+                    const colJobs = dayJobs.filter((j) => (j.assigned_to || null) === c.id);
+                    const timed = colJobs.map((j) => ({ j, r: timeRangeMin(j.scheduled_time) })).filter((x) => x.r);
+                    const untimed = colJobs.filter((j) => !timeRangeMin(j.scheduled_time));
+                    return (
+                      <div key={c.id || "none"} className="kd-tlcol" style={{ height: DAY_END - DAY_START }}>
+                        {isToday && nowMin >= DAY_START && nowMin <= DAY_END && <div className="kd-tlnow" style={{ top: nowMin - DAY_START }} />}
+                        {untimed.length > 0 && (
+                          <div className="kd-tluntimed">
+                            {untimed.map((j) => (
+                              <button key={j.id} className="kd-tlchip" onClick={() => setModal({ kind: "edit", job: j })}>⏱ без времени · {j.pest}</button>
+                            ))}
+                          </div>
+                        )}
+                        {timed.map(({ j, r }) => {
+                          const top = Math.max(0, r.from - DAY_START);
+                          const height = Math.max(34, Math.min(r.to, DAY_END) - Math.max(r.from, DAY_START));
+                          const st = STATUS[j.status] || STATUS.new;
+                          return (
+                            <button key={j.id} className="kd-tlcard" style={{ top, height, borderLeftColor: st.color, background: st.bg }}
+                              onClick={() => setModal({ kind: "edit", job: j })}>
+                              <div className="kd-tltime">{j.scheduled_time || ""}</div>
+                              <div className="kd-tlpest">{j.pest}</div>
+                              <div className="kd-tladdr">{(j.address || "").slice(0, 60)}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
         {!loading && tab === "done" && (
           <>
