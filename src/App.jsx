@@ -130,6 +130,11 @@ function timeRangeMin(t) {
   const to = all[1] ? Number(all[1][1]) * 60 + Number(all[1][2]) : from + 60; // без конца — час по умолчанию
   return { from, to: Math.max(to, from + 30) };
 }
+// Адрес без ссылок (для компактных карточек): вырезаем URL, если остался пустой — метка карты
+function addressPlain(text) {
+  const s = String(text || "").replace(/https?:\/\/[^\s]+/g, "").replace(/\s{2,}/g, " ").trim().replace(/[,;·]+$/, "");
+  return s || (text ? "📍 точка на карте" : "");
+}
 function dateGroupLabel(iso) {
   const date = parseIso(iso); if (!date) return "Без даты";
   const diff = Math.round((date.getTime() - todayStart()) / 86400000); const ru = isoToRu(iso);
@@ -302,6 +307,7 @@ function Dashboard({ session, profile }) {
   const [mktTopups, setMktTopups] = useState([]);
   const [opexView, setOpexView] = useState("accounts");
   const [scheduleDate, setScheduleDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [daysOff, setDaysOff] = useState([]);
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [jobsDateFilter, setJobsDateFilter] = useState({ preset: "all" });
@@ -331,7 +337,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -361,6 +367,7 @@ function Dashboard({ session, profile }) {
       supabase.from("lead_stages").select("*").order("sort"),
       supabase.from("mkt_channels").select("*").order("sort"),
       supabase.from("mkt_topups").select("*").order("topup_date", { ascending: false }),
+      supabase.from("tech_days_off").select("*"),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -394,6 +401,7 @@ function Dashboard({ session, profile }) {
     setLeadStages(lsr.data || []);
     setMktChannels(mcr.data || []);
     setMktTopups(mtr.data || []);
+    setDaysOff(dofr.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -941,6 +949,17 @@ function Dashboard({ session, profile }) {
     await logAction("Маркетинг", `Пополнение удалено: ${fmt(t.amount)} ₸`);
     showToast("Удалено"); load();
   }
+  async function addDayOff(techId, offDate, note) {
+    const { error } = await supabase.from("tech_days_off").insert({ tech_id: techId, off_date: offDate, note: note || null, created_by: session.user.id });
+    if (error) { showToast(error.message.includes("duplicate") ? "У этого сотрудника уже отмечен выходной на эту дату" : "Ошибка: " + error.message); return; }
+    await logAction("График", `Выходной: ${personName(techId)} · ${isoToRu(offDate)}`);
+    setModal(null); showToast("Выходной отмечен"); load();
+  }
+  async function removeDayOff(row) {
+    await supabase.from("tech_days_off").delete().eq("id", row.id);
+    await logAction("График", `Выходной снят: ${personName(row.tech_id)} · ${isoToRu(row.off_date)}`);
+    showToast("Выходной снят"); load();
+  }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
@@ -1213,7 +1232,24 @@ function Dashboard({ session, profile }) {
       if (j.partner_comp > 0) partnerComp += Number(j.partner_comp) || 0;
     });
     const weekMax = Math.max(1, ...week.map((w) => w.revenue));
-    return { revenue, cost, partnerShares, qrFees, partnerComp, profit: revenue - cost - partnerShares - qrFees + partnerComp, cash, qr, bySource, byTech, week, weekMax };
+    // средний чек по трём срезам (в том же периоде, независимо от фильтра бренда)
+    const avg = { ours: { sum: 0, n: 0 }, partner: { sum: 0, n: 0 } };
+    jobs.forEach((j) => {
+      if (j.status !== "done") return;
+      const dt = parseIso(j.scheduled_date);
+      const inR = pMode === "all" || (dt && dt.getTime() >= range.start && dt.getTime() < range.end);
+      if (!inR) return;
+      const paid = Number(j.report_paid) || 0;
+      if (paid <= 0) return;
+      const k = j.brand === "partner" ? "partner" : "ours";
+      avg[k].sum += paid; avg[k].n++;
+    });
+    const avgCheck = {
+      ours: avg.ours.n ? Math.round(avg.ours.sum / avg.ours.n) : 0, oursN: avg.ours.n,
+      partner: avg.partner.n ? Math.round(avg.partner.sum / avg.partner.n) : 0, partnerN: avg.partner.n,
+      all: (avg.ours.n + avg.partner.n) ? Math.round((avg.ours.sum + avg.partner.sum) / (avg.ours.n + avg.partner.n)) : 0, allN: avg.ours.n + avg.partner.n,
+    };
+    return { revenue, cost, partnerShares, qrFees, partnerComp, profit: revenue - cost - partnerShares - qrFees + partnerComp, cash, qr, bySource, byTech, week, weekMax, avgCheck };
   })();
 
   const expensesInRange = expenses.filter((e) => {
@@ -1443,13 +1479,15 @@ function Dashboard({ session, profile }) {
         )}
 
         {!loading && tab === "schedule" && (() => {
-          const DAY_START = 7 * 60, DAY_END = 21 * 60; // 07:00–21:00
+          const DAY_START = 7 * 60, DAY_END = 23 * 60; // 07:00–23:00
           const dayJobs = jobs.filter((j) => j.scheduled_date === scheduleDate && j.status !== "canceled");
+          const offToday = daysOff.filter((d) => d.off_date === scheduleDate);
+          const offFor = (techId) => offToday.find((d) => d.tech_id === techId);
           const cols = [...techs.map((t) => ({ id: t.id, name: t.full_name || "—" })), { id: null, name: "Не назначено" }];
           const shiftDay = (d) => { const x = parseIso(scheduleDate) || new Date(); x.setDate(x.getDate() + d); setScheduleDate(isoOf(x)); };
           const isToday = scheduleDate === new Date().toISOString().slice(0, 10);
           const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-          const hours = []; for (let h = 7; h <= 21; h++) hours.push(h);
+          const hours = []; for (let h = 7; h <= 23; h++) hours.push(h);
           return (
             <>
               <div className="kd-tabbar" style={{ marginBottom: 10 }}>
@@ -1459,46 +1497,50 @@ function Dashboard({ session, profile }) {
                   <button className="kd-btn ghost sm" onClick={() => setScheduleDate(new Date().toISOString().slice(0, 10))}>Сегодня</button>
                   <button className="kd-arrow" onClick={() => shiftDay(1)}><ChevronRight size={18} /></button>
                   <input type="date" value={scheduleDate} onChange={(e) => e.target.value && setScheduleDate(e.target.value)} className="kd-tldate" />
+                  <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "dayOff" })}>🌴 Выходной</button>
                 </div>
               </div>
-              <div className="kd-muted" style={{ marginBottom: 10 }}>Нажми на заявку, чтобы открыть и перенести. Прокручивай вбок, если колонки не помещаются.</div>
+              {offToday.length > 0 && <div className="kd-hint" style={{ marginBottom: 10 }}>🌴 Сегодня отдыхают: {offToday.map((d) => personName(d.tech_id)).join(", ")}. Их колонки затемнены — не назначай туда выезды.</div>}
               <div className="kd-timeline">
-                <div className="kd-tlgrid" style={{ gridTemplateColumns: `56px repeat(${cols.length}, minmax(220px, 1fr))` }}>
-                  {/* шапка */}
+                <div className="kd-tlgrid" style={{ gridTemplateColumns: `56px repeat(${cols.length}, minmax(230px, 1fr))` }}>
                   <div className="kd-tlhead kd-tlcorner"></div>
                   {cols.map((c) => {
                     const cnt = dayJobs.filter((j) => (j.assigned_to || null) === c.id).length;
-                    return <div key={c.id || "none"} className="kd-tlhead">{c.name}{cnt ? <span className="kd-tlcnt">{cnt}</span> : null}</div>;
+                    const off = c.id ? offFor(c.id) : null;
+                    return (
+                      <div key={c.id || "none"} className={`kd-tlhead ${off ? "off" : ""}`}>
+                        {c.name}{off ? <span className="kd-offtag">🌴 выходной</span> : (cnt ? <span className="kd-tlcnt">{cnt}</span> : null)}
+                        {off && <button className="kd-offx" title="Снять выходной" onClick={() => askConfirm(`Снять выходной у ${c.name}?`, () => removeDayOff(off), { danger: false, confirmLabel: "Да, снять" })}><X size={12} /></button>}
+                      </div>
+                    );
                   })}
-                  {/* ось времени */}
                   <div className="kd-tlaxis" style={{ height: DAY_END - DAY_START }}>
                     {hours.map((h) => <div key={h} className="kd-tlhour" style={{ top: h * 60 - DAY_START }}>{String(h).padStart(2, "0")}:00</div>)}
                   </div>
-                  {/* колонки */}
                   {cols.map((c) => {
                     const colJobs = dayJobs.filter((j) => (j.assigned_to || null) === c.id);
                     const timed = colJobs.map((j) => ({ j, r: timeRangeMin(j.scheduled_time) })).filter((x) => x.r);
                     const untimed = colJobs.filter((j) => !timeRangeMin(j.scheduled_time));
+                    const off = c.id ? offFor(c.id) : null;
                     return (
-                      <div key={c.id || "none"} className="kd-tlcol" style={{ height: DAY_END - DAY_START }}>
+                      <div key={c.id || "none"} className={`kd-tlcol ${off ? "off" : ""}`} style={{ height: DAY_END - DAY_START }}>
                         {isToday && nowMin >= DAY_START && nowMin <= DAY_END && <div className="kd-tlnow" style={{ top: nowMin - DAY_START }} />}
                         {untimed.length > 0 && (
                           <div className="kd-tluntimed">
                             {untimed.map((j) => (
-                              <button key={j.id} className="kd-tlchip" onClick={() => setModal({ kind: "edit", job: j })}>⏱ без времени · {j.pest}</button>
+                              <button key={j.id} className="kd-tlchip" onClick={() => setModal({ kind: "edit", job: j })}>⏱ {addressPlain(j.address) || j.pest}</button>
                             ))}
                           </div>
                         )}
                         {timed.map(({ j, r }) => {
                           const top = Math.max(0, r.from - DAY_START);
-                          const height = Math.max(34, Math.min(r.to, DAY_END) - Math.max(r.from, DAY_START));
+                          const height = Math.max(46, Math.min(r.to, DAY_END) - Math.max(r.from, DAY_START));
                           const st = STATUS[j.status] || STATUS.new;
                           return (
                             <button key={j.id} className="kd-tlcard" style={{ top, height, borderLeftColor: st.color, background: st.bg }}
                               onClick={() => setModal({ kind: "edit", job: j })}>
-                              <div className="kd-tltime">{j.scheduled_time || ""}</div>
-                              <div className="kd-tlpest">{j.pest}</div>
-                              <div className="kd-tladdr">{(j.address || "").slice(0, 60)}</div>
+                              <div className="kd-tladdr">{addressPlain(j.address)}</div>
+                              <div className="kd-tlsub">{j.scheduled_time || ""} · {j.pest}</div>
                             </button>
                           );
                         })}
@@ -1968,6 +2010,13 @@ function Dashboard({ session, profile }) {
                 <div className="kd-row"><span>Выплаты сотрудникам (зарплата/дорожные)</span><strong style={{ color: "#B42318" }}>− {fmt(expensesInRange)} ₸</strong></div>
                 <div className="kd-row"><span>Операционные расходы</span><strong style={{ color: "#B42318" }}>− {fmt(opexInRange)} ₸</strong></div>
                 <div className="kd-row total"><span>Итоговая прибыль</span><strong style={{ color: netProfit >= 0 ? "#0E7C66" : "#B42318" }}>{fmt(netProfit)} ₸</strong></div>
+              </div>
+              <div className="kd-card">
+                <div className="kd-section">Средний чек · {range.label}</div>
+                <div className="kd-row"><span>Наши заявки</span><span className="kd-twoval"><em>{fin.avgCheck.oursN} заявок</em><strong>{fmt(fin.avgCheck.ours)} ₸</strong></span></div>
+                <div className="kd-row"><span>Партнёрские</span><span className="kd-twoval"><em>{fin.avgCheck.partnerN} заявок</em><strong>{fmt(fin.avgCheck.partner)} ₸</strong></span></div>
+                <div className="kd-row total"><span>Общий (все заявки)</span><span className="kd-twoval"><em>{fin.avgCheck.allN} заявок</em><strong style={{ color: "var(--primary-d)" }}>{fmt(fin.avgCheck.all)} ₸</strong></span></div>
+                <div className="kd-muted" style={{ marginTop: 8 }}>Чек = выручка ÷ число выполненных оплаченных заявок за период. Считается по всем заявкам, независимо от фильтра выше.</div>
               </div>
               <div className="kd-card">
                 <div className="kd-section">Источники клиентов</div>
@@ -2535,6 +2584,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} onClose={() => setModal(null)} onSave={saveLead} />}
       {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}
       {modal?.kind === "mktTopup" && <MktTopupModal channel={modal.channel} accounts={accounts} onClose={() => setModal(null)} onSave={(amount, date, accId, note) => addMktTopup(modal.channel.id, amount, date, accId, note)} />}
+      {modal?.kind === "dayOff" && <DayOffModal techs={techs} defaultDate={scheduleDate} daysOff={daysOff} personName={personName} onClose={() => setModal(null)} onAdd={addDayOff} onRemove={removeDayOff} />}
       {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} onClose={() => setModal(null)} onPick={(sid) => { setLeadStage(modal.lead, sid); setModal(null); }} />}
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
@@ -3662,6 +3712,39 @@ function TaskModal({ task, people, onClose, onSave }) {
         </div>
       </div>
       {dueMode === "date" && <Field label="Выбери дату"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+    </ModalShell>
+  );
+}
+
+function DayOffModal({ techs, defaultDate, daysOff, personName, onClose, onAdd, onRemove }) {
+  const [techId, setTechId] = useState(techs[0]?.id || "");
+  const [offDate, setOffDate] = useState(defaultDate || new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = techId && offDate;
+  const upcoming = [...daysOff].filter((d) => d.off_date >= new Date().toISOString().slice(0, 10)).sort((a, b) => a.off_date.localeCompare(b.off_date)).slice(0, 12);
+  async function save() { setSaving(true); await onAdd(techId, offDate, note.trim() || null); setSaving(false); }
+  return (
+    <ModalShell title="Выходной сотрудника" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Закрыть</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Отметить выходной"}</button>
+    </>}>
+      <div className="kd-grid2">
+        <Field label="Сотрудник"><select value={techId} onChange={(e) => setTechId(e.target.value)}>{techs.map((t) => <option key={t.id} value={t.id}>{t.full_name || "—"}</option>)}</select></Field>
+        <Field label="Дата"><input type="date" value={offDate} onChange={(e) => setOffDate(e.target.value)} /></Field>
+      </div>
+      <Field label="Причина (необязательно)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="выходной / отпросился / болеет" /></Field>
+      {upcoming.length > 0 && (
+        <>
+          <div className="kd-section" style={{ marginTop: 6 }}>Ближайшие выходные</div>
+          {upcoming.map((d) => (
+            <div key={d.id} className="kd-returnrow" style={{ fontSize: 13.5 }}>
+              <span>🌴 {personName(d.tech_id)} · {isoToRu(d.off_date)}{d.note ? " · " + d.note : ""}</span>
+              <button className="kd-btn ghost danger sm" onClick={() => onRemove(d)}><X size={12} /></button>
+            </div>
+          ))}
+        </>
+      )}
     </ModalShell>
   );
 }
