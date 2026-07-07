@@ -163,6 +163,24 @@ body{
 .kd-touch{margin-top:6px;font-size:12.5px;font-weight:600;color:var(--muted);}
 .kd-mktbar{height:8px;background:var(--surface-sunk);border-radius:999px;overflow:hidden;margin:8px 0;}
 .kd-mktbarfill{height:100%;background:var(--primary);border-radius:999px;transition:width .3s ease;}
+/* Таймлайн (График) */
+.kd-timeline{overflow:auto;max-height:76vh;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);}
+.kd-tlgrid{display:grid;position:relative;min-width:max-content;}
+.kd-tlhead{position:sticky;top:0;z-index:5;background:var(--surface-sunk);padding:10px 12px;font-weight:700;font-size:14px;border-bottom:1px solid var(--line);border-right:1px solid var(--line-soft);white-space:nowrap;}
+.kd-tlcorner{position:sticky;left:0;top:0;z-index:8;}
+.kd-tlcnt{margin-left:7px;background:var(--primary-tint);color:var(--primary-d);border-radius:999px;padding:1px 8px;font-size:12px;font-weight:700;}
+.kd-tlaxis{position:sticky;left:0;z-index:6;background:var(--surface);border-right:1px solid var(--line);}
+.kd-tlhour{position:absolute;right:6px;transform:translateY(-7px);font-size:11px;color:var(--muted);font-weight:700;}
+.kd-tlcol{position:relative;border-right:1px solid var(--line-soft);background:repeating-linear-gradient(to bottom,transparent 0 59px,var(--line-soft) 59px 60px);}
+.kd-tlnow{position:absolute;left:0;right:0;height:2px;background:#B3261E;z-index:3;box-shadow:0 0 4px rgba(179,38,30,.5);}
+.kd-tlcard{position:absolute;left:4px;right:4px;border:1px solid var(--line-soft);border-left:4px solid;border-radius:8px;padding:4px 8px;text-align:left;cursor:pointer;overflow:hidden;font:inherit;z-index:2;display:block;}
+.kd-tlcard:hover{filter:brightness(.97);}
+.kd-tltime{font-size:11px;font-weight:800;letter-spacing:.2px;}
+.kd-tlpest{font-size:13px;font-weight:700;line-height:1.25;}
+.kd-tladdr{font-size:11.5px;color:var(--ink-soft);font-weight:600;line-height:1.25;}
+.kd-tluntimed{position:relative;z-index:4;padding:4px;}
+.kd-tlchip{display:block;width:calc(100% - 0px);text-align:left;background:var(--surface-sunk);border:1px dashed var(--line);border-radius:8px;padding:6px 9px;font:inherit;font-size:12px;font-weight:700;color:var(--ink-soft);cursor:pointer;margin-bottom:4px;}
+.kd-tldate{font:inherit;font-weight:600;color:var(--ink);padding:7px 9px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);min-height:38px;}
 .kd-datefilter{margin-bottom:14px;}
 .kd-datechips{display:flex;flex-wrap:wrap;gap:6px;}
 .kd-datechip{border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);font:inherit;font-weight:700;font-size:12.5px;padding:7px 13px;border-radius:999px;cursor:pointer;min-height:34px;transition:background .14s ease,border-color .14s ease,color .14s ease;}
