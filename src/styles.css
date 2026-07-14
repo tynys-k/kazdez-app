@@ -341,9 +341,12 @@ body{
 .kd-tlhour{position:absolute;right:6px;transform:translateY(-7px);font-family:var(--font-mono);font-size:11px;color:var(--muted);font-weight:700;}
 .kd-tlcol{position:relative;border-right:1px solid var(--line-soft);background:repeating-linear-gradient(to bottom,transparent 0 59px,var(--line-soft) 59px 60px);}
 .kd-tlnow{position:absolute;left:0;right:0;height:2px;background:var(--rust);z-index:3;box-shadow:0 0 6px rgba(242,114,106,.6);}
-.kd-tlcard{position:absolute;left:4px;right:4px;background:var(--surface-hi);border:1px solid var(--line-hi);border-left:4px solid;border-radius:9px;padding:4px 8px;text-align:left;cursor:pointer;overflow:hidden;font:inherit;z-index:2;display:block;}
-.kd-tlcard:hover{filter:brightness(1.15);}
-.kd-tladdr{font-size:13.5px;font-weight:800;color:var(--ink);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+/* карточки таймлайна: фон приходит светлым инлайн-стилем (st.bg) —
+   накрываем его тёмным слоем через inset box-shadow, чтобы светлый текст читался,
+   при этом сохраняется лёгкий оттенок статуса и яркая цветная левая полоса */
+.kd-tlcard{position:absolute;left:4px;right:4px;background:var(--surface-hi);border:1px solid var(--line-hi);border-left:4px solid;border-radius:9px;padding:5px 9px;text-align:left;cursor:pointer;overflow:hidden;font:inherit;z-index:2;display:block;box-shadow:inset 0 0 0 2000px rgba(9,13,11,.84);}
+.kd-tlcard:hover{box-shadow:inset 0 0 0 2000px rgba(20,27,22,.80);}
+.kd-tladdr{font-size:13px;font-weight:800;color:var(--ink);line-height:1.32;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .kd-tlsub{font-size:11px;font-weight:700;color:var(--ink-soft);margin-top:2px;letter-spacing:.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .kd-tlhead.off{background:repeating-linear-gradient(45deg,var(--surface-sunk) 0 8px,var(--surface) 8px 16px);color:var(--muted);}
 .kd-offtag{margin-left:7px;background:var(--amber-tint);color:var(--amber);border-radius:999px;padding:1px 8px;font-size:11.5px;font-weight:800;}
