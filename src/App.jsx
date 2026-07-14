@@ -103,6 +103,7 @@ function Dashboard({ session, profile }) {
   const [confirmState, setConfirmState] = useState(null);
   const askConfirm = (message, onYes, opts = {}) => setConfirmState({ message, onYes, danger: opts.danger !== false, confirmLabel: opts.confirmLabel });
   const [statusFilter, setStatusFilter] = useState("all");
+  const [sideOpen, setSideOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [doneSortDir, setDoneSortDir] = useState("desc");
   const [techFilter, setTechFilter] = useState("");
@@ -1265,23 +1266,28 @@ function Dashboard({ session, profile }) {
     : baseTabs;
 
   return (
-    <div className="kd-app">
-      <div className="kd-hazard" />
-      <header className="kd-top">
+    <div className={`kd-app ${sideOpen ? "side-open" : ""}`}>
+      <div className="kd-scrim" onClick={() => setSideOpen(false)} />
+      <aside className="kd-side">
+        <div className="kd-hazard" />
         <div className="kd-brand">
           <div className="kd-logo"><Bug size={19} strokeWidth={2.4} /></div>
           <div><div className="kd-brand-name">KazDez</div><div className="kd-brand-sub">{isAdmin ? "Админ" : "Дезинфектор"} · {actorName}</div></div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {isAdmin && <button className="kd-btn ghost" onClick={() => setModal({ kind: "settings" })}><Settings size={15} /></button>}
-          <button className="kd-btn ghost" onClick={() => supabase.auth.signOut()}><LogOut size={15} />Выйти</button>
+        <nav className="kd-tabs">
+          {tabs.map((t) => (<button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => { setTab(t.id); setSideOpen(false); }}>{t.icon ? <t.icon size={17} /> : null}<span className="kd-tab-lbl">{t.label}</span></button>))}
+        </nav>
+        <div className="kd-navfoot">
+          {isAdmin && <button className="kd-tab" onClick={() => { setModal({ kind: "settings" }); setSideOpen(false); }}><Settings size={17} /><span className="kd-tab-lbl">Настройки</span></button>}
+          <button className="kd-tab" onClick={() => supabase.auth.signOut()}><LogOut size={17} /><span className="kd-tab-lbl">Выйти</span></button>
         </div>
-      </header>
+      </aside>
 
-      <main className="kd-main">
-        <div className="kd-tabbar">
-          <div className="kd-tabs">
-            {tabs.map((t) => (<button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => setTab(t.id)}>{t.icon ? <t.icon size={15} /> : null}{t.label}</button>))}
+      <div className="kd-mainwrap">
+        <header className="kd-topbar">
+          <div className="kd-topleft">
+            <button className="kd-burger" onClick={() => setSideOpen((v) => !v)} aria-label="Меню"><ClipboardList size={18} /></button>
+            <h1 className="kd-pagetitle">{(tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
           </div>
           <div className="kd-tabactions">
             {tab === "jobs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
@@ -1291,7 +1297,9 @@ function Dashboard({ session, profile }) {
             {tab === "opex" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "opex" })}><Plus size={15} />Расход</button>}
             {isAdmin && <button className="kd-btn ghost" onClick={exportExcel}><Download size={15} />Выгрузить в Excel</button>}
           </div>
-        </div>
+        </header>
+
+      <main className="kd-main">
 
         {loading && <div className="kd-empty">Загрузка…</div>}
 
@@ -2482,6 +2490,7 @@ function Dashboard({ session, profile }) {
           </div>
         )}
       </main>
+      </div>
 
       {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} sources={sources} pestTypes={pestTypes} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
       {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} sources={sources} pestTypes={pestTypes} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
