@@ -525,14 +525,15 @@ function Dashboard({ session, profile }) {
       p_docs_needed: docs.needed, p_docs_avr: docs.avr, p_docs_dogovor: docs.dogovor, p_docs_note: docs.note,
     });
     if (error) { showToast("Ошибка: " + error.message); return; }
-    // перечисление + пересчёт report_paid с учётом всех трёх способов
+    // перечисление + пересбор report_paid с учётом всех трёх способов
     const transfer = Number(report.transfer) || 0;
-    await supabase.from("jobs").update({
+    const upd = await supabase.from("jobs").update({
       report_transfer: transfer || null,
       transfer_paid: false,
       report_paid: (Number(report.cash) || 0) + (Number(report.qr) || 0) + transfer,
       report_method: report.method,
     }).eq("id", job.id);
+    if (upd.error) { showToast("Отчёт сохранён, но перечисление не записалось: " + upd.error.message + ". Проверь, выполнена ли SQL-миграция kazdez-transfer-bonus."); load(); return; }
     setModal({ kind: "reportSuccess" }); load();
   }
   async function markTransferPaid(job, accountId, paidDate) {
