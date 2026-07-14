@@ -525,16 +525,12 @@ function Dashboard({ session, profile }) {
       p_docs_needed: docs.needed, p_docs_avr: docs.avr, p_docs_dogovor: docs.dogovor, p_docs_note: docs.note,
     });
     if (error) { showToast("Ошибка: " + error.message); return; }
-    // перечисление + пересбор report_paid с учётом всех трёх способов
-    const transfer = Number(report.transfer) || 0;
-    const upd = await supabase.from("jobs").update({
-      report_transfer: transfer || null,
-      transfer_paid: false,
-      report_paid: (Number(report.cash) || 0) + (Number(report.qr) || 0) + transfer,
-      report_method: report.method,
-      edit_request_status: null, edit_request_reason: null, edit_request_at: null,
-    }).eq("id", job.id);
-    if (upd.error) { showToast("Отчёт сохранён, но перечисление не записалось: " + upd.error.message + ". Проверь, выполнена ли SQL-миграция kazdez-transfer-bonus."); load(); return; }
+    // перечисление + пересчёт report_paid — через защищённую функцию (RLS блокировал прямой update)
+    const upd = await supabase.rpc("save_report_extras", {
+      p_job: job.id, p_cash: Number(report.cash) || 0, p_qr: Number(report.qr) || 0,
+      p_transfer: Number(report.transfer) || 0, p_method: report.method,
+    });
+    if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); load(); return; }
     setModal({ kind: "reportSuccess" }); load();
   }
   async function markTransferPaid(job, accountId, paidDate) {
@@ -559,7 +555,7 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Сохранено"); load();
   }
   async function requestReportEdit(job, reason) {
-    const { error } = await supabase.from("jobs").update({ edit_request_status: "requested", edit_request_reason: reason || null, edit_request_at: new Date().toISOString() }).eq("id", job.id);
+    const { error } = await supabase.rpc("request_report_edit", { p_job: job.id, p_reason: reason || null });
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Отчёт", `Запрос на изменение: ${job.pest} · ${job.address}${reason ? " — " + reason : ""}`);
     setModal(null); showToast("Запрос отправлен админу"); load();
