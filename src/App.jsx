@@ -423,6 +423,9 @@ function Dashboard({ session, profile }) {
   }
 
   const techById = (id) => techs.find((t) => t.id === id);
+  const techExtrasTotal = (techId) => jobs.filter((j) => j.assigned_to === techId).reduce((s, j) => s + (Number(j.tech_bonus) || 0) + (Number(j.tech_travel) || 0), 0);
+  const techBonusTotal = (techId) => jobs.filter((j) => j.assigned_to === techId).reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
+  const techTravelTotal = (techId) => jobs.filter((j) => j.assigned_to === techId).reduce((s, j) => s + (Number(j.tech_travel) || 0), 0);
   const profileById = (id) => allProfiles.find((p) => p.id === id);
   const personName = (id) => profileById(id)?.full_name || "—";
   const assignableProfiles = allProfiles;
@@ -498,7 +501,7 @@ function Dashboard({ session, profile }) {
     const ins = await supabase.from("jobs").insert({
       type: "Вторичная", scheduled_date: null, scheduled_time: "", address: job.address, floor: job.floor,
       area: job.area, source: job.source, pest: job.pest, price_options: job.price_options,
-      client_phone: job.client_phone, guarantee_months: job.guarantee_months, status: "new", created_by: session.user.id,
+      client_phone: job.client_phone, guarantee_months: job.guarantee_months, status: "new", repeat_of: job.id, created_by: session.user.id,
     });
     if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
     await supabase.from("jobs").update({ repeat_state: "finished" }).eq("id", job.id);
@@ -522,7 +525,36 @@ function Dashboard({ session, profile }) {
       p_docs_needed: docs.needed, p_docs_avr: docs.avr, p_docs_dogovor: docs.dogovor, p_docs_note: docs.note,
     });
     if (error) { showToast("Ошибка: " + error.message); return; }
+    // перечисление + пересчёт report_paid с учётом всех трёх способов
+    const transfer = Number(report.transfer) || 0;
+    await supabase.from("jobs").update({
+      report_transfer: transfer || null,
+      transfer_paid: false,
+      report_paid: (Number(report.cash) || 0) + (Number(report.qr) || 0) + transfer,
+      report_method: report.method,
+    }).eq("id", job.id);
     setModal({ kind: "reportSuccess" }); load();
+  }
+  async function markTransferPaid(job, accountId, paidDate) {
+    const { error } = await supabase.from("jobs").update({ transfer_paid: true, transfer_account_id: accountId || null, transfer_paid_date: paidDate || new Date().toISOString().slice(0, 10) }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    if (accountId) {
+      const exists = moves.some((m) => m.source === "job_transfer" && m.ref_id === job.id);
+      if (!exists) {
+        await supabase.from("money_moves").insert({
+          account_id: accountId, direction: "income", amount: Number(job.report_transfer) || 0, move_date: paidDate || new Date().toISOString().slice(0, 10),
+          note: `Оплата перечислением: ${job.pest} · ${job.address}`, source: "job_transfer", ref_id: job.id, created_by: session.user.id,
+        });
+      }
+    }
+    await logAction("Оплата", `Перечисление оплачено ${fmt(job.report_transfer)} ₸${accountId ? " → " + (accountById(accountId)?.name || "") : ""}`);
+    setModal(null); showToast("Оплата зачтена"); load();
+  }
+  async function saveTechExtras(job, bonus, travel) {
+    const { error } = await supabase.from("jobs").update({ tech_bonus: Number(bonus) || null, tech_travel: Number(travel) || null }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Заявка", `Бонус/дорожные: ${job.pest} · бонус ${fmt(bonus)} · дорожные ${fmt(travel)}`);
+    setModal(null); showToast("Сохранено"); load();
   }
   async function deleteJob(job) {
     await supabase.from("trash").insert({ deleted_by: actorName, deleted_by_id: session.user.id, job: { ...job } });
@@ -1468,6 +1500,8 @@ function Dashboard({ session, profile }) {
                         onCompPaid={(paid) => markCompPaid(j, paid)}
                         onCancel={() => setModal({ kind: "cancelJob", job: j })}
                         onRestore={() => restoreCanceled(j)}
+                  onTransferPaid={() => setModal({ kind: "transferPay", job: j })}
+                  onTechExtras={() => setModal({ kind: "techExtras", job: j })}
                         onHistory={() => setModal({ kind: "history", job: j })}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                         onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
@@ -1577,6 +1611,8 @@ function Dashboard({ session, profile }) {
                         onCompPaid={(paid) => markCompPaid(j, paid)}
                         onCancel={() => setModal({ kind: "cancelJob", job: j })}
                         onRestore={() => restoreCanceled(j)}
+                  onTransferPaid={() => setModal({ kind: "transferPay", job: j })}
+                  onTechExtras={() => setModal({ kind: "techExtras", job: j })}
                       onHistory={() => setModal({ kind: "history", job: j })}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                       onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
@@ -1953,6 +1989,8 @@ function Dashboard({ session, profile }) {
                   onCompPaid={(paid) => markCompPaid(j, paid)}
                   onCancel={() => setModal({ kind: "cancelJob", job: j })}
                   onRestore={() => restoreCanceled(j)}
+                  onTransferPaid={() => setModal({ kind: "transferPay", job: j })}
+                  onTechExtras={() => setModal({ kind: "techExtras", job: j })}
                   onHistory={() => setModal({ kind: "history", job: j })}
                   onOpenDetails={() => setModal({ kind: "details", job: j })}
                   onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину.`, () => deleteJob(j))} />
@@ -2332,6 +2370,7 @@ function Dashboard({ session, profile }) {
                       <div>
                         <div className="kd-tech-name">{t.full_name || "(без имени)"}</div>
                         <div className="kd-muted">{t.phone || "—"} · заявок: {cnt}</div>
+                        {techExtrasTotal(t.id) > 0 && <div className="kd-muted" style={{ color: "var(--violet)", fontWeight: 700 }}>🎁 бонусы {fmt(techBonusTotal(t.id))} ₸ · дорожные {fmt(techTravelTotal(t.id))} ₸</div>}
                       </div>
                     </div>
                     <div className="kd-actions" style={{ marginBottom: 0 }}>
@@ -2543,7 +2582,17 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} sources={sources} pestTypes={pestTypes} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
       {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} sources={sources} pestTypes={pestTypes} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} />}
-      {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} onClose={() => setModal(null)} onSave={submitReport} />}
+      {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} primaryReport={(() => {
+        if (!modal.job.repeat_of) return null;
+        const p = jobs.find((x) => x.id === modal.job.repeat_of);
+        if (!p) return null;
+        return {
+          paid: Number(p.report_paid) || 0,
+          techName: techById(p.assigned_to)?.full_name || "—",
+          date: p.scheduled_date,
+          chems: (p.chemicals || []).map((rc) => ({ name: rc.name || (chemicals.find((c) => c.id === rc.chemical_id)?.name) || "препарат", amount: rc.amount })),
+        };
+      })()} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "reportSuccess" && <ReportSuccessModal onClose={() => setModal(null)} />}
       {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} />}
       {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} onReport={() => setModal({ kind: "report", job: modal.job })} onClose={() => setModal(null)} />}
@@ -2585,6 +2634,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}
       {modal?.kind === "mktTopup" && <MktTopupModal channel={modal.channel} accounts={accounts} onClose={() => setModal(null)} onSave={(amount, date, accId, note) => addMktTopup(modal.channel.id, amount, date, accId, note)} />}
       {modal?.kind === "dayOff" && <DayOffModal techs={techs} defaultDate={scheduleDate} daysOff={daysOff} personName={personName} onClose={() => setModal(null)} onAdd={addDayOff} onRemove={removeDayOff} />}
+      {modal?.kind === "transferPay" && <TransferPayModal job={modal.job} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markTransferPaid(modal.job, accId, date)} />}
+      {modal?.kind === "techExtras" && <TechExtrasModal job={modal.job} techName={techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} onSave={(bonus, travel) => saveTechExtras(modal.job, bonus, travel)} />}
       {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} onClose={() => setModal(null)} onPick={(sid) => { setLeadStage(modal.lead, sid); setModal(null); }} />}
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
@@ -2604,7 +2655,7 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
@@ -2635,6 +2686,16 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {isAdmin && job.partner_comp > 0 && <span className={job.partner_comp_paid ? "kd-muted paid" : "kd-muted"} style={{ color: job.partner_comp_paid ? undefined : "#B4650B", fontWeight: 700 }}>💳 Компенсация от партнёра нам: {fmt(job.partner_comp)} ₸ · {job.partner_comp_paid ? "получено" : "ожидаем на Kaspi"}</span>}
         {isAdmin && <span className="kd-muted">{assignedName ? "Дезинфектор: " + assignedName : "Не назначен"}</span>}
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
+        {Number(job.report_transfer) > 0 && (
+          <span className="kd-muted" style={{ color: job.transfer_paid ? "#0E7C66" : "#B4650B", fontWeight: 700 }}>
+            💳 Перечисление {fmt(job.report_transfer)} ₸ — {job.transfer_paid ? `оплачено ${isoToRu(job.transfer_paid_date) || ""}` : "ждём оплату"}
+          </span>
+        )}
+        {isAdmin && (Number(job.tech_bonus) > 0 || Number(job.tech_travel) > 0) && (
+          <span className="kd-muted" style={{ color: "var(--violet)", fontWeight: 700 }}>
+            🎁 {Number(job.tech_bonus) > 0 ? `бонус ${fmt(job.tech_bonus)} ₸` : ""}{Number(job.tech_bonus) > 0 && Number(job.tech_travel) > 0 ? " · " : ""}{Number(job.tech_travel) > 0 ? `дорожные ${fmt(job.tech_travel)} ₸` : ""}
+          </span>
+        )}
         {job.status === "canceled" && <span className="kd-muted" style={{ color: "#B3261E", fontWeight: 700 }}>Отменена{job.cancel_reason ? ": " + job.cancel_reason : ""}</span>}
       </div>
       <div className="kd-actions">
@@ -2649,6 +2710,8 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {isAdmin && job.status === "canceled" && <button className="kd-btn primary" onClick={() => onRestore()}>Вернуть в работу</button>}
         {isAdmin && share > 0 && <button className="kd-btn ghost" onClick={() => onPayPartner(!job.partner_paid)}>{job.partner_paid ? "Отменить выплату" : "Выплатить долю"}</button>}
         {isAdmin && job.partner_comp > 0 && <button className="kd-btn ghost" onClick={() => onCompPaid(!job.partner_comp_paid)}>{job.partner_comp_paid ? "Компенсация не получена" : "Компенсация получена"}</button>}
+        {isAdmin && job.status === "done" && Number(job.report_transfer) > 0 && !job.transfer_paid && <button className="kd-btn primary sm" onClick={() => onTransferPaid()}>💳 Зачесть оплату ({fmt(job.report_transfer)})</button>}
+        {isAdmin && job.status === "done" && <button className="kd-btn ghost sm" onClick={() => onTechExtras()}>Бонус / дорожные</button>}
         {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить"><Trash2 size={14} /></button>}
       </div>
     </div>
@@ -2945,15 +3008,22 @@ function DocModal({ doc, partners, onClose, onSave }) {
   );
 }
 
-function ReportModal({ job, chemicals, onClose, onSave }) {
+function ReportModal({ job, chemicals, primaryReport, onClose, onSave }) {
   const [cash, setCash] = useState(""); const [qr, setQr] = useState(""); const [note, setNote] = useState("");
+  const [transfer, setTransfer] = useState("");
   const [chems, setChems] = useState([{ chemical_id: "", amount: "", unit: "small" }, { chemical_id: "", amount: "", unit: "small" }]);
   const [fuWanted, setFuWanted] = useState(false); const [fuDate, setFuDate] = useState(""); const [fuNote, setFuNote] = useState("");
   const [docNeeded, setDocNeeded] = useState(false); const [avr, setAvr] = useState(false); const [dogovor, setDogovor] = useState(false); const [docNote, setDocNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const total = (Number(cash) || 0) + (Number(qr) || 0);
+  const total = (Number(cash) || 0) + (Number(qr) || 0) + (Number(transfer) || 0);
   const setChem = (i, k) => (e) => { const n = chems.slice(); n[i] = { ...n[i], [k]: e.target.value }; setChems(n); };
-  function methodLabel() { const c = Number(cash) || 0, q = Number(qr) || 0; if (c > 0 && q > 0) return "Наличные + QR"; if (q > 0) return "QR"; return "Наличные"; }
+  function methodLabel() {
+    const parts = [];
+    if (Number(cash) > 0) parts.push("Наличные");
+    if (Number(qr) > 0) parts.push("QR");
+    if (Number(transfer) > 0) parts.push("Перечисление");
+    return parts.join(" + ") || "Наличные";
+  }
   async function save() {
     setSaving(true);
     const lines = chems.filter((c) => c.chemical_id && Number(c.amount) > 0).map((c) => {
@@ -2962,7 +3032,7 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
       const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
       return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
     });
-    await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote } }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
+    await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote } }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
     setSaving(false);
   }
   return (
@@ -2971,12 +3041,32 @@ function ReportModal({ job, chemicals, onClose, onSave }) {
       <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
     </>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
+
+      {primaryReport && (
+        <div className="kd-card" style={{ marginBottom: 14, background: "var(--surface-sunk)", boxShadow: "none" }}>
+          <div className="kd-section" style={{ marginTop: 0 }}>📋 Первичная обработка — от чего отталкиваться</div>
+          <div className="kd-row"><span>Сумма</span><strong>{fmt(primaryReport.paid)} ₸</strong></div>
+          <div className="kd-row"><span>Исполнитель</span><strong>{primaryReport.techName || "—"}</strong></div>
+          {primaryReport.date && <div className="kd-row"><span>Дата</span><strong>{isoToRu(primaryReport.date)}</strong></div>}
+          {primaryReport.chems && primaryReport.chems.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div className="kd-muted" style={{ marginBottom: 4, fontWeight: 700 }}>Препараты по первичной:</div>
+              {primaryReport.chems.map((c, i) => <div key={i} className="kd-row" style={{ padding: "4px 0" }}><span>{c.name}</span><span className="kd-muted">{c.amount} мл/г</span></div>)}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="kd-section">Оплата</div>
       <div className="kd-grid2">
         <Field label="Наличными (₸)"><input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="numeric" placeholder="15000" /></Field>
-        <Field label="QR / переводом (₸)"><input value={qr} onChange={(e) => setQr(e.target.value)} inputMode="numeric" placeholder="10000" /></Field>
+        <Field label="QR (₸)"><input value={qr} onChange={(e) => setQr(e.target.value)} inputMode="numeric" placeholder="10000" /></Field>
       </div>
-      <div className="kd-paytotal"><span>Итого получено</span><strong>{fmt(total)} ₸</strong></div>
+      <Field label="Через перечисление на счёт (₸)">
+        <input value={transfer} onChange={(e) => setTransfer(e.target.value)} inputMode="numeric" placeholder="Юрлицо / тендер — оплата на счёт" />
+      </Field>
+      {Number(transfer) > 0 && <div className="kd-hint" style={{ marginTop: -4 }}>💳 Перечисление уйдёт админу со статусом «ждём оплату». Админ проставит счёт и дату, когда деньги придут.</div>}
+      <div className="kd-paytotal"><span>Итого по заявке</span><strong>{fmt(total)} ₸</strong></div>
       <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Было поднятие" /></Field>
       <div className="kd-section">Расход препаратов</div>
       {chemicals.length === 0 && <div className="kd-muted" style={{ marginBottom: 8 }}>Сначала добавь препараты на склад — тогда их можно будет выбирать здесь.</div>}
@@ -3712,6 +3802,43 @@ function TaskModal({ task, people, onClose, onSave }) {
         </div>
       </div>
       {dueMode === "date" && <Field label="Выбери дату"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+    </ModalShell>
+  );
+}
+
+function TransferPayModal({ job, accounts, onClose, onConfirm }) {
+  const [accId, setAccId] = useState(accounts[0]?.id || "");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  async function save() { setSaving(true); await onConfirm(accId || null, date || null); setSaving(false); }
+  return (
+    <ModalShell title="Зачесть оплату перечислением" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Да, оплата пришла"}</button>
+    </>}>
+      <div className="kd-paytotal"><span>{job.pest} · {job.address}</span><strong>{fmt(job.report_transfer)} ₸</strong></div>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Отметь, когда деньги реально пришли. Сумма зачислится на выбранный счёт в «Финансах».</div>
+      <Field label="На какой счёт пришло"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— не привязывать к счёту —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      <Field label="Дата оплаты"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+    </ModalShell>
+  );
+}
+
+function TechExtrasModal({ job, techName, onClose, onSave }) {
+  const [bonus, setBonus] = useState(job.tech_bonus ?? "");
+  const [travel, setTravel] = useState(job.tech_travel ?? "");
+  const [saving, setSaving] = useState(false);
+  async function save() { setSaving(true); await onSave(bonus, travel); setSaving(false); }
+  return (
+    <ModalShell title="Бонус и дорожные" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Сотрудник: <strong>{techName || "не назначен"}</strong>. Суммы попадут в его выплаты (расходы по сотруднику).</div>
+      <div className="kd-grid2">
+        <Field label="Бонус за заявку (₸)"><input value={bonus} onChange={(e) => setBonus(e.target.value)} inputMode="numeric" placeholder="напр. % от суммы" /></Field>
+        <Field label="Дорожные (₸)"><input value={travel} onChange={(e) => setTravel(e.target.value)} inputMode="numeric" placeholder="2000" /></Field>
+      </div>
     </ModalShell>
   );
 }
