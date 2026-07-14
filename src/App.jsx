@@ -532,6 +532,7 @@ function Dashboard({ session, profile }) {
       transfer_paid: false,
       report_paid: (Number(report.cash) || 0) + (Number(report.qr) || 0) + transfer,
       report_method: report.method,
+      edit_request_status: null, edit_request_reason: null, edit_request_at: null,
     }).eq("id", job.id);
     if (upd.error) { showToast("Отчёт сохранён, но перечисление не записалось: " + upd.error.message + ". Проверь, выполнена ли SQL-миграция kazdez-transfer-bonus."); load(); return; }
     setModal({ kind: "reportSuccess" }); load();
@@ -556,6 +557,24 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Заявка", `Бонус/дорожные: ${job.pest} · бонус ${fmt(bonus)} · дорожные ${fmt(travel)}`);
     setModal(null); showToast("Сохранено"); load();
+  }
+  async function requestReportEdit(job, reason) {
+    const { error } = await supabase.from("jobs").update({ edit_request_status: "requested", edit_request_reason: reason || null, edit_request_at: new Date().toISOString() }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Отчёт", `Запрос на изменение: ${job.pest} · ${job.address}${reason ? " — " + reason : ""}`);
+    setModal(null); showToast("Запрос отправлен админу"); load();
+  }
+  async function approveReportEdit(job) {
+    const { error } = await supabase.from("jobs").update({ edit_request_status: "approved" }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Отчёт", `Разрешено изменение: ${job.pest} · ${job.address}`);
+    showToast("Изменение разрешено — дезинфектор может переоткрыть отчёт"); load();
+  }
+  async function rejectReportEdit(job) {
+    const { error } = await supabase.from("jobs").update({ edit_request_status: null, edit_request_reason: null, edit_request_at: null }).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Отчёт", `Отклонён запрос на изменение: ${job.pest} · ${job.address}`);
+    showToast("Запрос отклонён"); load();
   }
   async function deleteJob(job) {
     await supabase.from("trash").insert({ deleted_by: actorName, deleted_by_id: session.user.id, job: { ...job } });
@@ -1503,6 +1522,9 @@ function Dashboard({ session, profile }) {
                         onRestore={() => restoreCanceled(j)}
                   onTransferPaid={() => setModal({ kind: "transferPay", job: j })}
                   onTechExtras={() => setModal({ kind: "techExtras", job: j })}
+                  onRequestEdit={() => setModal({ kind: "requestEdit", job: j })}
+                  onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
+                  onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
                         onHistory={() => setModal({ kind: "history", job: j })}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                         onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
@@ -1614,6 +1636,9 @@ function Dashboard({ session, profile }) {
                         onRestore={() => restoreCanceled(j)}
                   onTransferPaid={() => setModal({ kind: "transferPay", job: j })}
                   onTechExtras={() => setModal({ kind: "techExtras", job: j })}
+                  onRequestEdit={() => setModal({ kind: "requestEdit", job: j })}
+                  onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
+                  onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
                       onHistory={() => setModal({ kind: "history", job: j })}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                       onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
@@ -1992,6 +2017,9 @@ function Dashboard({ session, profile }) {
                   onRestore={() => restoreCanceled(j)}
                   onTransferPaid={() => setModal({ kind: "transferPay", job: j })}
                   onTechExtras={() => setModal({ kind: "techExtras", job: j })}
+                  onRequestEdit={() => setModal({ kind: "requestEdit", job: j })}
+                  onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
+                  onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
                   onHistory={() => setModal({ kind: "history", job: j })}
                   onOpenDetails={() => setModal({ kind: "details", job: j })}
                   onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину.`, () => deleteJob(j))} />
@@ -2637,6 +2665,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "dayOff" && <DayOffModal techs={techs} defaultDate={scheduleDate} daysOff={daysOff} personName={personName} onClose={() => setModal(null)} onAdd={addDayOff} onRemove={removeDayOff} />}
       {modal?.kind === "transferPay" && <TransferPayModal job={modal.job} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markTransferPaid(modal.job, accId, date)} />}
       {modal?.kind === "techExtras" && <TechExtrasModal job={modal.job} techName={techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} onSave={(bonus, travel) => saveTechExtras(modal.job, bonus, travel)} />}
+      {modal?.kind === "requestEdit" && <RequestEditModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => requestReportEdit(modal.job, reason)} />}
       {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} onClose={() => setModal(null)} onPick={(sid) => { setLeadStage(modal.lead, sid); setModal(null); }} />}
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
@@ -2656,7 +2685,7 @@ function Dashboard({ session, profile }) {
   );
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onDelete }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
@@ -2698,6 +2727,8 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
           </span>
         )}
         {job.status === "canceled" && <span className="kd-muted" style={{ color: "#B3261E", fontWeight: 700 }}>Отменена{job.cancel_reason ? ": " + job.cancel_reason : ""}</span>}
+        {job.edit_request_status === "requested" && <span className="kd-muted" style={{ color: "#B4650B", fontWeight: 700 }}>⏳ Запрос на изменение отчёта{job.edit_request_reason ? ": " + job.edit_request_reason : ""}{isAdmin ? " — нужно решение" : " — ждём ответа админа"}</span>}
+        {job.edit_request_status === "approved" && <span className="kd-muted" style={{ color: "#0E7C66", fontWeight: 700 }}>✅ Изменение отчёта разрешено{!isAdmin ? " — можешь переоткрыть отчёт" : ""}</span>}
       </div>
       <div className="kd-actions">
         {isAdmin && job.status !== "canceled" && <button className="kd-btn wa" onClick={onCopy}><MessageCircle size={15} />Скопировать для WhatsApp</button>}
@@ -2713,6 +2744,10 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {isAdmin && job.partner_comp > 0 && <button className="kd-btn ghost" onClick={() => onCompPaid(!job.partner_comp_paid)}>{job.partner_comp_paid ? "Компенсация не получена" : "Компенсация получена"}</button>}
         {isAdmin && job.status === "done" && Number(job.report_transfer) > 0 && !job.transfer_paid && <button className="kd-btn primary sm" onClick={() => onTransferPaid()}>💳 Зачесть оплату ({fmt(job.report_transfer)})</button>}
         {isAdmin && job.status === "done" && <button className="kd-btn ghost sm" onClick={() => onTechExtras()}>Бонус / дорожные</button>}
+        {!isAdmin && job.status === "done" && !job.edit_request_status && <button className="kd-btn ghost sm" onClick={() => onRequestEdit()}>Запросить изменение</button>}
+        {!isAdmin && job.status === "done" && job.edit_request_status === "approved" && <button className="kd-btn primary sm" onClick={onReport}>Изменить отчёт</button>}
+        {isAdmin && job.edit_request_status === "requested" && <button className="kd-btn primary sm" onClick={() => onApproveEdit()}>Разрешить изменение</button>}
+        {isAdmin && job.edit_request_status === "requested" && <button className="kd-btn ghost danger sm" onClick={() => onRejectEdit()}>Отклонить</button>}
         {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить"><Trash2 size={14} /></button>}
       </div>
     </div>
@@ -3803,6 +3838,22 @@ function TaskModal({ task, people, onClose, onSave }) {
         </div>
       </div>
       {dueMode === "date" && <Field label="Выбери дату"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+    </ModalShell>
+  );
+}
+
+function RequestEditModal({ job, onClose, onSave }) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = reason.trim();
+  async function save() { setSaving(true); await onSave(reason.trim()); setSaving(false); }
+  return (
+    <ModalShell title="Запросить изменение отчёта" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Отправить запрос"}</button>
+    </>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}. Отчёт менять сразу нельзя — сначала админ подтвердит после созвона. Опиши, что нужно исправить.</div>
+      <Field label="Причина / что исправить"><textarea className="kd-textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Напр.: ошибся в сумме, было перечисление 80 000, а не 0" /></Field>
     </ModalShell>
   );
 }
