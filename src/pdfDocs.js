@@ -40,7 +40,7 @@ function certificateDef(job, c) {
   const months = job.guarantee_months || 6;
   const number = job.doc_number || `ГС-${new Date().getFullYear()}-00001`;
   const date = dateRu(job.scheduled_date);
-  const sy = 600; // вертикальное положение блока подписи/печати. Если стоят высоко/низко — меняй это одно число.
+  const sy = 650; // вертикальное положение блока подписи/печати. Если стоят высоко/низко — меняй это одно число.
 
   return {
     pageSize: "A4",
@@ -85,6 +85,7 @@ function certificateDef(job, c) {
           widths: [150, "*"],
           body: [
             ["Объект (адрес)", job.address || "—"],
+            ["Заказчик (телефон)", (job.client_phone || "—") + (job.contact_name ? ` (${job.contact_name})` : "")],
             ["Вид обработки", `${job.type || "—"} · ${job.pest || "—"}`],
             ...(job.area ? [["Площадь", `${job.area} м²`]] : []),
             ["Дата обработки", date + (job.scheduled_time ? `, ${job.scheduled_time}` : "")],
@@ -114,8 +115,8 @@ function certificateDef(job, c) {
       { text: c.director, bold: true, absolutePosition: { x: 42, y: sy } },
       { canvas: [{ type: "line", x1: 0, y1: 0, x2: 200, y2: 0, lineWidth: 0.7, lineColor: "#cccccc" }], absolutePosition: { x: 42, y: sy + 46 } },
       { text: "подпись / М.П.", fontSize: 8, color: MUTED, absolutePosition: { x: 42, y: sy + 50 } },
-      ...(c.signature ? [{ image: c.signature, width: 130, absolutePosition: { x: 46, y: sy + -40 } }] : []),
-      ...(c.stamp ? [{ image: c.stamp, width: 120, opacity: 0.9, absolutePosition: { x: 150, y: sy + 2 } }] : []),
+      ...(c.signature ? [{ image: c.signature, width: 130, absolutePosition: { x: 46, y: sy + 6 } }] : []),
+      ...(c.stamp ? [{ image: c.stamp, width: 120, opacity: 0.9, absolutePosition: { x: 215, y: sy + 2 } }] : []),
     ],
     footer: () => ({
       text: `${c.name} · ${c.phone}`,
