@@ -925,6 +925,15 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
   }
   const parents = (expCats || []).filter((c) => !c.parent_id);
   const subsOf = (pid) => (expCats || []).filter((c) => c.parent_id === pid);
+  // загрузка картинки (печать/подпись) → сохраняем как data-URL в настройках
+  const onPickImage = (key) => (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (file.size > 700 * 1024) { alert("Файл великоват (лучше до 500 КБ). Уменьшите картинку и попробуйте снова."); e.target.value = ""; return; }
+    const r = new FileReader();
+    r.onload = () => onSaveSetting(key, r.result);
+    r.readAsDataURL(file);
+  };
   const inputStyle = { flex: 1, font: "inherit", fontWeight: 600, color: "var(--ink)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "10px 12px", minHeight: 44 };
   return (
     <ModalShell title="Настройки" onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Готово</button>}>
@@ -1050,6 +1059,33 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
           </div>
           <Field label="Адрес"><input defaultValue={settings.company_address ?? ""} onBlur={(e) => onSaveSetting("company_address", e.target.value.trim() || null)} placeholder="г. Алматы, ул. …, д. …" /></Field>
           <Field label="ФИО директора (для строки под подписью)"><input defaultValue={settings.company_director ?? ""} onBlur={(e) => onSaveSetting("company_director", e.target.value.trim() || null)} placeholder="Директор Тыныспаев К." /></Field>
+
+          <div className="kd-section" style={{ marginTop: 6 }}>Печать и подпись</div>
+          <div className="kd-grid2">
+            <div>
+              <div className="kd-muted" style={{ marginBottom: 6 }}>Печать (PNG без фона)</div>
+              {settings.company_stamp ? (
+                <div>
+                  <img src={settings.company_stamp} alt="печать" style={{ maxHeight: 74, maxWidth: "100%", background: "#fff", borderRadius: 8, padding: 4 }} />
+                  <div><button className="kd-btn ghost sm" style={{ marginTop: 6 }} onClick={() => onSaveSetting("company_stamp", null)}>Удалить</button></div>
+                </div>
+              ) : (
+                <input type="file" accept="image/png,image/jpeg" onChange={onPickImage("company_stamp")} />
+              )}
+            </div>
+            <div>
+              <div className="kd-muted" style={{ marginBottom: 6 }}>Подпись (PNG без фона)</div>
+              {settings.company_signature ? (
+                <div>
+                  <img src={settings.company_signature} alt="подпись" style={{ maxHeight: 74, maxWidth: "100%", background: "#fff", borderRadius: 8, padding: 4 }} />
+                  <div><button className="kd-btn ghost sm" style={{ marginTop: 6 }} onClick={() => onSaveSetting("company_signature", null)}>Удалить</button></div>
+                </div>
+              ) : (
+                <input type="file" accept="image/png,image/jpeg" onChange={onPickImage("company_signature")} />
+              )}
+            </div>
+          </div>
+
           <div className="kd-muted">Эти данные печатаются в шапке гарантийного сертификата и акта выполненных работ. Сохраняется автоматически при выходе из поля.</div>
         </SettingsSection>
       </div>
