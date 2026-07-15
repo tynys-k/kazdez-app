@@ -30,6 +30,8 @@ function company(settings = {}) {
     address: settings.company_address || "—",
     phone: settings.company_phone || "—",
     director: settings.company_director || "Директор",
+    stamp: settings.company_stamp || null,       // data-URL картинки печати
+    signature: settings.company_signature || null, // data-URL картинки подписи
   };
 }
 
@@ -38,6 +40,7 @@ function certificateDef(job, c) {
   const months = job.guarantee_months || 6;
   const number = job.doc_number || `ГС-${new Date().getFullYear()}-00001`;
   const date = dateRu(job.scheduled_date);
+  const sy = 650; // вертикальное положение блока подписи/печати. Если стоят высоко/низко — меняй это одно число.
 
   return {
     pageSize: "A4",
@@ -106,13 +109,13 @@ function certificateDef(job, c) {
         color: "#333",
       },
 
-      // подпись (место под печать оставим на след. шаге)
-      { text: c.director, bold: true, margin: [0, 40, 0, 0] },
-      {
-        canvas: [{ type: "line", x1: 0, y1: 6, x2: 200, y2: 6, lineWidth: 0.7, lineColor: "#cccccc" }],
-        margin: [0, 30, 0, 2],
-      },
-      { text: "подпись / М.П.", fontSize: 8, color: MUTED },
+      // ── подпись и печать (абсолютно, привязано к низу страницы) ──
+      // порядок = слои: сначала линия, затем подпись, сверху печать
+      { text: c.director, bold: true, absolutePosition: { x: 42, y: sy } },
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 200, y2: 0, lineWidth: 0.7, lineColor: "#cccccc" }], absolutePosition: { x: 42, y: sy + 46 } },
+      { text: "подпись / М.П.", fontSize: 8, color: MUTED, absolutePosition: { x: 42, y: sy + 50 } },
+      ...(c.signature ? [{ image: c.signature, width: 130, absolutePosition: { x: 46, y: sy + 6 } }] : []),
+      ...(c.stamp ? [{ image: c.stamp, width: 120, opacity: 0.9, absolutePosition: { x: 215, y: sy + 2 } }] : []),
     ],
     footer: () => ({
       text: `${c.name} · ${c.phone}`,
