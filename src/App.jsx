@@ -220,6 +220,8 @@ function Dashboard({ session, profile }) {
       scheduled_time: job.scheduled_time,
       guarantee_months: job.guarantee_months,
       tech: techById(job.assigned_to)?.full_name,
+      client_phone: job.client_phone,
+      contact_name: job.contact_name,
       doc_number: num,
     }, settings);
   }
