@@ -40,7 +40,7 @@ function certificateDef(job, c) {
   const months = job.guarantee_months || 6;
   const number = job.doc_number || `ГС-${new Date().getFullYear()}-00001`;
   const date = dateRu(job.scheduled_date);
-  const sy = 700; // вертикальное положение блока подписи/печати. Если стоят высоко/низко — меняй это одно число.
+  const sy = 600; // вертикальное положение блока подписи/печати. Если стоят высоко/низко — меняй это одно число.
 
   return {
     pageSize: "A4",
