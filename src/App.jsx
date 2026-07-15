@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import { testPdf } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
@@ -1379,6 +1380,7 @@ function Dashboard({ session, profile }) {
               <div className="kd-tabbar" style={{ marginBottom: 10 }}>
                 <div className="kd-title" style={{ fontSize: 18 }}>График · {isoToRu(scheduleDate)}{isToday ? " (сегодня)" : ""}</div>
                 <div className="kd-tabactions">
+                  <button className="kd-btn ghost" onClick={testPdf}>Тест PDF</button>
                   <button className="kd-arrow" onClick={() => shiftDay(-1)}><ChevronLeft size={18} /></button>
                   <button className="kd-btn ghost sm" onClick={() => setScheduleDate(new Date().toISOString().slice(0, 10))}>Сегодня</button>
                   <button className="kd-arrow" onClick={() => shiftDay(1)}><ChevronRight size={18} /></button>
