@@ -1041,6 +1041,17 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
           </div>
           <div className="kd-muted">Бюджет на рекламу = цель × %. Напр.: 15 000 000 × 10% = 1 500 000 ₸. Сами каналы и пополнения — во вкладке «Финансы» → «Маркетинг». Сохраняется при выходе из поля.</div>
         </SettingsSection>
+
+        <SettingsSection title="Реквизиты компании" subtitle="Для гарантийного сертификата и акта" open={openSection === "company"} onToggle={() => toggle("company")}>
+          <Field label="Название компании"><input defaultValue={settings.company_name ?? ""} onBlur={(e) => onSaveSetting("company_name", e.target.value.trim() || null)} placeholder="ТОО «KazDez»" /></Field>
+          <div className="kd-grid2">
+            <Field label="БИН"><input defaultValue={settings.company_bin ?? ""} inputMode="numeric" onBlur={(e) => onSaveSetting("company_bin", e.target.value.trim() || null)} placeholder="000000000000" /></Field>
+            <Field label="Телефон"><input defaultValue={settings.company_phone ?? ""} onBlur={(e) => onSaveSetting("company_phone", e.target.value.trim() || null)} placeholder="+7 700 000 00 00" /></Field>
+          </div>
+          <Field label="Адрес"><input defaultValue={settings.company_address ?? ""} onBlur={(e) => onSaveSetting("company_address", e.target.value.trim() || null)} placeholder="г. Алматы, ул. …, д. …" /></Field>
+          <Field label="ФИО директора (для строки под подписью)"><input defaultValue={settings.company_director ?? ""} onBlur={(e) => onSaveSetting("company_director", e.target.value.trim() || null)} placeholder="Директор Тыныспаев К." /></Field>
+          <div className="kd-muted">Эти данные печатаются в шапке гарантийного сертификата и акта выполненных работ. Сохраняется автоматически при выходе из поля.</div>
+        </SettingsSection>
       </div>
     </ModalShell>
   );
