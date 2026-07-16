@@ -2276,7 +2276,6 @@ function Dashboard({ session, profile }) {
               <DateFilterBar filter={teamRepFilter} onChange={setTeamRepFilter} hide={["tomorrow"]} />
               {(() => {
                 const paidExp = expenses.filter((e) => e.status === "paid" && dateInFilter(e.expense_date || (e.created_at || "").slice(0, 10), teamRepFilter));
-                const offRows = daysOff.filter((d) => dateInFilter(d.off_date, teamRepFilter)).sort((a, b) => b.off_date.localeCompare(a.off_date));
                 const byTechPay = {};
                 paidExp.forEach((e) => {
                   if (!byTechPay[e.tech_id]) byTechPay[e.tech_id] = { salary: 0, travel: 0, other: 0, total: 0 };
@@ -2293,11 +2292,6 @@ function Dashboard({ session, profile }) {
                         <span>{personName(tid)}</span>
                         <span className="kd-twoval"><em>зп {fmt(v.salary)} · дор. {fmt(v.travel)}{v.other ? ` · др. ${fmt(v.other)}` : ""}</em><strong>{fmt(v.total)} ₸</strong></span>
                       </div>
-                    ))}
-                    <div className="kd-section">🌴 Кто отдыхал</div>
-                    {offRows.length === 0 && <div className="kd-muted">Выходных за период нет.</div>}
-                    {offRows.map((d) => (
-                      <div className="kd-row" key={d.id}><span>{personName(d.tech_id)}</span><span className="kd-twoval"><em>{d.note || ""}</em><strong>{isoToRu(d.off_date)}</strong></span></div>
                     ))}
                   </>
                 );
