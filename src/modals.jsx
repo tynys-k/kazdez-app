@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight } from "lucide-react";
 import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
@@ -65,7 +65,8 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {isAdmin && !job.executor_partner_id && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onAssign}><UserPlus size={14} />{assignedName ? "Переназначить" : "Назначить"}</button>}
         {isAdmin && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onEdit}><Pencil size={14} />Изменить</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
-        {isAdmin && job.status === "done" && onCert && <button className="kd-btn ghost" onClick={onCert}>Сертификат</button>}
+        {isAdmin && job.status === "done" && job.type === "Первичная" && onAct && <button className="kd-btn ghost" onClick={onAct}>Акт</button>}
+        {isAdmin && job.status === "done" && job.type !== "Первичная" && onCert && <button className="kd-btn ghost" onClick={onCert}>Сертификат</button>}
         {isAdmin && job.status === "done" && !job.repeat_state && <button className="kd-btn ghost" onClick={onRepeat}>На повтор</button>}
         {isAdmin && job.status === "canceled" && <button className="kd-btn primary" onClick={() => onRestore()}>Вернуть в работу</button>}
         {isAdmin && share > 0 && <button className="kd-btn ghost" onClick={() => onPayPartner(!job.partner_paid)}>{job.partner_paid ? "Отменить выплату" : "Выплатить долю"}</button>}
@@ -1060,6 +1061,12 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
           </div>
           <Field label="Адрес"><input defaultValue={settings.company_address ?? ""} onBlur={(e) => onSaveSetting("company_address", e.target.value.trim() || null)} placeholder="г. Алматы, ул. …, д. …" /></Field>
           <Field label="ФИО директора (для строки под подписью)"><input defaultValue={settings.company_director ?? ""} onBlur={(e) => onSaveSetting("company_director", e.target.value.trim() || null)} placeholder="Директор Тыныспаев К." /></Field>
+
+          <div className="kd-section" style={{ marginTop: 6 }}>Акт: срок второй обработки</div>
+          <div className="kd-grid2">
+            <Field label="Повтор через, дней (от)"><input defaultValue={settings.repeat_days_min ?? 5} inputMode="numeric" onBlur={(e) => onSaveSetting("repeat_days_min", Number(e.target.value) || 5)} /></Field>
+            <Field label="Повтор через, дней (до)"><input defaultValue={settings.repeat_days_max ?? 14} inputMode="numeric" onBlur={(e) => onSaveSetting("repeat_days_max", Number(e.target.value) || 14)} /></Field>
+          </div>
 
           <div className="kd-section" style={{ marginTop: 6 }}>Печать и подпись</div>
           <div className="kd-grid2">
