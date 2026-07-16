@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft } from "lucide-react";
+import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info } from "lucide-react";
 import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct }) {
@@ -213,8 +213,9 @@ function jobToForm(job) {
   };
 }
 
-function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], sources = [], pestTypes = [], defaultGuarantee = 6, onClose, onSave }) {
+function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], sources = [], pestTypes = [], pestGuide = {}, defaultGuarantee = 6, onClose, onSave }) {
   const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
+  const [pestInfoOpen, setPestInfoOpen] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
@@ -264,9 +265,32 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
       <datalist id="kd-pests-list">{pestTypes.map((p) => <option key={p.id} value={p.name} />)}</datalist>
       <datalist id="kd-sources-list">{sources.map((s) => <option key={s.id} value={s.name} />)}</datalist>
       <div className="kd-grid2">
-        <Field label="Вид (вредитель)"><input list="kd-pests-list" value={f.pest} onChange={set("pest")} placeholder="Тараканы" /></Field>
+        <Field label="Вид (вредитель)">
+          <div style={{ display: "flex", gap: 8 }}>
+            <input list="kd-pests-list" value={f.pest} onChange={set("pest")} placeholder="Тараканы" style={{ flex: 1 }} />
+            <button type="button" className="kd-btn ghost" title="Информация по вредителю" onClick={() => setPestInfoOpen((v) => !v)} style={{ minWidth: 46, padding: "0 12px" }}><Info size={17} /></button>
+          </div>
+        </Field>
         <Field label="Источник"><input list="kd-sources-list" value={f.source} onChange={set("source")} placeholder="OLX" /></Field>
       </div>
+      {pestInfoOpen && (() => {
+        const g = pestGuide[(f.pest || "").trim()] || null;
+        return (
+          <div className="kd-notebox" style={{ marginBottom: 12 }}>
+            {!f.pest ? "Сначала выбери вид вредителя." : !g ? (
+              <span>Нет данных по «{f.pest}». Заполни в Настройки → Справочник по вредителям.</span>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div><strong>{f.pest}</strong></div>
+                {g.info ? <div>{g.info}</div> : null}
+                {g.chems ? <div><span className="kd-muted">Препараты:</span> {g.chems}</div> : null}
+                {g.times ? <div><span className="kd-muted">Обработок:</span> {g.times}</div> : null}
+                {g.drive ? <div><a className="kd-btn ghost sm" href={g.drive} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>📄 Инструкция для клиента</a></div> : null}
+              </div>
+            )}
+          </div>
+        );
+      })()}
       <div className="kd-grid3">
         <Field label="Дата"><input type="date" value={f.scheduled_date} onChange={set("scheduled_date")} /></Field>
         <Field label="Время с"><input type="time" value={f.time_from} onChange={set("time_from")} /></Field>
@@ -299,7 +323,16 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
         <Field label="Цена 2 — сумма (₸)"><input value={f.p2amount} onChange={set("p2amount")} inputMode="numeric" placeholder="20000" /></Field>
       </div>
       <div className="kd-grid2">
-        <Field label="Телефон клиента"><input value={f.client_phone} onChange={set("client_phone")} placeholder="+7 701 ..." /></Field>
+        <Field label="Телефон клиента">
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={f.client_phone} onChange={set("client_phone")} placeholder="+7 701 ..." style={{ flex: 1 }} />
+            {((f.client_phone || "").replace(/\D/g, "").length >= 10) && (
+              <a className="kd-btn wa" href={`https://api.whatsapp.com/send/?phone=${(f.client_phone || "").replace(/\D/g, "")}&text&type=phone_number&app_absent=0`} target="_blank" rel="noreferrer" title="Написать в WhatsApp" style={{ textDecoration: "none", minWidth: 46, padding: "0 12px" }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 14.4c-.3-.2-1.7-.8-1.9-.9-.3-.1-.5-.2-.6.1-.2.3-.7.9-.8 1-.2.2-.3.2-.6.1-.3-.2-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.2.2-.3.3-.5.1-.2 0-.4 0-.5-.1-.1-.6-1.5-.8-2.1-.2-.5-.4-.5-.6-.5h-.5c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2s.9 2.5 1.1 2.7c.1.2 1.8 2.8 4.4 3.9.6.3 1.1.4 1.5.5.6.2 1.2.2 1.6.1.5-.1 1.7-.7 1.9-1.3.2-.7.2-1.2.2-1.3-.1-.2-.3-.2-.6-.4z M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2zm0 18.3a8.3 8.3 0 0 1-4.2-1.2l-.3-.2-2.9.8.8-2.8-.2-.3A8.3 8.3 0 1 1 12 20.3z" /></svg>
+              </a>
+            )}
+          </div>
+        </Field>
         <Field label="Имя контактного лица"><input value={f.contact_name} onChange={set("contact_name")} placeholder="Айгуль" /></Field>
       </div>
       <datalist id="kd-contact-roles">{["Муж", "Жена", "Сестра", "Брат", "Коллега", "Директор", "Диспетчер", "Охранник", "Бухгалтер", "Администратор", "Сосед"].map((r) => <option key={r} value={r} />)}</datalist>
@@ -927,6 +960,19 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
   }
   const parents = (expCats || []).filter((c) => !c.parent_id);
   const subsOf = (pid) => (expCats || []).filter((c) => c.parent_id === pid);
+  // справочник по вредителям (хранится JSON-ом в settings.pest_guide)
+  const pestGuideMap = (() => { try { return JSON.parse(settings.pest_guide || "{}"); } catch { return {}; } })();
+  const firstPest = (pestTypes[0] && pestTypes[0].name) || "";
+  const [pgPest, setPgPest] = useState(firstPest);
+  const [pg, setPg] = useState(pestGuideMap[firstPest] || { info: "", chems: "", times: "", drive: "" });
+  const loadPg = (name) => { setPgPest(name); setPg(pestGuideMap[name] || { info: "", chems: "", times: "", drive: "" }); };
+  const savePg = () => {
+    const map = { ...pestGuideMap };
+    const val = { info: (pg.info || "").trim(), chems: (pg.chems || "").trim(), times: (pg.times || "").trim(), drive: (pg.drive || "").trim() };
+    if (!val.info && !val.chems && !val.times && !val.drive) delete map[pgPest];
+    else map[pgPest] = val;
+    onSaveSetting("pest_guide", JSON.stringify(map));
+  };
   // загрузка картинки (печать/подпись) → сохраняем как data-URL в настройках
   const onPickImage = (key) => (e) => {
     const file = e.target.files && e.target.files[0];
@@ -999,6 +1045,24 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
 
         <SettingsSection title="Виды вредителей" subtitle={`${pestTypes.length} шт.`} open={openSection === "pests"} onToggle={() => toggle("pests")}>
           <CatalogList items={pestTypes} onAdd={onAddPest} onRemove={onRemovePest} placeholder="Напр.: Муравьи" />
+        </SettingsSection>
+
+        <SettingsSection title="Справочник по вредителям" subtitle="Инфо и инструкции для формы заявки" open={openSection === "pestguide"} onToggle={() => toggle("pestguide")}>
+          {pestTypes.length === 0 ? (
+            <div className="kd-muted">Сначала добавь виды вредителей в разделе выше.</div>
+          ) : (
+            <>
+              <Field label="Вредитель"><select value={pgPest} onChange={(e) => loadPg(e.target.value)}>{pestTypes.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select></Field>
+              <Field label="О вредителе (описание)"><textarea rows={2} value={pg.info} onChange={(e) => setPg({ ...pg, info: e.target.value })} placeholder="Коротко: чем опасен, где прячется…" /></Field>
+              <Field label="Препараты"><textarea rows={2} value={pg.chems} onChange={(e) => setPg({ ...pg, chems: e.target.value })} placeholder="Напр.: Гет, Дельта Зона, Ксулат…" /></Field>
+              <div className="kd-grid2">
+                <Field label="Сколько обработок"><input value={pg.times} onChange={(e) => setPg({ ...pg, times: e.target.value })} placeholder="2 (первичная + повтор)" /></Field>
+                <Field label="Инструкция клиенту (Google Drive)"><input value={pg.drive} onChange={(e) => setPg({ ...pg, drive: e.target.value })} placeholder="https://drive.google.com/..." /></Field>
+              </div>
+              <button className="kd-btn primary" onClick={savePg}>Сохранить по «{pgPest || "—"}»</button>
+              <div className="kd-muted" style={{ marginTop: 8 }}>Показывается в форме заявки по кнопке ⓘ рядом с выбором вредителя. У каждого вредителя своя инструкция в Google Drive.</div>
+            </>
+          )}
         </SettingsSection>
 
         <SettingsSection title="Категории расходов" subtitle={`${parents.length} категорий · для учёта в Финансах`} open={openSection === "expcats"} onToggle={() => toggle("expcats")}>
