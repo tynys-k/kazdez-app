@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight } from "lucide-react";
+import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft } from "lucide-react";
 import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct }) {
@@ -1700,4 +1700,117 @@ function RejectDepositModal({ dep, techName, onClose, onSave }) {
   );
 }
 
-export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CatalogList, ConfirmDepositModal, ConfirmModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm };
+function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, onPickDay }) {
+  const start = defaultDate ? new Date(defaultDate) : new Date();
+  const [ym, setYm] = useState({ y: start.getFullYear(), m: start.getMonth() });
+
+  const COLORS = ["#34D399", "#F5B454", "#7CB2F5", "#B79BF0", "#F2726A", "#25D366", "#E9A23B", "#5FD0C4", "#EF8FBE", "#9DD35F"];
+  const techColor = (id) => {
+    const i = (techs || []).findIndex((t) => t.id === id);
+    return COLORS[(i < 0 ? 0 : i) % COLORS.length];
+  };
+  const firstName = (id) => ((personName(id) || "—").split(" ")[0]);
+
+  const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+  const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+  // карта: дата → [tech_id]
+  const offByDate = {};
+  (daysOff || []).forEach((d) => { (offByDate[d.off_date] = offByDate[d.off_date] || []).push(d.tech_id); });
+
+  const first = new Date(ym.y, ym.m, 1);
+  const startDow = (first.getDay() + 6) % 7; // Пн = 0
+  const daysInMonth = new Date(ym.y, ym.m + 1, 0).getDate();
+  const todayIso = new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD локально
+
+  const cells = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = `${ym.y}-${String(ym.m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    cells.push({ day, iso, offs: offByDate[iso] || [] });
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
+  const prev = () => setYm((s) => (s.m === 0 ? { y: s.y - 1, m: 11 } : { y: s.y, m: s.m - 1 }));
+  const next = () => setYm((s) => (s.m === 11 ? { y: s.y + 1, m: 0 } : { y: s.y, m: s.m + 1 }));
+  const today = () => { const d = new Date(); setYm({ y: d.getFullYear(), m: d.getMonth() }); };
+
+  // сотрудники, у кого есть выходные в этом месяце — для легенды
+  const monthPrefix = `${ym.y}-${String(ym.m + 1).padStart(2, "0")}`;
+  const activeTechIds = [...new Set((daysOff || []).filter((d) => String(d.off_date).startsWith(monthPrefix)).map((d) => d.tech_id))];
+
+  const cellStyle = {
+    minHeight: 84, borderRadius: 10, border: "1px solid var(--line)",
+    background: "var(--surface-sunk)", padding: "5px 6px", display: "flex",
+    flexDirection: "column", gap: 3, cursor: onPickDay ? "pointer" : "default", overflow: "hidden",
+  };
+
+  return (
+    <div className="kd-overlay" onClick={onClose}>
+      <div className="kd-modal" style={{ maxWidth: 760, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+        <div className="kd-modal-head">
+          <h3>🌴 Выходные сотрудников</h3>
+          <button className="kd-x" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="kd-modal-body">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button className="kd-arrow" onClick={prev}><ChevronLeft size={18} /></button>
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 17, minWidth: 150, textAlign: "center" }}>{MONTHS[ym.m]} {ym.y}</div>
+              <button className="kd-arrow" onClick={next}><ChevronRight size={18} /></button>
+            </div>
+            <button className="kd-btn ghost sm" onClick={today}>Сегодня</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 6 }}>
+            {WD.map((w, i) => (
+              <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, letterSpacing: ".4px", color: i >= 5 ? "var(--rust)" : "var(--muted)", textTransform: "uppercase" }}>{w}</div>
+            ))}
+          </div>
+
+          {weeks.map((week, wi) => (
+            <div key={wi} style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 6 }}>
+              {week.map((cell, ci) => {
+                if (!cell) return <div key={ci} style={{ ...cellStyle, background: "transparent", border: "1px solid transparent", cursor: "default" }} />;
+                const isToday = cell.iso === todayIso;
+                return (
+                  <div
+                    key={ci}
+                    onClick={onPickDay ? () => onPickDay(cell.iso) : undefined}
+                    style={{ ...cellStyle, borderColor: isToday ? "var(--primary)" : "var(--line)", boxShadow: isToday ? "0 0 0 1px var(--primary), 0 6px 18px -10px var(--em-glow)" : "none" }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 700, color: isToday ? "var(--primary-d)" : (ci >= 5 ? "var(--muted)" : "var(--ink-soft)") }}>{cell.day}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      {cell.offs.map((tid, k) => (
+                        <span key={k} title={personName(tid)} style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--surface-hi)", borderRadius: 6, padding: "2px 5px", fontSize: 10.5, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: techColor(tid), flexShrink: 0 }} />
+                          {firstName(tid)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          {activeTechIds.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+              {activeTechIds.map((tid) => (
+                <span key={tid} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "var(--ink-soft)" }}>
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: techColor(tid) }} />
+                  {personName(tid)}
+                </span>
+              ))}
+            </div>
+          )}
+          {onPickDay && <div className="kd-muted" style={{ marginTop: 10 }}>Нажми на день, чтобы отметить или снять выходной.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CatalogList, ConfirmDepositModal, ConfirmModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm };
