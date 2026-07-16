@@ -22,6 +22,17 @@ function dateRu(iso) {
   return d && m && y ? `${d}.${m}.${y}` : iso;
 }
 
+// ── прибавить N дней к дате и вернуть в формате ДД.ММ.ГГГГ ──
+function addDays(iso, n) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return "—";
+  d.setDate(d.getDate() + Number(n || 0));
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}.${mm}.${d.getFullYear()}`;
+}
+
 // ── реквизиты компании из settings ──
 function company(settings = {}) {
   return {
@@ -132,6 +143,125 @@ function certificateDef(job, c) {
 export function generateCertificate(job, settings) {
   const def = certificateDef(job, company(settings));
   pdfMake.createPdf(def).download(`Сертификат-${job.doc_number || "тест"}.pdf`);
+}
+
+// ── макет АКТА о проведении дезинфекционных работ (для первичной обработки,
+//    когда гарантия появляется только после второй обработки) ──
+function actDef(job, c, minDays, maxDays) {
+  const number = job.doc_number || `АКТ-${new Date().getFullYear()}-00001`;
+  const date = dateRu(job.scheduled_date);
+  const fromDate = addDays(job.scheduled_date, minDays);
+  const toDate = addDays(job.scheduled_date, maxDays);
+  const chems = job.chemicals && job.chemicals.length ? job.chemicals : null;
+  const sy = 650;
+
+  return {
+    pageSize: "A4",
+    pageMargins: [42, 42, 42, 56],
+    defaultStyle: { font: "Roboto", fontSize: 11, color: "#1A1F1C", lineHeight: 1.3 },
+    content: [
+      {
+        columns: [
+          {
+            width: "*",
+            stack: [
+              { text: "KazDez", fontSize: 22, bold: true, color: GREEN },
+              { text: c.name, bold: true, margin: [0, 4, 0, 0] },
+              { text: `БИН ${c.bin}`, fontSize: 9, color: MUTED },
+              { text: c.address, fontSize: 9, color: MUTED },
+              { text: `тел. ${c.phone}`, fontSize: 9, color: MUTED },
+            ],
+          },
+          {
+            width: "auto",
+            stack: [
+              { text: "АКТ О ПРОВЕДЕНИИ", bold: true, fontSize: 14, alignment: "right" },
+              { text: "ДЕЗИНФЕКЦИОННЫХ РАБОТ", bold: true, fontSize: 14, alignment: "right" },
+              { text: `№ ${number}`, alignment: "right", margin: [0, 6, 0, 0] },
+              { text: `от ${date}`, alignment: "right", fontSize: 10, color: MUTED },
+            ],
+          },
+        ],
+        columnGap: 16,
+      },
+      { canvas: [{ type: "line", x1: 0, y1: 10, x2: 511, y2: 10, lineWidth: 1.4, lineColor: GREEN }], margin: [0, 8, 0, 16] },
+
+      {
+        text: `Настоящим подтверждается, что специалистами ${c.name} проведена дезинфекционная обработка объекта Заказчика.`,
+        margin: [0, 0, 0, 14],
+      },
+
+      {
+        table: {
+          widths: [150, "*"],
+          body: [
+            ["Объект (адрес)", job.address || "—"],
+            ["Заказчик (телефон)", (job.client_phone || "—") + (job.contact_name ? ` (${job.contact_name})` : "")],
+            ["Вид обработки", `${job.type || "—"} · ${job.pest || "—"}`],
+            ...(job.area ? [["Площадь", `${job.area} м²`]] : []),
+            ["Дата обработки", date + (job.scheduled_time ? `, ${job.scheduled_time}` : "")],
+            ["Специалист", job.tech || "—"],
+          ].map(([k, v]) => [
+            { text: k, color: MUTED, fontSize: 10, margin: [0, 3, 0, 3] },
+            { text: v, bold: true, margin: [0, 3, 0, 3] },
+          ]),
+        },
+        layout: "noBorders",
+      },
+
+      { text: "Использованные препараты", bold: true, margin: [0, 16, 0, 6] },
+      chems
+        ? { ul: chems, fontSize: 10, color: "#333" }
+        : { text: "Не указаны.", fontSize: 10, color: MUTED },
+
+      // блок про отложенную гарантию (выделен)
+      {
+        table: {
+          widths: ["*"],
+          body: [[
+            {
+              stack: [
+                { text: "Гарантия", bold: true, color: GREEN, margin: [0, 0, 0, 4] },
+                {
+                  text: `Гарантия на выполненные работы предоставляется только после проведения второй (закрепляющей) обработки. Вторую обработку необходимо провести в срок от ${minDays} до ${maxDays} дней с даты первичной обработки — ориентировочно с ${fromDate} по ${toDate}.`,
+                  fontSize: 10,
+                },
+              ],
+              margin: [10, 8, 10, 8],
+            },
+          ]],
+        },
+        layout: {
+          hLineWidth: () => 0,
+          vLineWidth: () => 0,
+          fillColor: () => "#EAF4F0",
+        },
+        margin: [0, 14, 0, 0],
+      },
+
+      // подпись и печать — те же позиции, что в сертификате
+      { text: c.director, bold: true, absolutePosition: { x: 42, y: sy } },
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 200, y2: 0, lineWidth: 0.7, lineColor: "#cccccc" }], absolutePosition: { x: 42, y: sy + 46 } },
+      { text: "подпись / М.П.", fontSize: 8, color: MUTED, absolutePosition: { x: 42, y: sy + 50 } },
+      ...(c.signature ? [{ image: c.signature, width: 130, absolutePosition: { x: 46, y: sy - 40 } }] : []),
+      ...(c.stamp ? [{ image: c.stamp, width: 120, opacity: 0.9, absolutePosition: { x: 150, y: sy + 2 } }] : []),
+    ],
+    footer: () => ({
+      text: `${c.name} · ${c.phone}`,
+      alignment: "center",
+      fontSize: 8,
+      color: MUTED,
+      margin: [0, 12, 0, 0],
+    }),
+  };
+}
+
+// ── создать и скачать акт по заявке ──
+export function generateAct(job, settings) {
+  const minDays = Number(settings?.repeat_days_min) || 5;
+  const maxDays = Number(settings?.repeat_days_max) || 14;
+  const def = actDef(job, company(settings), minDays, maxDays);
+  pdfMake.createPdf(def).download(`Акт-${job.doc_number || "работы"}.pdf`);
 }
 
 // ── тест: демо-заявка + твои реальные реквизиты из Настроек ──
