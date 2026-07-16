@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
-import { generateCertificate } from "./pdfDocs";
+import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
@@ -222,6 +222,28 @@ function Dashboard({ session, profile }) {
       tech: techById(job.assigned_to)?.full_name,
       client_phone: job.client_phone,
       contact_name: job.contact_name,
+      doc_number: num,
+    }, settings);
+  }
+  // сделать акт о проведении дезработ (для первичной обработки — гарантия после второй)
+  function certifyAct(job) {
+    const yr = new Date().getFullYear();
+    const num = `АКТ-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
+    const chems = (job.chemicals || []).map((l) => {
+      const c = lineChem(l);
+      return `${l.name || (c && c.name) || "препарат"} — ${fmtAmount(lineAmount(l), c && c.unit_kind)}`;
+    });
+    generateAct({
+      address: addressPlain(job.address),
+      type: job.type,
+      pest: job.pest,
+      area: job.area,
+      scheduled_date: job.scheduled_date,
+      scheduled_time: job.scheduled_time,
+      tech: techById(job.assigned_to)?.full_name,
+      client_phone: job.client_phone,
+      contact_name: job.contact_name,
+      chemicals: chems,
       doc_number: num,
     }, settings);
   }
@@ -1354,7 +1376,7 @@ function Dashboard({ session, profile }) {
                   <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                         onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                         onReport={() => setModal({ kind: "report", job: j })}
                         onAssign={() => setModal({ kind: "assign", job: j })}
@@ -1471,7 +1493,7 @@ function Dashboard({ session, profile }) {
                   <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                       onReport={() => setModal({ kind: "report", job: j })}
                       onAssign={() => setModal({ kind: "assign", job: j })}
@@ -1864,7 +1886,7 @@ function Dashboard({ session, profile }) {
             {canceledJobs.length === 0 ? <div className="kd-empty">Отменённых заявок нет.</div> :
               canceledFiltered.length === 0 ? <div className="kd-empty">По этому фильтру ничего не найдено.</div> :
               [...canceledFiltered].sort((a, b) => new Date(b.canceled_at || 0) - new Date(a.canceled_at || 0)).map((j) => (
-                <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat="" share={partnerShareAmt(j)}
+                <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat="" share={partnerShareAmt(j)}
                   onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                   onReport={() => setModal({ kind: "report", job: j })}
                   onAssign={() => setModal({ kind: "assign", job: j })}
