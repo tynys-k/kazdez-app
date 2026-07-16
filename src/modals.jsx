@@ -1396,7 +1396,14 @@ function DayOffModal({ techs, defaultDate, daysOff, personName, onClose, onAdd, 
         <Field label="Сотрудник"><select value={techId} onChange={(e) => setTechId(e.target.value)}>{techs.map((t) => <option key={t.id} value={t.id}>{t.full_name || "—"}</option>)}</select></Field>
         <Field label="Дата"><input type="date" value={offDate} onChange={(e) => setOffDate(e.target.value)} /></Field>
       </div>
-      <Field label="Причина (необязательно)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="выходной / отпросился / болеет" /></Field>
+      <Field label="Причина (необязательно)"><input list="kd-dayoff-reasons" value={note} onChange={(e) => setNote(e.target.value)} placeholder="отгул / больничный / отпуск / отпросился / свой выходной" /></Field>
+      <datalist id="kd-dayoff-reasons">
+        <option value="Свой выходной" />
+        <option value="Отгул" />
+        <option value="Больничный (БС)" />
+        <option value="Отпуск" />
+        <option value="Отпросился" />
+      </datalist>
       {upcoming.length > 0 && (
         <>
           <div className="kd-section" style={{ marginTop: 6 }}>Ближайшие выходные</div>
@@ -1714,9 +1721,9 @@ function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, on
   const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
   const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
-  // карта: дата → [tech_id]
+  // карта: дата → [строка выходного {tech_id, note, ...}]
   const offByDate = {};
-  (daysOff || []).forEach((d) => { (offByDate[d.off_date] = offByDate[d.off_date] || []).push(d.tech_id); });
+  (daysOff || []).forEach((d) => { (offByDate[d.off_date] = offByDate[d.off_date] || []).push(d); });
 
   const first = new Date(ym.y, ym.m, 1);
   const startDow = (first.getDay() + 6) % 7; // Пн = 0
@@ -1783,10 +1790,10 @@ function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, on
                   >
                     <div style={{ fontSize: 12, fontWeight: 700, color: isToday ? "var(--primary-d)" : (ci >= 5 ? "var(--muted)" : "var(--ink-soft)") }}>{cell.day}</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                      {cell.offs.map((tid, k) => (
-                        <span key={k} title={personName(tid)} style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--surface-hi)", borderRadius: 6, padding: "2px 5px", fontSize: 10.5, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: techColor(tid), flexShrink: 0 }} />
-                          {firstName(tid)}
+                      {cell.offs.map((row, k) => (
+                        <span key={k} title={personName(row.tech_id) + (row.note ? " · " + row.note : "")} style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--surface-hi)", borderRadius: 6, padding: "2px 5px", fontSize: 10.5, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: techColor(row.tech_id), flexShrink: 0 }} />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{firstName(row.tech_id)}{row.note ? <span style={{ color: "var(--muted)", fontWeight: 600 }}> · {row.note}</span> : null}</span>
                         </span>
                       ))}
                     </div>
