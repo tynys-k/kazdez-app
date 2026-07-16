@@ -9,7 +9,7 @@ import {
 
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
+import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -1425,6 +1425,7 @@ function Dashboard({ session, profile }) {
                   <button className="kd-arrow" onClick={() => shiftDay(1)}><ChevronRight size={18} /></button>
                   <input type="date" value={scheduleDate} onChange={(e) => e.target.value && setScheduleDate(e.target.value)} className="kd-tldate" />
                   <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "dayOff" })}>🌴 Выходной</button>
+                  <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "offCalendar" })}>📅 Выходные</button>
                 </div>
               </div>
               {offToday.length > 0 && <div className="kd-hint" style={{ marginBottom: 10 }}>🌴 Сегодня отдыхают: {offToday.map((d) => personName(d.tech_id)).join(", ")}. Их колонки затемнены — не назначай туда выезды.</div>}
@@ -2603,7 +2604,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} onClose={() => setModal(null)} onSave={saveLead} />}
       {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}
       {modal?.kind === "mktTopup" && <MktTopupModal channel={modal.channel} accounts={accounts} onClose={() => setModal(null)} onSave={(amount, date, accId, note) => addMktTopup(modal.channel.id, amount, date, accId, note)} />}
-      {modal?.kind === "dayOff" && <DayOffModal techs={techs} defaultDate={scheduleDate} daysOff={daysOff} personName={personName} onClose={() => setModal(null)} onAdd={addDayOff} onRemove={removeDayOff} />}
+      {modal?.kind === "dayOff" && <DayOffModal techs={techs} defaultDate={modal.date || scheduleDate} daysOff={daysOff} personName={personName} onClose={() => setModal(null)} onAdd={addDayOff} onRemove={removeDayOff} />}
+      {modal?.kind === "offCalendar" && <OffCalendarModal techs={techs} daysOff={daysOff} personName={personName} defaultDate={scheduleDate} onClose={() => setModal(null)} onPickDay={(iso) => setModal({ kind: "dayOff", date: iso })} />}
       {modal?.kind === "transferPay" && <TransferPayModal job={modal.job} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markTransferPaid(modal.job, accId, date)} />}
       {modal?.kind === "techExtras" && <TechExtrasModal job={modal.job} techName={techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} onSave={(bonus, travel) => saveTechExtras(modal.job, bonus, travel)} />}
       {modal?.kind === "requestEdit" && <RequestEditModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => requestReportEdit(modal.job, reason)} />}
