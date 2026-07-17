@@ -2652,7 +2652,7 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "trash" && (
           <div className="kd-list">
-            {trash.length === 0 && <div className="kd-empty">Корзина пуста. Удалённые заявки можно восстановить отсювда.</div>}
+            {trash.length === 0 && <div className="kd-empty">Корзина пуста. Удалённые заявки можно восстановить отсюда.</div>}
             {trash.map((row) => (
               <div key={row.id} className="kd-card">
                 <div className="kd-card-head"><div className="kd-pest">{row.job.pest}</div><span className="kd-muted">удалено {fmtTs(row.deleted_at)}</span></div>
