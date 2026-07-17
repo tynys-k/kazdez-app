@@ -1,3 +1,4 @@
+// KAZDEZ-STAGE-2-NAVIGATION-2026-07-17
 import React, { useState } from "react";
 import { Calendar, ExternalLink } from "lucide-react";
 
@@ -43,8 +44,8 @@ const DRIVE_LINKS = [
   { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓", place: "knowledge" },
   { key: "drive_kp", label: "КП клиентов", desc: "Папка со всеми коммерческими предложениями", emoji: "📑", place: "leads" },
 ];
-const TAB_LABELS = { today: "Сегодня", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
-const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "done", "canceled", "tasks", "repeats", "leads", "finance", "opex", "cash", "stock", "team", "partners", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
+const TAB_LABELS = { today: "Сегодня", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", growth: "Прибыль и KPI", retention: "Касания", subscriptions: "Абоненты", routes: "Маршруты", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
+const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "done", "canceled", "tasks", "repeats", "leads", "retention", "subscriptions", "routes", "growth", "finance", "opex", "cash", "stock", "team", "partners", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -218,6 +219,19 @@ function buildMsg(job, header) {
   if (job.type !== "Осмотр") lines.push(`Гарантия ${job.guarantee_months || 6} месяцев после вторичной (повторной обработки)`);
   return lines.join("\n");
 }
+function technicianArrivalMessage(job) {
+  const time = (String(job?.scheduled_time || "").match(/(?:[01]?\d|2[0-3]):[0-5]\d/) || [])[0];
+  if (time) {
+    return `Сәлеметсіз бе! Мен дезинфектормын, сізге дезинфекция бойынша жазып отырмын. Сіздерде сағат ${time}-де боламын.\n\nЗдравствуйте! Пишу по поводу дезинфекции. Я дезинфектор, приеду к вам к ${time}.`;
+  }
+  return "Сәлеметсіз бе! Мен дезинфектормын, сізге дезинфекция бойынша жазып отырмын. Сіздерде келісілген уақытта боламын.\n\nЗдравствуйте! Пишу по поводу дезинфекции. Я дезинфектор, приеду к вам в согласованное время.";
+}
+function jobWhatsappUrl(job, isAdmin) {
+  const phone = String(job?.client_phone || "").replace(/\D/g, "");
+  if (!phone) return "";
+  if (isAdmin) return `https://wa.me/${phone}`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(technicianArrivalMessage(job))}`;
+}
 function copyText(text, onDone) {
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(onDone, onDone);
   else onDone && onDone();
@@ -225,4 +239,4 @@ function copyText(text, onDone) {
 
 // ----------------------------- root -----------------------------
 
-export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin, timeStart, todayStart };
+export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
