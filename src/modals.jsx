@@ -1,8 +1,8 @@
 // KAZDEZ-USABILITY-YANDEX-MODALS-2026-07-18
-// Модальные окна Этапа 2 плюс ролевой WhatsApp из предыдущего этапа.
+// Модальные окна Этапа 3: клиент 360 и единый жизненный цикл заявки.
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin } from "lucide-react";
-import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, WORK_STAGE, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, jobWorkStage, lineAmount, norm } from "./shared";
 
 function yandexMapUrl(text) {
   const raw = String(text || "").trim();
@@ -23,8 +23,10 @@ function roleWhatsappUrl(job, isAdmin) {
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct }) {
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink }) {
   const st = STATUS[job.status] || STATUS.new;
+  const stageKey = jobWorkStage(job);
+  const stage = WORK_STAGE[stageKey];
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
   const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
@@ -32,7 +34,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
   const whatsappUrl = roleWhatsappUrl(job, isAdmin);
   return (
     <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
-      <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span></div>
+      <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><div className="kd-cardbadges"><span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>{stageKey !== job.status && <span className="kd-badge subtle" style={{ color: st.color, background: st.bg }}>{st.label}</span>}</div></div>
       <div className="kd-meta">
         <span className="kd-brandtag">{brandLabel}</span>
         <span>{job.type}</span><span>·</span><span className="kd-datetimetag">{isoToRu(job.scheduled_date) || "без даты"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
@@ -84,10 +86,14 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {phoneDigits && <a className="kd-quickbtn" href={`tel:+${phoneDigits}`}><Phone size={15} />Позвонить</a>}
         {phoneDigits && <a className="kd-quickbtn wa" href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle size={15} />WhatsApp</a>}
         {job.address && <a className="kd-quickbtn" href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={15} />Яндекс Карты</a>}
+        {isAdmin && job.public_token && <button className="kd-quickbtn" onClick={onCopyPublicLink}><ChevronRight size={15} />Ссылка клиенту</button>}
       </div>
       <div className="kd-actions">
         {!isAdmin && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onOpenDetails}>Открыть</button>}
-        {!job.executor_partner_id && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
+        {!isAdmin && !job.executor_partner_id && job.status !== "done" && job.status !== "canceled" && ["new", "confirmed", "assigned"].includes(stageKey) && <button className="kd-btn primary" onClick={() => onStageChange("en_route")}>В путь</button>}
+        {!isAdmin && !job.executor_partner_id && job.status !== "done" && job.status !== "canceled" && stageKey === "en_route" && <button className="kd-btn primary" onClick={() => onStageChange("on_site")}>Я на объекте</button>}
+        {!isAdmin && !job.executor_partner_id && job.status !== "done" && job.status !== "canceled" && stageKey === "on_site" && <button className="kd-btn primary" onClick={onReport}>Завершить и заполнить отчёт</button>}
+        {isAdmin && !job.executor_partner_id && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
         {isAdmin && job.executor_partner_id && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn primary" onClick={() => onExecutorDone()}>Выполнено (оплата)</button>}
         {job.status !== "done" && job.status !== "canceled" && <button className="kd-btn ghost danger" onClick={onCancel}>Клиент отказался</button>}
         {isAdmin && !job.executor_partner_id && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onAssign}><UserPlus size={14} />{assignedName ? "Переназначить" : "Назначить"}</button>}
@@ -175,10 +181,10 @@ function ReportSuccessModal({ onClose }) {
   );
 }
 
-function ModalShell({ title, onClose, children, footer }) {
+function ModalShell({ title, onClose, children, footer, wide = false }) {
   return (
     <div className="kd-overlay">
-      <div className="kd-modal" onClick={(e) => e.stopPropagation()}>
+      <div className={`kd-modal ${wide ? "wide" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="kd-modal-head"><h3>{title}</h3><button className="kd-x" onClick={onClose}><X size={16} /></button></div>
         <div className="kd-modal-body">{children}</div>
         {footer && <div className="kd-modal-foot">{footer}</div>}
@@ -734,31 +740,89 @@ function ViewModal({ job, chemicals, performedBy, onClose }) {
   );
 }
 
-function HistoryModal({ job, jobs, onClose, onOpen }) {
+function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts = [], events = [], feedback = [], profiles = [], canPlanFollowup = false, onClose, onOpen, onAddNote, onPlanFollowup, onCopyPublicLink }) {
+  const [view, setView] = useState("overview");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
   const digits = (job.client_phone || "").replace(/\D/g, "");
   const list = jobs
     .filter((j) => (j.client_phone || "").replace(/\D/g, "") === digits && digits)
     .sort((a, b) => new Date(b.scheduled_date || b.created_at || 0) - new Date(a.scheduled_date || a.created_at || 0));
   const doneCount = list.filter((j) => j.status === "done").length;
+  const revenue = list.filter((j) => j.status === "done").reduce((sum, j) => sum + (Number(j.report_paid) || 0), 0);
+  const average = doneCount ? Math.round(revenue / doneCount) : 0;
+  const jobIds = new Set(list.map((j) => String(j.id)));
+  const clientFollowups = followups.filter((f) => (f.phone || "").replace(/\D/g, "") === digits || jobIds.has(String(f.job_id || "")));
+  const clientQuality = qualityChecks.filter((q) => jobIds.has(String(q.job_id || "")));
+  const clientContracts = contracts.filter((c) => (c.phone || "").replace(/\D/g, "") === digits);
+  const clientFeedback = feedback.filter((f) => jobIds.has(String(f.job_id || "")));
+  const lastDone = list.find((j) => j.status === "done");
+  const nextJob = [...list].filter((j) => j.status !== "done" && j.status !== "canceled").sort((a, b) => new Date(a.scheduled_date || "9999-12-31") - new Date(b.scheduled_date || "9999-12-31"))[0];
+  const profileName = (id) => profiles.find((p) => p.id === id)?.full_name || "Сотрудник";
+  const eventTime = (date, time) => {
+    if (!date) return null;
+    const start = (String(time || "").match(/\d{1,2}:\d{2}/) || ["12:00"])[0];
+    const parsed = new Date(`${date}T${start.length === 4 ? `0${start}` : start}:00`);
+    return Number.isNaN(parsed.getTime()) ? new Date(date) : parsed;
+  };
+  const timeline = [
+    ...events.filter((e) => (e.client_phone || "").replace(/\D/g, "") === digits || jobIds.has(String(e.job_id || ""))).map((e) => ({ id: `e-${e.id}`, at: new Date(e.created_at), type: e.event_type, title: e.title, details: [e.details, e.created_by ? profileName(e.created_by) : ""].filter(Boolean).join(" · ") })),
+    ...list.flatMap((j) => [
+      j.created_at ? { id: `created-${j.id}`, at: new Date(j.created_at), type: "created", title: `Создана заявка: ${j.pest || j.type || "услуга"}`, details: j.address } : null,
+      j.scheduled_date ? { id: `visit-${j.id}`, at: eventTime(j.scheduled_date, j.scheduled_time), type: "visit", title: `${j.status === "done" ? "Выполнен" : "Запланирован"} выезд`, details: `${j.type || "Обработка"} · ${j.pest || ""}` } : null,
+      j.canceled_at ? { id: `cancel-${j.id}`, at: new Date(j.canceled_at), type: "canceled", title: "Заявка отменена", details: j.cancel_reason || "Причина не указана" } : null,
+    ].filter(Boolean)),
+    ...clientFollowups.map((f) => ({ id: `f-${f.id}`, at: eventTime(f.completed_at?.slice(0, 10) || f.due_date), type: "followup", title: f.status === "done" ? "Касание завершено" : "Запланировано касание", details: f.result || f.note || f.kind })),
+    ...clientQuality.map((q) => ({ id: `q-${q.id}`, at: new Date(q.contacted_at || q.created_at), type: "quality", title: `Контроль качества${q.rating ? ` · ${q.rating}/5` : ""}`, details: q.note || q.result })),
+    ...clientContracts.map((c) => ({ id: `c-${c.id}`, at: new Date(c.created_at), type: "contract", title: `Абонентский договор${c.active === false ? " закрыт" : " активен"}`, details: `${c.service || "Услуга"} · следующий выезд ${isoToRu(c.next_service_date) || "не задан"}` })),
+    ...clientFeedback.map((f) => ({ id: `pf-${f.id}`, at: new Date(f.created_at), type: "feedback", title: `Оценка клиента · ${f.rating}/5`, details: f.comment || "Без комментария" })),
+  ].filter((item) => item.at && !Number.isNaN(item.at.getTime())).sort((a, b) => b.at - a.at);
+
+  async function saveNote() {
+    if (!note.trim() || saving) return;
+    setSaving(true); const ok = await onAddNote(job, note); setSaving(false);
+    if (ok) setNote("");
+  }
+
   return (
-    <ModalShell title={`История клиента · ${job.client_phone}`} onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
-      <div className="kd-muted" style={{ marginBottom: 12 }}>Всего заявок: {list.length}{doneCount ? ` · выполнено: ${doneCount}` : ""}</div>
-      {list.length <= 1 && <div className="kd-empty">Других заявок этого клиента не найдено — похоже, это новый клиент.</div>}
-      {list.length > 1 && list.map((j) => {
-        const st = STATUS[j.status] || STATUS.new;
-        return (
-          <div key={j.id} className="kd-histrow" onClick={() => onOpen(j)}>
-            <div>
-              <div className="kd-histmain">{j.type} · {j.pest}</div>
-              <div className="kd-muted">{isoToRu(j.scheduled_date) || "без даты"} · {j.address}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
-              {j.report_paid != null && <div className="kd-muted" style={{ marginTop: 4 }}>{fmt(j.report_paid)} ₸</div>}
-            </div>
-          </div>
-        );
-      })}
+    <ModalShell wide title={`Клиент 360° · ${job.contact_name || job.client_phone}`} onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
+      <div className="kd-client360-head">
+        <div><div className="kd-client360-name">{job.contact_name || "Клиент"}</div><a href={`tel:+${digits}`}>{job.client_phone}</a><span>{job.address}</span></div>
+        <div className="kd-client360-actions">
+          {digits && <a className="kd-btn ghost sm" href={`tel:+${digits}`}><Phone size={14} />Позвонить</a>}
+          {digits && <a className="kd-btn ghost sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={14} />WhatsApp</a>}
+          {job.public_token && <button className="kd-btn ghost sm" onClick={() => onCopyPublicLink(job)}>Ссылка клиенту</button>}
+          {canPlanFollowup && <button className="kd-btn primary sm" onClick={() => onPlanFollowup(job)}><Plus size={14} />Касание</button>}
+        </div>
+      </div>
+
+      <div className="kd-client360-kpis">
+        <div><span>Заявки</span><strong>{list.length}</strong><small>{doneCount} выполнено</small></div>
+        <div><span>LTV клиента</span><strong>{fmt(revenue)} ₸</strong><small>за всё время</small></div>
+        <div><span>Средний чек</span><strong>{fmt(average)} ₸</strong><small>по выполненным</small></div>
+        <div><span>Оценка</span><strong>{clientFeedback.length || clientQuality.some((q) => q.rating) ? `${Math.round(([...clientFeedback.map((f) => Number(f.rating)), ...clientQuality.map((q) => Number(q.rating)).filter(Boolean)].reduce((s, n) => s + n, 0) / Math.max(1, clientFeedback.length + clientQuality.filter((q) => q.rating).length)) * 10) / 10}/5` : "—"}</strong><small>{clientContracts.some((c) => c.active !== false) ? "Абонент" : "Разовый клиент"}</small></div>
+      </div>
+
+      <div className="kd-client360-tabs">
+        {[{ id: "overview", label: "Обзор" }, { id: "timeline", label: `Хронология · ${timeline.length}` }, { id: "jobs", label: `Заявки · ${list.length}` }].map((item) => <button key={item.id} className={view === item.id ? "on" : ""} onClick={() => setView(item.id)}>{item.label}</button>)}
+      </div>
+
+      {view === "overview" && <div className="kd-client360-overview">
+        <div className="kd-client360-panel"><div className="kd-section">Следующее действие</div>{nextJob ? <><strong>{isoToRu(nextJob.scheduled_date) || "Дата уточняется"} · {nextJob.scheduled_time || "время уточняется"}</strong><span>{nextJob.type} · {nextJob.pest}</span></> : clientFollowups.find((f) => f.status !== "done") ? <><strong>Связаться {isoToRu(clientFollowups.find((f) => f.status !== "done").due_date)}</strong><span>{clientFollowups.find((f) => f.status !== "done").note || "Запланированное касание"}</span></> : <><strong>Не запланировано</strong><span>Создай касание, чтобы клиент не потерялся.</span></>}</div>
+        <div className="kd-client360-panel"><div className="kd-section">Последняя работа</div>{lastDone ? <><strong>{isoToRu(lastDone.scheduled_date)} · {lastDone.pest}</strong><span>{fmt(lastDone.report_paid)} ₸ · гарантия {lastDone.guarantee_months || 0} мес.</span></> : <><strong>Ещё не было</strong><span>Клиент пока без выполненных заявок.</span></>}</div>
+        <div className="kd-client360-note"><div className="kd-section">Внутренняя заметка</div><textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что важно знать при следующем контакте…" /><button className="kd-btn primary sm" disabled={!note.trim() || saving} onClick={saveNote}>{saving ? "Сохраняем…" : "Добавить в хронологию"}</button></div>
+      </div>}
+
+      {view === "timeline" && <div className="kd-client-timeline">
+        {timeline.length === 0 ? <div className="kd-empty">Событий пока нет.</div> : timeline.map((item) => <div className={`kd-client-event ${item.type}`} key={item.id}><span className="kd-client-event-dot" /><div><time>{fmtTs(item.at)}</time><strong>{item.title}</strong>{item.details && <p>{item.details}</p>}</div></div>)}
+      </div>}
+
+      {view === "jobs" && <div className="kd-client360-jobs">
+        {list.map((j) => {
+          const stage = WORK_STAGE[jobWorkStage(j)];
+          return <button key={j.id} className="kd-histrow" onClick={() => onOpen(j)}><div><div className="kd-histmain">{j.type} · {j.pest}</div><div className="kd-muted">{isoToRu(j.scheduled_date) || "без даты"} · {j.address}</div></div><div style={{ textAlign: "right" }}><span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>{j.report_paid != null && <div className="kd-muted" style={{ marginTop: 4 }}>{fmt(j.report_paid)} ₸</div>}</div></button>;
+        })}
+      </div>}
     </ModalShell>
   );
 }
