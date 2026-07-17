@@ -114,6 +114,8 @@ body{
 .kd-tabs{display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;padding:6px 12px 10px;}
 .kd-tabs::-webkit-scrollbar{width:8px;}
 .kd-tabs::-webkit-scrollbar-thumb{background:var(--line-hi);border-radius:8px;border:2px solid transparent;background-clip:padding-box;}
+.kd-navgroup{display:flex;flex-direction:column;gap:2px;margin-bottom:9px;}
+.kd-navlabel{font-family:var(--font-mono);font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.25px;color:var(--faint);padding:7px 12px 4px;}
 .kd-tab{
   position:relative;width:100%;display:flex;align-items:center;gap:11px;
   border:1px solid transparent;background:transparent;color:var(--muted);
@@ -148,6 +150,63 @@ body{
 .kd-tabbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
 .kd-title{font-family:var(--font-display);font-weight:700;font-size:20px;letter-spacing:-.3px;}
 .kd-tabactions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+
+/* ===================== GLOBAL SEARCH ===================== */
+.kd-globalsearch{position:relative;display:flex;align-items:center;gap:9px;flex:1;max-width:480px;margin:0 12px;padding:0 11px;background:var(--surface-sunk);border:1px solid var(--line);border-radius:12px;min-width:180px;transition:border-color .15s,box-shadow .15s;}
+.kd-globalsearch:focus-within{border-color:rgba(52,211,153,.45);box-shadow:0 0 0 3px var(--primary-tint);}
+.kd-globalsearch>svg{color:var(--muted);flex-shrink:0;}
+.kd-globalsearch input{width:100%;height:40px;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;min-width:0;}
+.kd-globalsearch input::placeholder{color:var(--faint);}
+.kd-globalsearch>button{border:0;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;padding:4px;}
+.kd-globalresults{position:absolute;left:0;right:0;top:calc(100% + 8px);z-index:50;background:var(--surface-hi);border:1px solid var(--line-hi);border-radius:14px;padding:6px;box-shadow:var(--shadow-pop);max-height:430px;overflow:auto;}
+.kd-globalresults>button{display:flex;flex-direction:column;align-items:flex-start;width:100%;border:0;background:transparent;color:var(--ink);padding:10px 11px;border-radius:9px;text-align:left;cursor:pointer;font:inherit;}
+.kd-globalresults>button:hover{background:var(--primary-tint);}
+.kd-globalresults>button span{font-size:13.5px;font-weight:750;line-height:1.35;}
+.kd-globalresults>button small{font-size:11.5px;color:var(--muted);font-weight:600;margin-top:2px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kd-globalempty{padding:18px;text-align:center;color:var(--muted);font-size:13px;font-weight:600;}
+
+/* ===================== TODAY DASHBOARD ===================== */
+.kd-today{display:flex;flex-direction:column;gap:18px;}
+.kd-todayhero{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px 26px;border:1px solid rgba(52,211,153,.22);border-radius:var(--radius-lg);background:radial-gradient(600px 260px at 0 0,rgba(52,211,153,.13),transparent 65%),linear-gradient(145deg,var(--surface-hi),var(--surface));box-shadow:var(--shadow-card);}
+.kd-todayhero h2{font-family:var(--font-display);font-size:25px;line-height:1.18;letter-spacing:-.6px;margin:4px 0 7px;}
+.kd-todayhero p{margin:0;color:var(--muted);font-size:14px;font-weight:600;}
+.kd-eyebrow{font-family:var(--font-mono);font-size:10.5px;color:var(--primary-d);font-weight:800;text-transform:uppercase;letter-spacing:1.2px;}
+.kd-todayhero-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+.kd-kpigrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
+.kd-kpigrid>button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:15px 16px;color:var(--ink);cursor:pointer;font:inherit;transition:border-color .15s,transform .15s,background .15s;}
+.kd-kpigrid>button:hover{border-color:rgba(52,211,153,.3);background:var(--surface-hi);transform:translateY(-1px);}
+.kd-kpigrid span{font-size:11.5px;color:var(--muted);font-weight:750;}
+.kd-kpigrid strong{font-family:var(--font-display);font-size:23px;line-height:1.25;margin-top:3px;letter-spacing:-.4px;}
+.kd-kpigrid strong.danger{color:var(--rust);}.kd-kpigrid strong.ok{color:var(--primary-d);}
+.kd-kpigrid small{font-size:10.5px;color:var(--faint);font-weight:650;margin-top:2px;}
+.kd-todaysection{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-card);}
+.kd-todaysection-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;}
+.kd-alertgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.kd-alertgrid>button{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:9px;border:1px solid var(--line);background:var(--surface-sunk);color:var(--ink);border-radius:12px;padding:11px 12px;text-align:left;font:inherit;cursor:pointer;}
+.kd-alertgrid>button span{font-size:13px;font-weight:700;}.kd-alertgrid>button strong{font-family:var(--font-mono);font-size:14px;}
+.kd-alertgrid>button.danger{border-color:rgba(242,114,106,.28);}.kd-alertgrid>button.danger>svg:first-child,.kd-alertgrid>button.danger strong{color:var(--rust);}
+.kd-alertgrid>button.warning{border-color:rgba(245,180,84,.25);}.kd-alertgrid>button.warning>svg:first-child,.kd-alertgrid>button.warning strong{color:var(--amber);}
+.kd-allgood{display:flex;align-items:center;gap:9px;color:var(--primary-d);font-weight:700;font-size:13.5px;padding:12px 13px;background:var(--primary-tint);border:1px solid rgba(52,211,153,.2);border-radius:12px;}
+.kd-todayjobs{display:flex;flex-direction:column;}
+.kd-todayjob{display:grid;grid-template-columns:105px 1fr auto;gap:14px;align-items:center;padding:12px 3px;border-bottom:1px solid var(--line-soft);}
+.kd-todayjob:last-child{border-bottom:0;}
+.kd-todayjob.done{opacity:.62;}.kd-todayjob.late{border-left:3px solid var(--rust);padding-left:10px;}
+.kd-todaytime{font-family:var(--font-mono);font-size:12px;font-weight:800;color:var(--amber);}
+.kd-todayjobmain{display:flex;flex-direction:column;min-width:0;}.kd-todayjobmain strong{font-size:14px;}.kd-todayjobmain span{font-size:12.5px;color:var(--ink-soft);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.kd-todayjobmain small{font-size:11px;color:var(--muted);font-weight:650;margin-top:2px;}
+.kd-todayjobactions{display:flex;align-items:center;gap:6px;}
+.kd-todayjobactions a{display:grid;place-items:center;width:36px;height:36px;border:1px solid var(--line);border-radius:10px;background:var(--surface-sunk);color:var(--ink-soft);text-decoration:none;}.kd-todayjobactions a.wa{color:var(--wa);}
+.kd-todayjobactions button{height:36px;border:1px solid rgba(52,211,153,.24);border-radius:10px;background:var(--primary-tint);color:var(--primary-d);font:inherit;font-size:12px;font-weight:800;padding:0 12px;cursor:pointer;}
+.kd-todaytasks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.kd-todaytasks>button{display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;column-gap:8px;border:1px solid var(--line);background:var(--surface-sunk);border-radius:11px;color:var(--ink);padding:10px 12px;text-align:left;font:inherit;cursor:pointer;}.kd-todaytasks>button.overdue{border-color:rgba(242,114,106,.3);}.kd-todaytasks span{font-size:13px;font-weight:750;}.kd-todaytasks small{font-size:11px;color:var(--muted);font-weight:650;}.kd-todaytasks svg{grid-column:2;grid-row:1 / 3;align-self:center;color:var(--muted);}
+
+/* ===================== QUICK JOB ACTIONS / FORM ===================== */
+.kd-quickactions{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px;}
+.kd-quickbtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:7px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surface-sunk);color:var(--ink-soft);font-size:12px;font-weight:750;text-decoration:none;}.kd-quickbtn:hover{border-color:rgba(52,211,153,.35);color:var(--ink);}.kd-quickbtn.wa{color:var(--wa);}
+.kd-formmode{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:var(--surface-sunk);border:1px solid var(--line);border-radius:12px;margin-bottom:15px;}
+.kd-formmode button{border:0;border-radius:9px;background:transparent;color:var(--muted);padding:9px;font:inherit;font-size:13px;font-weight:750;cursor:pointer;}.kd-formmode button.on{background:var(--surface-hi);color:var(--ink);box-shadow:var(--shadow-sm);}
+.kd-draftnotice,.kd-clientfound{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid rgba(52,211,153,.25);background:var(--primary-tint);color:var(--primary-d);border-radius:11px;padding:9px 11px;margin-bottom:13px;font-size:12.5px;font-weight:700;}
+.kd-draftnotice button{border:0;background:transparent;color:var(--ink-soft);font:inherit;font-size:12px;font-weight:750;text-decoration:underline;cursor:pointer;}
+.kd-clientfound>div{display:flex;flex-direction:column;}.kd-clientfound>div span{font-size:11px;color:var(--muted);margin-top:2px;}.kd-clientfound.warning{border-color:rgba(245,180,84,.35);background:var(--amber-tint);color:var(--amber);}
 
 /* ===================== GROUPS / DATE ===================== */
 .kd-group{margin-bottom:26px;}
@@ -415,6 +474,10 @@ body{
   .kd-burger{display:grid;}
   .kd-main{padding:18px 16px 72px;}
   .kd-topbar{padding:13px 16px;}
+  .kd-pagetitle{display:none;}
+  .kd-topleft{flex-shrink:0;}
+  .kd-globalsearch{max-width:none;margin:0;}
+  .kd-topbar>.kd-tabactions .kd-btn.ghost{display:none;}
 }
 @media (max-width:720px){
   .kd-grid2,.kd-grid3{grid-template-columns:1fr;}
@@ -425,4 +488,20 @@ body{
   .kd-seg{width:100%;}
   .kd-segbtn{flex:1;text-align:center;}
   .kd-pagetitle{font-size:19px;}
+  .kd-topbar{gap:8px;align-items:center;}
+  .kd-globalsearch input{font-size:13px;}
+  .kd-topbar>.kd-tabactions .kd-btn{font-size:0;padding:0;width:40px;min-height:40px;}
+  .kd-topbar>.kd-tabactions .kd-btn svg{margin:0;}
+  .kd-todayhero{align-items:flex-start;flex-direction:column;padding:19px;}
+  .kd-todayhero h2{font-size:21px;}
+  .kd-todayhero-actions{justify-content:flex-start;width:100%;}
+  .kd-kpigrid{grid-template-columns:1fr 1fr;}
+  .kd-alertgrid,.kd-todaytasks{grid-template-columns:1fr;}
+  .kd-todayjob{grid-template-columns:72px 1fr;gap:10px;}
+  .kd-todayjobactions{grid-column:1 / -1;justify-content:flex-end;}
+  .kd-todaysection{padding:15px;}
+  .kd-todaysection-head{align-items:flex-start;}
+  .kd-clientfound{align-items:flex-start;flex-direction:column;}
+  .kd-quickbtn{flex:1;}
+  .kd-modal-foot{position:sticky;bottom:-1px;background:var(--surface-sunk);z-index:2;}
 }
