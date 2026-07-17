@@ -1,8 +1,8 @@
-// KAZDEZ-STAGE-2-MODALS-2026-07-17
+// KAZDEZ-STAGE-2-MODALS-2GIS-2026-07-17
 // Модальные окна Этапа 2 плюс ролевой WhatsApp из предыдущего этапа.
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin } from "lucide-react";
-import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm, twoGisSearchUrl } from "./shared";
 
 function roleWhatsappUrl(job, isAdmin) {
   const phone = String(job?.client_phone || "").replace(/\D/g, "");
@@ -22,8 +22,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
   const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
-  const addressUrl = (String(job.address || "").match(/https?:\/\/[^\s]+/) || [])[0];
-  const mapUrl = addressUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.address || "")}`;
+  const mapUrl = twoGisSearchUrl(job.address);
   const whatsappUrl = roleWhatsappUrl(job, isAdmin);
   return (
     <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
@@ -78,7 +77,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
       <div className="kd-quickactions" aria-label="Быстрые действия">
         {phoneDigits && <a className="kd-quickbtn" href={`tel:+${phoneDigits}`}><Phone size={15} />Позвонить</a>}
         {phoneDigits && <a className="kd-quickbtn wa" href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle size={15} />WhatsApp</a>}
-        {job.address && <a className="kd-quickbtn" href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={15} />Маршрут</a>}
+        {job.address && <a className="kd-quickbtn" href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={15} />2GIS</a>}
       </div>
       <div className="kd-actions">
         {!isAdmin && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onOpenDetails}>Открыть</button>}
