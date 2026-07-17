@@ -1,16 +1,17 @@
-// KAZDEZ-WHATSAPP-FIX-V4-2026-07-17 — принудительная новая сборка Vercel
+// KAZDEZ-STAGE-2-PROFIT-CONTROL-2026-07-17
+// Этап 2: юнит-экономика, касания, качество, абоненты, маршруты, допродажи и рейтинги.
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
+import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
 
 function roleWhatsappUrl(job, isAdmin) {
   const phone = String(job?.client_phone || "").replace(/\D/g, "");
@@ -103,6 +104,11 @@ function Dashboard({ session, profile }) {
   const [opexView, setOpexView] = useState("accounts");
   const [scheduleDate, setScheduleDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [daysOff, setDaysOff] = useState([]);
+  const [followups, setFollowups] = useState([]);
+  const [qualityChecks, setQualityChecks] = useState([]);
+  const [contracts, setContracts] = useState([]);
+  const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [routeTech, setRouteTech] = useState("all");
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [jobsDateFilter, setJobsDateFilter] = useState({ preset: "all" });
@@ -135,7 +141,7 @@ function Dashboard({ session, profile }) {
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr] = await Promise.all([
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor] = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -166,6 +172,9 @@ function Dashboard({ session, profile }) {
       supabase.from("mkt_channels").select("*").order("sort"),
       supabase.from("mkt_topups").select("*").order("topup_date", { ascending: false }),
       supabase.from("tech_days_off").select("*"),
+      supabase.from("client_followups").select("*").order("due_date", { ascending: true }),
+      supabase.from("quality_checks").select("*").order("contacted_at", { ascending: false }),
+      supabase.from("service_contracts").select("*").order("next_service_date", { ascending: true }),
     ]);
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -200,6 +209,9 @@ function Dashboard({ session, profile }) {
     setMktChannels(mcr.data || []);
     setMktTopups(mtr.data || []);
     setDaysOff(dofr.data || []);
+    setFollowups(fur.data || []);
+    setQualityChecks(qcr.data || []);
+    setContracts(cor.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -515,6 +527,33 @@ function Dashboard({ session, profile }) {
     const costOwed = job.joint_supplier === "us" ? cost * (Number(job.joint_cost_share) || 0) / 100 : 0;
     return Math.round(profitShare - costOwed);
   };
+  const executorShareAmt = (job) => job.executor_partner_id && job.executor_settlement === "qr_full"
+    ? Math.round((Number(job.report_paid) || 0) * (Number(job.executor_share_pct) || 0) / 100) : 0;
+  function jobEconomics(job) {
+    const revenue = Number(job.report_paid) || 0;
+    const chemicalsCost = Math.round(jobChemCost(job));
+    const qrFee = Math.round((Number(job.report_qr) || 0) * qrFeeRate);
+    const partnersCost = Math.max(0, partnerShareAmt(job)) + executorShareAmt(job);
+    const techExtras = (Number(job.tech_bonus) || 0) + (Number(job.tech_travel) || 0);
+    const transport = Number(job.transport_cost) || 0;
+    const other = Number(job.other_cost) || 0;
+    const profit = Math.round(revenue - chemicalsCost - qrFee - partnersCost - techExtras - transport - other);
+    return { revenue, chemicals: chemicalsCost, qrFee, partners: partnersCost, techExtras, transport, other, profit, margin: revenue > 0 ? Math.round(profit / revenue * 100) : 0 };
+  }
+  function upsellFor(job) {
+    const text = norm(`${job.pest || ""} ${job.address || ""} ${job.note || ""}`);
+    if (/склад|цех|производ|общепит|кафе|ресторан/.test(text)) return "регулярное абонентское обслуживание и мониторинг объекта";
+    if (/клещ|комар|участ|территор|мурав/.test(text)) return "комплексную сезонную обработку от клещей, комаров и муравьёв";
+    if (/таракан/.test(text)) return "профилактическую барьерную обработку и контроль через 30 дней";
+    if (/клоп/.test(text)) return "контрольный осмотр и профилактику повторного заноса";
+    if (/мыш|крыс|дератиз/.test(text)) return "установку и обслуживание мониторинговых контейнеров";
+    return "плановую профилактическую обработку со скидкой для постоянного клиента";
+  }
+  function upsellWhatsappUrl(job) {
+    const phone = String(job.client_phone || "").replace(/\D/g, "");
+    const message = `Здравствуйте! Это KazDez. После выполненной обработки можем дополнительно предложить ${upsellFor(job)}. Если актуально — подберём удобную дату и рассчитаем стоимость.`;
+    return phone ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}` : "";
+  }
   async function savePartner(payload, existing) {
     const res = existing
       ? await supabase.from("partners").update(payload).eq("id", existing.id)
@@ -886,6 +925,57 @@ function Dashboard({ session, profile }) {
     await supabase.from("tech_days_off").delete().eq("id", row.id);
     await logAction("График", `Выходной снят: ${personName(row.tech_id)} · ${isoToRu(row.off_date)}`);
     showToast("Выходной снят"); load();
+  }
+  async function saveJobEconomics(job, payload) {
+    const { error } = await supabase.from("jobs").update(payload).eq("id", job.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Юнит-экономика", `${job.pest} · транспорт ${fmt(payload.transport_cost)} ₸ · прочее ${fmt(payload.other_cost)} ₸`);
+    setModal(null); showToast("Расходы заявки сохранены"); load();
+  }
+  async function saveFollowup(payload, existing) {
+    const data = { ...payload, created_by: existing?.created_by || session.user.id, updated_at: new Date().toISOString() };
+    const res = existing ? await supabase.from("client_followups").update(data).eq("id", existing.id) : await supabase.from("client_followups").insert(data);
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Касание", `${payload.phone} · ${payload.kind} · ${isoToRu(payload.due_date)}`);
+    setModal(null); showToast("Касание запланировано"); load();
+  }
+  async function setFollowupDone(item, result = "Связались") {
+    const { error } = await supabase.from("client_followups").update({ status: "done", result, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", item.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Касание", `Завершено: ${item.phone} · ${result}`); showToast("Касание завершено"); load();
+  }
+  async function saveQualityCheck(job, payload, existing) {
+    const data = { ...payload, checked_by: session.user.id, updated_at: new Date().toISOString() };
+    const res = existing ? await supabase.from("quality_checks").update(data).eq("id", existing.id) : await supabase.from("quality_checks").upsert(data, { onConflict: "job_id" });
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    if (payload.result === "repeat" && !job.repeat_state) await supabase.from("jobs").update({ repeat_state: "on_repeat", repeat_since: new Date().toISOString() }).eq("id", job.id);
+    await logAction("Контроль качества", `${job.client_phone} · оценка ${payload.rating || "—"} · ${payload.result}`);
+    setModal(null); showToast(payload.result === "repeat" ? "Сохранено и отправлено в «Повторы»" : "Контроль качества сохранён"); load();
+  }
+  async function saveContract(payload, existing) {
+    const data = { ...payload, created_by: existing?.created_by || session.user.id, updated_at: new Date().toISOString() };
+    const res = existing ? await supabase.from("service_contracts").update(data).eq("id", existing.id) : await supabase.from("service_contracts").insert(data);
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Абонент", `${existing ? "Изменён" : "Добавлен"}: ${payload.client_name} · каждые ${payload.interval_days} дн.`);
+    setModal(null); showToast("Абонент сохранён"); load();
+  }
+  async function removeContract(contract) {
+    const { error } = await supabase.from("service_contracts").delete().eq("id", contract.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Абонент", `Удалён: ${contract.client_name}`); showToast("Удалено"); load();
+  }
+  async function createContractJob(contract) {
+    const payload = {
+      type: "Плановая", scheduled_date: contract.next_service_date, scheduled_time: "", address: contract.address, source: "Абонентский договор",
+      pest: contract.service, price_options: [{ label: "Абонентское обслуживание", amount: Number(contract.price) || 0 }], client_phone: contract.phone,
+      contact_name: contract.client_name, guarantee_months: 0, status: "new", service_contract_id: contract.id, created_by: session.user.id,
+    };
+    const ins = await supabase.from("jobs").insert(payload);
+    if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
+    const next = parseIso(contract.next_service_date) || new Date(); next.setDate(next.getDate() + (Number(contract.interval_days) || 30));
+    await supabase.from("service_contracts").update({ last_generated_date: contract.next_service_date, next_service_date: isoOf(next), updated_at: new Date().toISOString() }).eq("id", contract.id);
+    await logAction("Абонент", `Создана плановая заявка: ${contract.client_name} · ${isoToRu(contract.next_service_date)}`);
+    showToast("Плановая заявка создана"); setTab("jobs"); load();
   }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
@@ -1297,6 +1387,38 @@ function Dashboard({ session, profile }) {
   const overdueTaskList = visibleTasks.filter((t) => t.status !== "done" && t.due_date && t.due_date < todayIso);
   const followupDue = isAdmin ? doneJobs.filter((j) => j.type === "Первичная" && !j.repeat_state && daysSince(j.reported_at) >= 5) : [];
   const pendingDeposits = isAdmin ? deposits.filter((d) => d.status === "pending") : [];
+  const completedEconomics = doneJobs.map((job) => ({ job, econ: jobEconomics(job) }));
+  const totalJobProfit = completedEconomics.reduce((s, r) => s + r.econ.profit, 0);
+  const totalJobRevenue = completedEconomics.reduce((s, r) => s + r.econ.revenue, 0);
+  const averageJobMargin = totalJobRevenue > 0 ? Math.round(totalJobProfit / totalJobRevenue * 100) : 0;
+  const lossJobs = completedEconomics.filter((r) => r.econ.profit < 0);
+  const lostRevenue = canceledJobs.reduce((s, j) => s + Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0)), 0);
+  const openFollowups = followups.filter((f) => f.status !== "done");
+  const dueFollowups = openFollowups.filter((f) => f.due_date && f.due_date <= todayIso);
+  const qualityByJob = (jobId) => qualityChecks.find((q) => q.job_id === jobId);
+  const qualityPending = doneJobs.filter((j) => !qualityByJob(j.id) && daysSince(j.reported_at || j.scheduled_date) >= 1);
+  const activeContracts = contracts.filter((c) => c.active !== false);
+  const dueContracts = activeContracts.filter((c) => c.next_service_date && c.next_service_date <= todayIso);
+  const upsellCandidates = doneJobs.filter((j) => daysSince(j.reported_at || j.scheduled_date) <= 120 && !followups.some((f) => f.job_id === j.id && f.kind === "upsell")).slice(0, 20);
+  const ratingMonthStart = new Date(); ratingMonthStart.setDate(1); ratingMonthStart.setHours(0, 0, 0, 0); const ratingStartIso = isoOf(ratingMonthStart);
+  const ratingJobs = jobs.filter((j) => (j.scheduled_date || "") >= ratingStartIso);
+  const sourceRatingMap = {};
+  ratingJobs.forEach((j) => {
+    const label = (j.source || "Не указан").trim() || "Не указан"; const key = norm(label);
+    if (!sourceRatingMap[key]) sourceRatingMap[key] = { key, label, total: 0, done: 0, canceled: 0, revenue: 0, profit: 0, spent: 0 };
+    const row = sourceRatingMap[key]; row.total++; if (j.status === "canceled") row.canceled++;
+    if (j.status === "done") { row.done++; row.revenue += Number(j.report_paid) || 0; row.profit += jobEconomics(j).profit; }
+  });
+  mktChannels.forEach((ch) => { const key = norm(ch.source_key); if (!key || !sourceRatingMap[key]) return; sourceRatingMap[key].spent += mktTopups.filter((t) => t.channel_id === ch.id && t.topup_date >= ratingStartIso).reduce((s, t) => s + (Number(t.amount) || 0), 0); });
+  const sourceRatings = Object.values(sourceRatingMap).map((r) => ({ ...r, conversion: r.total ? Math.round(r.done / r.total * 100) : 0, avgCheck: r.done ? Math.round(r.revenue / r.done) : 0, roi: r.spent > 0 ? r.revenue / r.spent : null })).sort((a, b) => b.profit - a.profit);
+  const managerRatingMap = {};
+  ratingJobs.forEach((j) => {
+    const id = j.created_by || "unknown"; const label = profileById(id)?.full_name || "Не указан";
+    if (!managerRatingMap[id]) managerRatingMap[id] = { id, label, total: 0, done: 0, canceled: 0, revenue: 0, profit: 0 };
+    const row = managerRatingMap[id]; row.total++; if (j.status === "canceled") row.canceled++;
+    if (j.status === "done") { row.done++; row.revenue += Number(j.report_paid) || 0; row.profit += jobEconomics(j).profit; }
+  });
+  const managerRatings = Object.values(managerRatingMap).map((r) => ({ ...r, conversion: r.total ? Math.round(r.done / r.total * 100) : 0, avgCheck: r.done ? Math.round(r.revenue / r.done) : 0 })).sort((a, b) => b.profit - a.profit);
   const dashboardAlerts = [
     overdueJobs.length ? { id: "overdue-jobs", label: "Просроченные заявки", value: overdueJobs.length, tab: "jobs", tone: "danger" } : null,
     unassignedSoon.length ? { id: "unassigned", label: "Не назначены на сегодня/завтра", value: unassignedSoon.length, tab: "jobs", tone: "warning" } : null,
@@ -1305,6 +1427,9 @@ function Dashboard({ session, profile }) {
     pendingDeposits.length ? { id: "cash", label: "Наличка ждёт подтверждения", value: pendingDeposits.length, tab: "cash", tone: "warning" } : null,
     isAdmin && lowCount ? { id: "stock", label: "Заканчиваются препараты", value: lowCount, tab: "stock", tone: "danger" } : null,
     isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
+    isAdmin && dueFollowups.length ? { id: "client-followups", label: "Пора связаться с клиентами", value: dueFollowups.length, tab: "retention", tone: "warning" } : null,
+    isAdmin && qualityPending.length ? { id: "quality", label: "Ждут контроля качества", value: qualityPending.length, tab: "retention", tone: "warning" } : null,
+    isAdmin && dueContracts.length ? { id: "contracts", label: "Пора создать плановые выезды", value: dueContracts.length, tab: "subscriptions", tone: "danger" } : null,
   ].filter(Boolean);
   const globalQ = globalSearch.trim().toLowerCase();
   const globalDigits = globalQ.replace(/\D/g, "");
@@ -1340,6 +1465,10 @@ function Dashboard({ session, profile }) {
     { id: "leads", icon: Contact, label: `Клиенты${activeLeads ? " · " + activeLeads : ""}` },
     { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : (activeTenders ? " · " + activeTenders : "")}` },
     { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
+    { id: "retention", icon: ClipboardCheck, label: `Касания${dueFollowups.length || qualityPending.length ? " · " + (dueFollowups.length + qualityPending.length) : ""}` },
+    { id: "subscriptions", icon: Repeat2, label: `Абоненты${dueContracts.length ? " · " + dueContracts.length : ""}` },
+    { id: "routes", icon: Route, label: "Маршруты" },
+    { id: "growth", icon: TrendingUp, label: `Прибыль и KPI${lossJobs.length ? " · ⚠ " + lossJobs.length : ""}` },
     { id: "finance", icon: Wallet, label: "Аналитика" },
     { id: "opex", icon: Landmark, label: "Финансы" },
     { id: "cash", icon: Banknote, label: `Касса${deposits.filter((d) => d.status === "pending").length ? " · " + deposits.filter((d) => d.status === "pending").length : ""}` },
@@ -1371,7 +1500,8 @@ function Dashboard({ session, profile }) {
     : baseTabs;
   const navGroups = isAdmin ? [
     { label: "Работа", ids: ["today", "jobs", "schedule", "repeats", "tasks", "done", "canceled"] },
-    { label: "Продажи", ids: ["leads"] },
+    { label: "Продажи", ids: ["leads", "retention", "subscriptions"] },
+    { label: "Контроль", ids: ["routes", "growth"] },
     { label: "Деньги", ids: ["finance", "opex", "cash"] },
     { label: "Ресурсы", ids: ["stock", "team"] },
     { label: "Контрагенты", ids: ["partners", "tenders", "docs"] },
@@ -1426,6 +1556,8 @@ function Dashboard({ session, profile }) {
           </div>
           <div className="kd-tabactions">
             {(tab === "jobs" || tab === "today") && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
+            {tab === "subscriptions" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "contract" })}><Plus size={15} />Абонент</button>}
+            {tab === "retention" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "followup" })}><Plus size={15} />Касание</button>}
             {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}><Plus size={15} />Препарат</button>}
             {tab === "partners" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}><Plus size={15} />Партнёр</button>}
             {tab === "docs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}><Plus size={15} />Документ</button>}
@@ -2081,6 +2213,101 @@ function Dashboard({ session, profile }) {
               ))}
           </div>
         )}
+
+        {!loading && tab === "growth" && (
+          <div className="kd-stage2">
+            <div className="kd-kpigrid">
+              <div className="kd-kpicard"><span>Прибыль по заявкам</span><strong className={totalJobProfit >= 0 ? "pos" : "neg"}>{fmt(totalJobProfit)} ₸</strong><small>без общих операционных расходов</small></div>
+              <div className="kd-kpicard"><span>Средняя маржа</span><strong>{averageJobMargin}%</strong><small>{completedEconomics.length} выполненных заявок</small></div>
+              <div className="kd-kpicard"><span>Убыточные заявки</span><strong className={lossJobs.length ? "neg" : "pos"}>{lossJobs.length}</strong><small>нужно проверить расходы и цену</small></div>
+              <div className="kd-kpicard"><span>Потерянная выручка</span><strong className="neg">{fmt(lostRevenue)} ₸</strong><small>{canceledJobs.length} отменённых заявок</small></div>
+            </div>
+
+            <div className="kd-stage2grid">
+              <section className="kd-card">
+                <div className="kd-stage2head"><div><div className="kd-title">Юнит-экономика заявок</div><div className="kd-muted">Выручка минус все прямые расходы</div></div><TrendingUp size={20} /></div>
+                {completedEconomics.length === 0 && <div className="kd-empty">Выполненных заявок пока нет.</div>}
+                <div className="kd-metrictable">
+                  {completedEconomics.sort((a, b) => a.econ.profit - b.econ.profit).slice(0, 30).map(({ job, econ }) => <button key={job.id} onClick={() => setModal({ kind: "economics", job, economics: econ })}>
+                    <span><strong>{job.pest}</strong><small>{isoToRu(job.scheduled_date)} · {job.client_phone}</small></span>
+                    <span className="right"><strong className={econ.profit >= 0 ? "pos" : "neg"}>{fmt(econ.profit)} ₸</strong><small>маржа {econ.margin}%</small></span><ArrowRight size={15} />
+                  </button>)}
+                </div>
+              </section>
+              <section className="kd-card">
+                <div className="kd-stage2head"><div><div className="kd-title">Рейтинг источников</div><div className="kd-muted">Текущий месяц · сортировка по прибыли</div></div><Star size={20} /></div>
+                {sourceRatings.length === 0 && <div className="kd-empty">Нет заявок за текущий месяц.</div>}
+                <div className="kd-ranktable"><div className="head"><span># / Источник</span><span>Конверсия</span><span>Чек</span><span>ROI</span><span>Прибыль</span></div>
+                  {sourceRatings.map((r, i) => <div key={r.key}><span><b>{i + 1}</b> {r.label}<small>{r.total} обращ.</small></span><strong>{r.conversion}%</strong><strong>{fmt(r.avgCheck)} ₸</strong><strong>{r.roi == null ? "—" : r.roi.toFixed(1) + "×"}</strong><strong className={r.profit >= 0 ? "pos" : "neg"}>{fmt(r.profit)} ₸</strong></div>)}
+                </div>
+              </section>
+            </div>
+            <section className="kd-card">
+              <div className="kd-stage2head"><div><div className="kd-title">Рейтинг менеджеров</div><div className="kd-muted">Кто создаёт заявки, сколько закрывает и с какой прибылью</div></div><Users size={20} /></div>
+              {managerRatings.length === 0 && <div className="kd-empty">Нет данных за текущий месяц.</div>}
+              <div className="kd-ranktable"><div className="head"><span># / Менеджер</span><span>Заявки</span><span>Конверсия</span><span>Средний чек</span><span>Прибыль</span></div>
+                {managerRatings.map((r, i) => <div key={r.id}><span><b>{i + 1}</b> {r.label}<small>{r.canceled} отмен</small></span><strong>{r.total}</strong><strong>{r.conversion}%</strong><strong>{fmt(r.avgCheck)} ₸</strong><strong className={r.profit >= 0 ? "pos" : "neg"}>{fmt(r.profit)} ₸</strong></div>)}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {!loading && tab === "retention" && (
+          <div className="kd-stage2">
+            <div className="kd-kpigrid">
+              <div className="kd-kpicard"><span>Касания на сегодня</span><strong className={dueFollowups.length ? "neg" : "pos"}>{dueFollowups.length}</strong><small>{openFollowups.length} всего открыто</small></div>
+              <div className="kd-kpicard"><span>Контроль качества</span><strong>{qualityPending.length}</strong><small>ожидают звонка</small></div>
+              <div className="kd-kpicard"><span>Средняя оценка</span><strong>{qualityChecks.filter((q) => q.rating).length ? (qualityChecks.reduce((s, q) => s + (Number(q.rating) || 0), 0) / qualityChecks.filter((q) => q.rating).length).toFixed(1) : "—"}</strong><small>по ответившим клиентам</small></div>
+              <div className="kd-kpicard"><span>Допродажи</span><strong>{upsellCandidates.length}</strong><small>актуальных возможностей</small></div>
+            </div>
+
+            <section className="kd-card">
+              <div className="kd-stage2head"><div><div className="kd-title">Повторные касания</div><div className="kd-muted">Просроченные и запланированные звонки</div></div><CalendarClock size={20} /></div>
+              {openFollowups.length === 0 && <div className="kd-empty">Касаний пока нет. Добавь их из отменённого клиента или вручную.</div>}
+              <div className="kd-followlist">{openFollowups.map((f) => {
+                const phone = String(f.phone || "").replace(/\D/g, ""); const overdue = f.due_date && f.due_date < todayIso;
+                return <div key={f.id} className={overdue ? "overdue" : ""}><div><strong>{f.client_name || f.phone}</strong><span>{isoToRu(f.due_date)} · {({ lost: "возврат клиента", quality: "качество", review: "отзыв", upsell: "допродажа", contract: "абонент" })[f.kind] || f.kind}</span>{f.note && <small>{f.note}</small>}</div><div className="actions">{phone && <a className="kd-btn wa sm" href={`https://wa.me/${phone}`} target="_blank" rel="noreferrer"><MessageCircle size={14} />WhatsApp</a>}<button className="kd-btn ghost sm" onClick={() => setModal({ kind: "followup", followup: f })}>Изменить</button><button className="kd-btn primary sm" onClick={() => setFollowupDone(f)}>Готово</button></div></div>;
+              })}</div>
+            </section>
+
+            <div className="kd-stage2grid">
+              <section className="kd-card"><div className="kd-stage2head"><div><div className="kd-title">Потерянные клиенты</div><div className="kd-muted">Отменённые заявки без запланированного возврата</div></div><UserRoundX size={20} /></div>
+                <div className="kd-compactlist">{canceledJobs.filter((j) => !openFollowups.some((f) => f.job_id === j.id && f.kind === "lost")).slice(0, 15).map((j) => <div key={j.id}><span><strong>{j.client_phone}</strong><small>{j.cancel_reason || "Причина не указана"} · {j.pest}</small></span><button className="kd-btn ghost sm" onClick={() => setModal({ kind: "followup", job: j, defaultKind: "lost" })}>Вернуть</button></div>)}</div>
+              </section>
+              <section className="kd-card"><div className="kd-stage2head"><div><div className="kd-title">Контроль качества</div><div className="kd-muted">После выполненной обработки</div></div><ClipboardCheck size={20} /></div>
+                <div className="kd-compactlist">{qualityPending.slice(0, 15).map((j) => <div key={j.id}><span><strong>{j.client_phone} · {j.pest}</strong><small>{isoToRu(j.scheduled_date)} · {addressPlain(j.address)}</small></span><button className="kd-btn primary sm" onClick={() => setModal({ kind: "quality", job: j })}>Проверить</button></div>)}</div>
+              </section>
+            </div>
+
+            {qualityChecks.length > 0 && <section className="kd-card"><div className="kd-stage2head"><div><div className="kd-title">Результаты контроля и отзывы</div><div className="kd-muted">Оценки, проблемы и готовые запросы отзывов</div></div><Star size={20} /></div>
+              <div className="kd-followlist">{qualityChecks.slice(0, 20).map((q) => { const job = jobs.find((j) => j.id === q.job_id); if (!job) return null; const phone = String(job.client_phone || "").replace(/\D/g, ""); const reviewText = `Здравствуйте! Спасибо, что выбрали KazDez. Будем благодарны, если вы оставите отзыв о нашей работе: ${q.review_url || ""}`; return <div key={q.id}><div><strong>{job.client_phone} · оценка {q.rating || "—"}/5</strong><span>{({ positive: "всё хорошо", repeat: "нужен повтор", complaint: "претензия", no_answer: "не ответил" })[q.result] || q.result}</span>{q.note && <small>{q.note}</small>}</div><div className="actions"><button className="kd-btn ghost sm" onClick={() => setModal({ kind: "quality", job })}>Изменить</button>{q.review_requested && q.review_url && phone && <a className="kd-btn wa sm" href={`https://wa.me/${phone}?text=${encodeURIComponent(reviewText)}`} target="_blank" rel="noreferrer"><Star size={14} />Запросить отзыв</a>}</div></div>; })}</div>
+            </section>}
+
+            <section className="kd-card"><div className="kd-stage2head"><div><div className="kd-title">Автоматические допродажи</div><div className="kd-muted">Предложение определяется по виду услуги и объекту</div></div><Sparkles size={20} /></div>
+              <div className="kd-upsellgrid">{upsellCandidates.map((j) => <div key={j.id}><div><strong>{j.client_phone} · {j.pest}</strong><span>Предложить: {upsellFor(j)}</span></div><div className="actions"><a className="kd-btn wa sm" href={upsellWhatsappUrl(j)} target="_blank" rel="noreferrer"><MessageCircle size={14} />Предложить</a><button className="kd-btn ghost sm" onClick={() => setModal({ kind: "followup", job: j, defaultKind: "upsell" })}>На потом</button></div></div>)}</div>
+            </section>
+          </div>
+        )}
+
+        {!loading && tab === "subscriptions" && (
+          <div className="kd-stage2">
+            <div className="kd-kpigrid">
+              <div className="kd-kpicard"><span>Активных договоров</span><strong>{activeContracts.length}</strong><small>регулярные клиенты</small></div>
+              <div className="kd-kpicard"><span>Пора создать заявку</span><strong className={dueContracts.length ? "neg" : "pos"}>{dueContracts.length}</strong><small>дата уже наступила</small></div>
+              <div className="kd-kpicard"><span>Плановая выручка</span><strong>{fmt(activeContracts.reduce((s, c) => s + (Number(c.price) || 0), 0))} ₸</strong><small>один цикл всех договоров</small></div>
+              <div className="kd-kpicard"><span>Неактивных</span><strong>{contracts.length - activeContracts.length}</strong><small>приостановленные договоры</small></div>
+            </div>
+            {contracts.length === 0 && <div className="kd-empty">Абонентских договоров нет. Добавь первый договор кнопкой «+ Абонент».</div>}
+            <div className="kd-contractgrid">{contracts.map((c) => { const due = c.active !== false && c.next_service_date <= todayIso; return <div className={`kd-card ${due ? "low" : ""}`} key={c.id}><div className="kd-card-head"><div className="kd-pest">{c.client_name}</div><span className="kd-badge" style={{ color: c.active !== false ? "#0E7C66" : "#6E7871", background: c.active !== false ? "#E4F3EE" : "#F0F0EE" }}>{c.active !== false ? "активен" : "пауза"}</span></div><div className="kd-addr">{c.address}</div><div className="kd-row"><span>Услуга</span><strong>{c.service}</strong></div><div className="kd-row"><span>Каждые</span><strong>{c.interval_days} дн.</strong></div><div className="kd-row"><span>Следующий выезд</span><strong className={due ? "kd-neg" : ""}>{isoToRu(c.next_service_date)}</strong></div><div className="kd-row total"><span>Стоимость</span><strong>{fmt(c.price)} ₸</strong></div><div className="kd-actions">{c.active !== false && <button className="kd-btn primary sm" onClick={() => createContractJob(c)}><Plus size={13} />Создать заявку</button>}<button className="kd-btn ghost sm" onClick={() => setModal({ kind: "contract", contract: c })}>Изменить</button><button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить договор «${c.client_name}»?`, () => removeContract(c))}><Trash2 size={13} /></button></div></div>; })}</div>
+          </div>
+        )}
+
+        {!loading && tab === "routes" && (() => {
+          const rows = jobs.filter((j) => j.scheduled_date === routeDate && j.status !== "canceled" && (routeTech === "all" || (routeTech === "none" ? !j.assigned_to : j.assigned_to === routeTech))).sort((a, b) => jobTime(a) - jobTime(b));
+          const groups = [...new Set(rows.map((j) => j.assigned_to || "none"))].map((techId) => ({ techId, jobs: rows.filter((j) => (j.assigned_to || "none") === techId) }));
+          const routeUrl = (list) => { const addresses = list.map((j) => addressPlain(j.address)).filter(Boolean); if (!addresses.length) return ""; if (addresses.length === 1) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addresses[0])}`; const origin = addresses[0], destination = addresses[addresses.length - 1], waypoints = addresses.slice(1, -1).join("|"); return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}${waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : ""}&travelmode=driving`; };
+          return <div className="kd-stage2"><div className="kd-routebar"><input type="date" value={routeDate} onChange={(e) => setRouteDate(e.target.value)} /><select value={routeTech} onChange={(e) => setRouteTech(e.target.value)}><option value="all">Все исполнители</option><option value="none">Не назначено</option>{techs.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}</select><button className="kd-btn ghost" onClick={() => setRouteDate(todayIso)}>Сегодня</button></div>{rows.length === 0 && <div className="kd-empty">На выбранную дату заявок нет.</div>}<div className="kd-routegrid">{groups.map((g) => <section className="kd-card" key={g.techId}><div className="kd-stage2head"><div><div className="kd-title">{g.techId === "none" ? "Не назначено" : techById(g.techId)?.full_name}</div><div className="kd-muted">{g.jobs.length} адресов · по времени заявок</div></div>{routeUrl(g.jobs) && <a className="kd-btn primary sm" href={routeUrl(g.jobs)} target="_blank" rel="noreferrer"><Navigation size={14} />Открыть маршрут</a>}</div><div className="kd-routelist">{g.jobs.map((j, i) => <div key={j.id}><b>{i + 1}</b><span><strong>{j.scheduled_time || "без времени"} · {j.pest}</strong><small>{addressPlain(j.address)} · {j.client_phone}</small></span><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressPlain(j.address))}`} target="_blank" rel="noreferrer"><MapPin size={16} /></a></div>)}</div></section>)}</div></div>;
+        })()}
 
         {!loading && tab === "finance" && (
           <>
@@ -2767,6 +2994,10 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
       {modal?.kind === "doc" && <DocModal doc={modal.doc} partners={partners} onClose={() => setModal(null)} onSave={saveDoc} />}
+      {modal?.kind === "economics" && <JobEconomicsModal job={modal.job} economics={jobEconomics(modal.job)} onClose={() => setModal(null)} onSave={(payload) => saveJobEconomics(modal.job, payload)} />}
+      {modal?.kind === "followup" && <FollowupModal followup={modal.followup} job={modal.job} lead={modal.lead} defaultKind={modal.defaultKind || "lost"} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveFollowup} />}
+      {modal?.kind === "quality" && <QualityModal job={modal.job} check={qualityByJob(modal.job.id)} defaultReviewUrl={settings.review_url || ""} onClose={() => setModal(null)} onSave={(payload, existing) => saveQualityCheck(modal.job, payload, existing)} />}
+      {modal?.kind === "contract" && <ContractModal contract={modal.contract} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveContract} />}
       {confirmState && (
         <ConfirmModal message={confirmState.message} danger={confirmState.danger} confirmLabel={confirmState.confirmLabel}
           onCancel={() => setConfirmState(null)}
