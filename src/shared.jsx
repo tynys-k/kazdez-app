@@ -44,7 +44,7 @@ const DRIVE_LINKS = [
   { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓", place: "knowledge" },
   { key: "drive_kp", label: "КП клиентов", desc: "Папка со всеми коммерческими предложениями", emoji: "📑", place: "leads" },
 ];
-const TAB_LABELS = { today: "Сегодня", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", growth: "Прибыль и KPI", retention: "Касания", subscriptions: "Абоненты", routes: "Маршруты", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
+const TAB_LABELS = { today: "Командный центр", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", growth: "Прибыль и KPI", retention: "Касания", subscriptions: "Абоненты", routes: "Маршруты", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
 const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "done", "canceled", "tasks", "repeats", "leads", "retention", "subscriptions", "routes", "growth", "finance", "opex", "cash", "stock", "team", "partners", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
@@ -114,6 +114,25 @@ const STATUS = {
   done: { label: "Выполнена", color: "#0E7C66", bg: "#E4F3EE" },
   canceled: { label: "Отменена", color: "#B3261E", bg: "#FBE7E5" },
 };
+
+// Единый жизненный цикл заявки. STATUS отвечает за итоговое состояние,
+// WORK_STAGE — за то, что происходит с заявкой прямо сейчас.
+const WORK_STAGE = {
+  new: { label: "Новая", short: "Новая", color: "#2563EB", bg: "#EAF1FE", step: 0 },
+  confirmed: { label: "Подтверждена", short: "Подтверждена", color: "#7C3AED", bg: "#F0EAFE", step: 1 },
+  assigned: { label: "Исполнитель назначен", short: "Назначена", color: "#B45309", bg: "#FCF1E2", step: 2 },
+  en_route: { label: "Исполнитель в пути", short: "В пути", color: "#0369A1", bg: "#E0F2FE", step: 3 },
+  on_site: { label: "Исполнитель на объекте", short: "На объекте", color: "#0F766E", bg: "#CCFBF1", step: 4 },
+  done: { label: "Работа выполнена", short: "Выполнена", color: "#0E7C66", bg: "#E4F3EE", step: 5 },
+  canceled: { label: "Заявка отменена", short: "Отменена", color: "#B3261E", bg: "#FBE7E5", step: -1 },
+};
+
+function jobWorkStage(job) {
+  if (job?.status === "done") return "done";
+  if (job?.status === "canceled") return "canceled";
+  if (WORK_STAGE[job?.work_stage]) return job.work_stage;
+  return job?.assigned_to ? "assigned" : "new";
+}
 
 function timeStart(t) { const m = (t || "").match(/^(\d{1,2}):(\d{2})/); return m ? `${m[1].padStart(2, "0")}:${m[2]}` : "00:00"; }
 function jobTime(j) { if (!j.scheduled_date) return Infinity; return new Date(`${j.scheduled_date}T${timeStart(j.scheduled_time)}`).getTime(); }
@@ -252,4 +271,4 @@ function copyText(text, onDone) {
 
 // ----------------------------- root -----------------------------
 
-export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
