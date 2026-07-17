@@ -4,7 +4,7 @@ import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -99,13 +99,15 @@ function Dashboard({ session, profile }) {
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("jobs");
+  const [tab, setTab] = useState("today");
   const [modal, setModal] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
   const askConfirm = (message, onYes, opts = {}) => setConfirmState({ message, onYes, danger: opts.danger !== false, confirmLabel: opts.confirmLabel });
   const [statusFilter, setStatusFilter] = useState("all");
   const [sideOpen, setSideOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [doneSortDir, setDoneSortDir] = useState("desc");
   const [techFilter, setTechFilter] = useState("");
   const [toast, setToast] = useState("");
@@ -275,19 +277,21 @@ function Dashboard({ session, profile }) {
   }
   async function createJob(payload) {
     const { error } = await supabase.from("jobs").insert({ ...payload, created_by: session.user.id });
-    if (error) { showToast("Ошибка: " + error.message); return; }
+    if (error) { showToast("Ошибка: " + error.message); return false; }
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
     setModal(null); showToast("Заявка создана"); load();
+    return true;
   }
   async function editJob(job, payload) {
     const { error } = await supabase.from("jobs").update(payload).eq("id", job.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
+    if (error) { showToast("Ошибка: " + error.message); return false; }
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Редактирование", `${payload.pest || job.pest} · ${payload.address || job.address}`);
     setModal(null); showToast("Заявка обновлена"); load();
+    return true;
   }
   async function putOnRepeat(job) {
     const { error } = await supabase.from("jobs").update({ repeat_state: "on_repeat", repeat_since: new Date().toISOString() }).eq("id", job.id);
@@ -1269,7 +1273,53 @@ function Dashboard({ session, profile }) {
     if (rank(a) !== rank(b)) return rank(a) - rank(b);
     return (a.due_date || "9999").localeCompare(b.due_date || "9999");
   });
+  const tomorrow = parseIso(todayIso); tomorrow.setDate(tomorrow.getDate() + 1); const tomorrowIso = isoOf(tomorrow);
+  const visibleForToday = (j) => isAdmin || j.assigned_to === session.user.id;
+  const todayJobs = jobs.filter((j) => j.scheduled_date === todayIso && j.status !== "canceled" && visibleForToday(j)).sort((a, b) => jobTime(a) - jobTime(b));
+  const todayDone = todayJobs.filter((j) => j.status === "done");
+  const todayActive = todayJobs.filter((j) => j.status !== "done");
+  const todayRevenue = todayDone.reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
+  const todayPlan = todayJobs.reduce((s, j) => s + Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0)), 0);
+  const overdueJobs = activeJobs.filter((j) => j.scheduled_date && j.scheduled_date < todayIso && visibleForToday(j));
+  const unassignedSoon = isAdmin ? activeJobs.filter((j) => !j.assigned_to && !j.executor_partner_id && j.scheduled_date && j.scheduled_date <= tomorrowIso) : [];
+  const overdueTaskList = visibleTasks.filter((t) => t.status !== "done" && t.due_date && t.due_date < todayIso);
+  const followupDue = isAdmin ? doneJobs.filter((j) => j.type === "Первичная" && !j.repeat_state && daysSince(j.reported_at) >= 5) : [];
+  const pendingDeposits = isAdmin ? deposits.filter((d) => d.status === "pending") : [];
+  const dashboardAlerts = [
+    overdueJobs.length ? { id: "overdue-jobs", label: "Просроченные заявки", value: overdueJobs.length, tab: "jobs", tone: "danger" } : null,
+    unassignedSoon.length ? { id: "unassigned", label: "Не назначены на сегодня/завтра", value: unassignedSoon.length, tab: "jobs", tone: "warning" } : null,
+    overdueTaskList.length ? { id: "tasks", label: "Просроченные задачи", value: overdueTaskList.length, tab: "tasks", tone: "danger" } : null,
+    followupDue.length ? { id: "followups", label: "Пора связаться после обработки", value: followupDue.length, tab: "done", tone: "warning" } : null,
+    pendingDeposits.length ? { id: "cash", label: "Наличка ждёт подтверждения", value: pendingDeposits.length, tab: "cash", tone: "warning" } : null,
+    isAdmin && lowCount ? { id: "stock", label: "Заканчиваются препараты", value: lowCount, tab: "stock", tone: "danger" } : null,
+    isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
+  ].filter(Boolean);
+  const globalQ = globalSearch.trim().toLowerCase();
+  const globalDigits = globalQ.replace(/\D/g, "");
+  const includesGlobal = (...parts) => {
+    const text = norm(parts.filter(Boolean).join(" "));
+    const digits = parts.join(" ").replace(/\D/g, "");
+    return !!globalQ && (text.includes(globalQ) || (globalDigits.length >= 3 && digits.includes(globalDigits)));
+  };
+  const globalResults = globalQ ? [
+    ...jobs.filter((j) => includesGlobal(j.id, j.client_phone, j.contact_name, j.address, j.pest)).slice(0, 6).map((j) => ({ kind: "job", id: j.id, label: `${j.pest || "Заявка"} · ${j.client_phone || "без телефона"}`, meta: `${addressPlain(j.address)} · ${isoToRu(j.scheduled_date) || "без даты"}`, item: j })),
+    ...(isAdmin ? leads.filter((l) => includesGlobal(l.name, l.phone, l.address)).slice(0, 4).map((l) => ({ kind: "lead", id: l.id, label: l.name || l.phone || "Клиент", meta: `Клиент · ${l.phone || l.address || ""}`, item: l })) : []),
+    ...(isAdmin ? tenders.filter((t) => includesGlobal(t.contract_no, t.customer, t.title, t.address)).slice(0, 3).map((t) => ({ kind: "tender", id: t.id, label: t.customer || t.title || "Тендер", meta: `Тендер · ${t.contract_no || t.address || ""}`, item: t })) : []),
+    ...(isAdmin ? partners.filter((p) => includesGlobal(p.name)).slice(0, 3).map((p) => ({ kind: "partner", id: p.id, label: p.name, meta: "Партнёр", item: p })) : []),
+    ...(isAdmin ? chemicals.filter((c) => includesGlobal(c.name)).slice(0, 3).map((c) => ({ kind: "chemical", id: c.id, label: c.name, meta: "Склад · препарат", item: c })) : []),
+    ...(isAdmin ? allProfiles.filter((p) => includesGlobal(p.full_name, p.phone)).slice(0, 3).map((p) => ({ kind: "profile", id: p.id, label: p.full_name || p.phone || "Сотрудник", meta: "Сотрудник", item: p })) : []),
+  ].slice(0, 12) : [];
+  function openGlobalResult(result) {
+    setGlobalSearch(""); setGlobalSearchOpen(false);
+    if (result.kind === "job") { setTab(result.item.status === "done" ? "done" : result.item.status === "canceled" ? "canceled" : "jobs"); setModal(result.item.status === "done" ? { kind: "view", job: result.item } : { kind: "edit", job: result.item }); }
+    if (result.kind === "lead") setModal({ kind: "lead", lead: result.item });
+    if (result.kind === "tender") setModal({ kind: "tender", tender: result.item });
+    if (result.kind === "partner") setModal({ kind: "partnerJobs", partner: result.item });
+    if (result.kind === "chemical") setTab("stock");
+    if (result.kind === "profile") setTab("team");
+  }
   const baseTabs = isAdmin ? [
+    { id: "today", icon: LayoutDashboard, label: `Сегодня${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "schedule", icon: CalendarClock, label: "График" },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
@@ -1290,6 +1340,7 @@ function Dashboard({ session, profile }) {
     { id: "journal", icon: History, label: "Журнал" },
     { id: "trash", icon: Trash2, label: `Корзина${trash.length ? " · " + trash.length : ""}` },
   ] : [
+    { id: "today", icon: LayoutDashboard, label: `Сегодня${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
     { id: "jobs", icon: ClipboardList, label: `Мои заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `${canManageTasks ? "Задачи" : "Мои задачи"}${(canManageTasks ? allOpenTasks : myOpenTasks) ? " · " + (canManageTasks ? allOpenTasks : myOpenTasks) : ""}` },
@@ -1306,6 +1357,18 @@ function Dashboard({ session, profile }) {
         return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
       })
     : baseTabs;
+  const navGroups = isAdmin ? [
+    { label: "Работа", ids: ["today", "jobs", "schedule", "repeats", "tasks", "done", "canceled"] },
+    { label: "Продажи", ids: ["leads"] },
+    { label: "Деньги", ids: ["finance", "opex", "cash"] },
+    { label: "Ресурсы", ids: ["stock", "team"] },
+    { label: "Контрагенты", ids: ["partners", "tenders", "docs"] },
+    { label: "Система", ids: ["materials", "knowledge", "journal", "trash"] },
+  ] : [
+    { label: "Работа", ids: ["today", "jobs", "tasks", "done"] },
+    { label: "Учёт", ids: ["cash", "myequip"] },
+    { label: "Помощь", ids: ["materials", "knowledge"] },
+  ];
 
   return (
     <div className={`kd-app ${sideOpen ? "side-open" : ""}`}>
@@ -1317,7 +1380,14 @@ function Dashboard({ session, profile }) {
           <div><div className="kd-brand-name">KazDez</div><div className="kd-brand-sub">{isAdmin ? "Админ" : "Дезинфектор"} · {actorName}</div></div>
         </div>
         <nav className="kd-tabs">
-          {tabs.map((t) => (<button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => { setTab(t.id); setSideOpen(false); }}>{t.icon ? <t.icon size={17} /> : null}<span className="kd-tab-lbl">{t.label}</span></button>))}
+          {navGroups.map((group) => {
+            const groupTabs = group.ids.map((id) => tabs.find((t) => t.id === id)).filter(Boolean);
+            if (!groupTabs.length) return null;
+            return <div className="kd-navgroup" key={group.label}>
+              <div className="kd-navlabel">{group.label}</div>
+              {groupTabs.map((t) => (<button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => { setTab(t.id); setSideOpen(false); }}>{t.icon ? <t.icon size={17} /> : null}<span className="kd-tab-lbl">{t.label}</span></button>))}
+            </div>;
+          })}
         </nav>
         <div className="kd-navfoot">
           {isAdmin && <button className="kd-tab" onClick={() => { setModal({ kind: "settings" }); setSideOpen(false); }}><Settings size={17} /><span className="kd-tab-lbl">Настройки</span></button>}
@@ -1331,8 +1401,19 @@ function Dashboard({ session, profile }) {
             <button className="kd-burger" onClick={() => setSideOpen((v) => !v)} aria-label="Меню"><ClipboardList size={18} /></button>
             <h1 className="kd-pagetitle">{(tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
           </div>
+          <div className="kd-globalsearch" onBlur={() => setTimeout(() => setGlobalSearchOpen(false), 120)}>
+            <Search size={16} />
+            <input value={globalSearch} onFocus={() => setGlobalSearchOpen(true)} onChange={(e) => { setGlobalSearch(e.target.value); setGlobalSearchOpen(true); }} onKeyDown={(e) => e.key === "Escape" && setGlobalSearchOpen(false)} placeholder="Найти клиента, заявку, тендер…" />
+            {globalSearch && <button onClick={() => setGlobalSearch("")} aria-label="Очистить"><X size={14} /></button>}
+            {globalSearchOpen && globalQ && <div className="kd-globalresults">
+              {globalResults.length === 0 && <div className="kd-globalempty">Ничего не найдено</div>}
+              {globalResults.map((r) => <button key={`${r.kind}-${r.id}`} onMouseDown={(e) => e.preventDefault()} onClick={() => openGlobalResult(r)}>
+                <span>{r.label}</span><small>{r.meta}</small>
+              </button>)}
+            </div>}
+          </div>
           <div className="kd-tabactions">
-            {tab === "jobs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
+            {(tab === "jobs" || tab === "today") && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
             {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}><Plus size={15} />Препарат</button>}
             {tab === "partners" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}><Plus size={15} />Партнёр</button>}
             {tab === "docs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}><Plus size={15} />Документ</button>}
@@ -1344,6 +1425,66 @@ function Dashboard({ session, profile }) {
       <main className="kd-main">
 
         {loading && <div className="kd-empty">Загрузка…</div>}
+
+        {!loading && tab === "today" && (
+          <div className="kd-today">
+            <section className="kd-todayhero">
+              <div>
+                <div className="kd-eyebrow">{WEEKDAYS[new Date().getDay()]} · {isoToRu(todayIso)}</div>
+                <h2>{todayActive.length ? `В работе ${todayActive.length} заяв.` : "На сегодня активных заявок нет"}</h2>
+                <p>{todayJobs.length ? `Всего ${todayJobs.length}, выполнено ${todayDone.length}. План на день — ${fmt(todayPlan)} ₸.` : "Можно заняться повторами, задачами и подготовкой следующих выездов."}</p>
+              </div>
+              <div className="kd-todayhero-actions">
+                {isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
+                {isAdmin && <button className="kd-btn ghost" onClick={() => setTab("schedule")}><CalendarClock size={15} />Открыть график</button>}
+              </div>
+            </section>
+
+            <section className="kd-kpigrid">
+              <button onClick={() => setTab("jobs")}><span>Заявок сегодня</span><strong>{todayJobs.length}</strong><small>{todayActive.length} ещё в работе</small></button>
+              <button onClick={() => setTab("done")}><span>Выполнено</span><strong>{todayDone.length}</strong><small>{todayJobs.length ? Math.round(todayDone.length / todayJobs.length * 100) : 0}% плана по количеству</small></button>
+              {isAdmin ? <button onClick={() => setTab("finance")}><span>Выручка сегодня</span><strong>{fmt(todayRevenue)} ₸</strong><small>план по заявкам {fmt(todayPlan)} ₸</small></button> : <button onClick={() => setTab("tasks")}><span>Мои задачи</span><strong>{myOpenTasks}</strong><small>{overdueTaskList.length} просрочено</small></button>}
+              <button onClick={() => dashboardAlerts[0] && setTab(dashboardAlerts[0].tab)}><span>Требуют внимания</span><strong className={dashboardAlerts.length ? "danger" : "ok"}>{dashboardAlerts.length}</strong><small>{dashboardAlerts.length ? "открой список ниже" : "всё под контролем"}</small></button>
+            </section>
+
+            <section className="kd-todaysection">
+              <div className="kd-todaysection-head"><div><div className="kd-title">Требуют внимания</div><div className="kd-muted">Главные просрочки и риски на текущий момент</div></div></div>
+              {dashboardAlerts.length === 0 ? <div className="kd-allgood"><CheckCircle2 size={20} />Критичных предупреждений нет</div> : <div className="kd-alertgrid">
+                {dashboardAlerts.map((a) => <button key={a.id} className={a.tone} onClick={() => setTab(a.tab)}><AlertTriangle size={18} /><span>{a.label}</span><strong>{a.value}</strong><ArrowRight size={16} /></button>)}
+              </div>}
+            </section>
+
+            <section className="kd-todaysection">
+              <div className="kd-todaysection-head"><div><div className="kd-title">Заявки на сегодня</div><div className="kd-muted">По времени, от ближайшей к поздней</div></div><button className="kd-btn ghost sm" onClick={() => setTab("jobs")}>Все заявки <ArrowRight size={14} /></button></div>
+              {todayJobs.length === 0 ? <div className="kd-empty">На сегодня заявок нет.</div> : <div className="kd-todayjobs">
+                {todayJobs.map((j) => {
+                  const phone = String(j.client_phone || "").replace(/\D/g, "");
+                  const directMap = (String(j.address || "").match(/https?:\/\/[^\s]+/) || [])[0] || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(j.address || "")}`;
+                  const late = j.status !== "done" && Number.isFinite(jobTime(j)) && jobTime(j) < Date.now();
+                  return <div className={`kd-todayjob ${j.status === "done" ? "done" : ""} ${late ? "late" : ""}`} key={j.id}>
+                    <div className="kd-todaytime">{j.scheduled_time || "—"}</div>
+                    <div className="kd-todayjobmain">
+                      <strong>{j.pest || "Заявка"}</strong><span>{addressPlain(j.address) || "Адрес не указан"}</span><small>{techById(j.assigned_to)?.full_name || (j.executor_partner_id ? partnerById(j.executor_partner_id)?.name : "Не назначен")}</small>
+                    </div>
+                    <div className="kd-todayjobactions">
+                      {phone && <a href={`tel:+${phone}`} title="Позвонить"><Phone size={16} /></a>}
+                      {phone && <a className="wa" href={`https://wa.me/${phone}?text=${encodeURIComponent(buildMsg(j, brandHeaderOf(j)))}`} target="_blank" rel="noreferrer" title="WhatsApp"><MessageCircle size={16} /></a>}
+                      {j.address && <a href={directMap} target="_blank" rel="noreferrer" title="Маршрут"><MapPin size={16} /></a>}
+                      <button onClick={() => setModal(j.status === "done" ? { kind: "view", job: j } : isAdmin ? { kind: "edit", job: j } : { kind: "details", job: j })}>{j.status === "done" ? "Отчёт" : "Открыть"}</button>
+                    </div>
+                  </div>;
+                })}
+              </div>}
+            </section>
+
+            <section className="kd-todaysection">
+              <div className="kd-todaysection-head"><div><div className="kd-title">Ближайшие задачи</div><div className="kd-muted">На сегодня и просроченные</div></div><button className="kd-btn ghost sm" onClick={() => setTab("tasks")}>Все задачи <ArrowRight size={14} /></button></div>
+              {visibleTasks.filter((t) => t.status !== "done" && t.due_date && t.due_date <= todayIso).length === 0 ? <div className="kd-allgood"><CheckCircle2 size={20} />Срочных задач нет</div> : <div className="kd-todaytasks">
+                {visibleTasks.filter((t) => t.status !== "done" && t.due_date && t.due_date <= todayIso).sort((a, b) => String(a.due_date).localeCompare(String(b.due_date))).slice(0, 6).map((t) => <button key={t.id} className={t.due_date < todayIso ? "overdue" : ""} onClick={() => setModal({ kind: "task", task: t })}><span>{t.title}</span><small>{t.due_date < todayIso ? `Просрочено · ${isoToRu(t.due_date)}` : "Сегодня"} · {personName(t.assignee_id)}</small><ArrowRight size={15} /></button>)}
+              </div>}
+            </section>
+          </div>
+        )}
 
         {!loading && (tab === "jobs" || tab === "done") && (
           <div className="kd-searchrow">
@@ -2529,8 +2670,8 @@ function Dashboard({ session, profile }) {
       </main>
       </div>
 
-      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} sources={sources} pestTypes={pestTypes} pestGuide={pestGuideObj} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
-      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} sources={sources} pestTypes={pestTypes} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
+      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} pestGuide={pestGuideObj} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
+      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} assignInfo={(techId) => {
         const d = modal.job.scheduled_date;
         if (!d) return { off: false, night: false, count: 0 };
@@ -2623,4 +2764,3 @@ function Dashboard({ session, profile }) {
     </div>
   );
 }
-
