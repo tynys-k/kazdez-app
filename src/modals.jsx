@@ -1,8 +1,14 @@
-// KAZDEZ-STAGE-2-MODALS-2GIS-2026-07-17
+// KAZDEZ-USABILITY-YANDEX-MODALS-2026-07-18
 // Модальные окна Этапа 2 плюс ролевой WhatsApp из предыдущего этапа.
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin } from "lucide-react";
-import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm, twoGisSearchUrl } from "./shared";
+import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+
+function yandexMapUrl(text) {
+  const raw = String(text || "").trim();
+  const clean = raw.replace(/https?:\/\/[^\s]+/g, "").replace(/\s{2,}/g, " ").trim();
+  return clean ? `https://yandex.com/maps/?text=${encodeURIComponent(clean)}` : "https://yandex.com/maps/";
+}
 
 function roleWhatsappUrl(job, isAdmin) {
   const phone = String(job?.client_phone || "").replace(/\D/g, "");
@@ -22,7 +28,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
   const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
-  const mapUrl = twoGisSearchUrl(job.address);
+  const mapUrl = yandexMapUrl(job.address);
   const whatsappUrl = roleWhatsappUrl(job, isAdmin);
   return (
     <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
@@ -77,7 +83,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
       <div className="kd-quickactions" aria-label="Быстрые действия">
         {phoneDigits && <a className="kd-quickbtn" href={`tel:+${phoneDigits}`}><Phone size={15} />Позвонить</a>}
         {phoneDigits && <a className="kd-quickbtn wa" href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle size={15} />WhatsApp</a>}
-        {job.address && <a className="kd-quickbtn" href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={15} />2GIS</a>}
+        {job.address && <a className="kd-quickbtn" href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={15} />Яндекс Карты</a>}
       </div>
       <div className="kd-actions">
         {!isAdmin && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onOpenDetails}>Открыть</button>}
@@ -2060,7 +2066,7 @@ function QualityModal({ job, check, defaultReviewUrl = "", onClose, onSave }) {
     <Field label="Результат звонка"><select value={result} onChange={(e) => setResult(e.target.value)}><option value="positive">Всё хорошо</option><option value="repeat">Нужен повтор</option><option value="complaint">Есть претензия</option><option value="no_answer">Не ответил</option></select></Field>
     <Field label="Оценка клиента"><select value={rating} onChange={(e) => setRating(e.target.value)}><option value="5">5 — отлично</option><option value="4">4 — хорошо</option><option value="3">3 — нормально</option><option value="2">2 — плохо</option><option value="1">1 — очень плохо</option></select></Field>
     <Field label="Комментарий"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что сказал клиент, что нужно сделать…" /></Field>
-    {result === "positive" && <><label className="kd-check"><input type="checkbox" checked={reviewRequested} onChange={(e) => setReviewRequested(e.target.checked)} /><span>Запросить отзыв после сохранения</span></label>{reviewRequested && <Field label="Ссылка на отзывы 2GIS"><input value={reviewUrl} onChange={(e) => setReviewUrl(e.target.value)} placeholder="https://2gis.kz/..." /></Field>}</>}
+    {result === "positive" && <><label className="kd-check"><input type="checkbox" checked={reviewRequested} onChange={(e) => setReviewRequested(e.target.checked)} /><span>Запросить отзыв после сохранения</span></label>{reviewRequested && <Field label="Ссылка на страницу отзывов"><input value={reviewUrl} onChange={(e) => setReviewUrl(e.target.value)} placeholder="2GIS, Яндекс или Google" /></Field>}</>}
   </ModalShell>;
 }
 
