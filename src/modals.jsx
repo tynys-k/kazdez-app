@@ -1,6 +1,20 @@
+// KAZDEZ-WHATSAPP-FIX-V4-2026-07-17 — разные сообщения для администратора и дезинфектора
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin } from "lucide-react";
 import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+
+function roleWhatsappUrl(job, isAdmin) {
+  const phone = String(job?.client_phone || "").replace(/\D/g, "");
+  if (!phone) return "";
+  // Администратору нужен обычный пустой чат без заготовленного текста.
+  if (isAdmin) return `https://wa.me/${phone}`;
+  // Дезинфектору подставляем время начала визита из заявки.
+  const time = (String(job?.scheduled_time || "").match(/(?:[01]?\d|2[0-3]):[0-5]\d/) || [])[0];
+  const message = time
+    ? `Сәлеметсіз бе! Мен дезинфектормын, сізге дезинфекция бойынша жазып отырмын. Сіздерде сағат ${time}-де боламын.\n\nЗдравствуйте! Пишу по поводу дезинфекции. Я дезинфектор, приеду к вам к ${time}.`
+    : "Сәлеметсіз бе! Мен дезинфектормын, сізге дезинфекция бойынша жазып отырмын. Сіздерде келісілген уақытта боламын.\n\nЗдравствуйте! Пишу по поводу дезинфекции. Я дезинфектор, приеду к вам в согласованное время.";
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
 
 function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct }) {
   const st = STATUS[job.status] || STATUS.new;
@@ -9,7 +23,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
   const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
   const addressUrl = (String(job.address || "").match(/https?:\/\/[^\s]+/) || [])[0];
   const mapUrl = addressUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.address || "")}`;
-  const whatsappUrl = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(buildMsg(job, brandLabel))}`;
+  const whatsappUrl = roleWhatsappUrl(job, isAdmin);
   return (
     <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span></div>
@@ -66,7 +80,6 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {job.address && <a className="kd-quickbtn" href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={15} />Маршрут</a>}
       </div>
       <div className="kd-actions">
-        {isAdmin && job.status !== "canceled" && <button className="kd-btn wa" onClick={onCopy}><MessageCircle size={15} />Скопировать для WhatsApp</button>}
         {!isAdmin && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onOpenDetails}>Открыть</button>}
         {!job.executor_partner_id && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
         {isAdmin && job.executor_partner_id && job.status !== "done" && job.status !== "canceled" && <button className="kd-btn primary" onClick={() => onExecutorDone()}>Выполнено (оплата)</button>}
