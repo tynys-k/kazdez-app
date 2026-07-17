@@ -1,4 +1,4 @@
-// KAZDEZ-STAGE-2-NAVIGATION-2GIS-2026-07-17
+// KAZDEZ-USABILITY-YANDEX-2026-07-18
 import React, { useState } from "react";
 import { Calendar, ExternalLink } from "lucide-react";
 
@@ -130,20 +130,18 @@ function addressPlain(text) {
   const s = String(text || "").replace(/https?:\/\/[^\s]+/g, "").replace(/\s{2,}/g, " ").trim().replace(/[,;·]+$/, "");
   return s || (text ? "📍 точка на карте" : "");
 }
-// Универсальная HTTPS-ссылка предпочтительнее dgis://: она открывает приложение
-// 2GIS на телефоне, а при его отсутствии — веб-версию.
-function twoGisSearchUrl(text) {
+function yandexMapUrl(text) {
   const raw = String(text || "").trim();
-  const existing2Gis = (raw.match(/https?:\/\/(?:[^/\s]+\.)?2gis\.(?:ru|kz|com)\/[^\s]+/i) || [])[0];
-  if (existing2Gis) return existing2Gis;
+  const existingYandex = (raw.match(/https?:\/\/(?:[^/\s]+\.)?yandex\.(?:ru|com|kz)\/maps[^\s]*/i) || [])[0];
+  if (existingYandex) return existingYandex;
   let decoded = raw;
   try { decoded = decodeURIComponent(raw); } catch { /* оставляем исходную строку */ }
-  const googleCoords = decoded.match(/@(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/)
+  const coords = decoded.match(/@(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/)
     || decoded.match(/[?&](?:q|query|destination)=(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/i);
-  if (googleCoords) return `https://2gis.ru/directions/points/|${googleCoords[2]},${googleCoords[1]}`;
+  if (coords) return `https://yandex.com/maps/?rtext=~${coords[1]},${coords[2]}&rtt=auto`;
   const plain = addressPlain(raw);
   const query = plain === "📍 точка на карте" ? raw.replace(/https?:\/\/[^\s]+/g, "").trim() : plain;
-  return query ? `https://2gis.ru/search/${encodeURIComponent(query)}` : "https://2gis.ru/";
+  return query ? `https://yandex.com/maps/?text=${encodeURIComponent(query)}` : "https://yandex.com/maps/";
 }
 function dateGroupLabel(iso) {
   const date = parseIso(iso); if (!date) return "Без даты";
@@ -165,13 +163,13 @@ function AddressText({ text }) {
   if (!text) return null;
   const urlMatch = String(text).match(/https?:\/\/[^\s]+/);
   if (!urlMatch) return <>{text}</>;
-  const url = twoGisSearchUrl(text);
+  const url = yandexMapUrl(text);
   const before = text.slice(0, urlMatch.index).trim();
   const after = text.slice(urlMatch.index + url.length).trim();
   return (
     <>
       {before && <span>{before} </span>}
-      <a href={url} target="_blank" rel="noopener noreferrer" className="kd-maplink" onClick={(e) => e.stopPropagation()}>📍 Открыть на карте</a>
+      <a href={url} target="_blank" rel="noopener noreferrer" className="kd-maplink" onClick={(e) => e.stopPropagation()}>📍 Яндекс Карты</a>
       {after && <span> {after}</span>}
     </>
   );
@@ -254,4 +252,4 @@ function copyText(text, onDone) {
 
 // ----------------------------- root -----------------------------
 
-export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart, twoGisSearchUrl };
+export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
