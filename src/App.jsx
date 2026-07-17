@@ -1,5 +1,5 @@
 // KAZDEZ-USABILITY-YANDEX-2026-07-18
-// Этап 2: юнит-экономика, касания, качество, абоненты, маршруты, допродажи и рейтинги.
+// Этап 3: единое окно, SLA, клиент 360, жизненный цикл и публичная страница заявки.
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { generateCertificate, generateAct } from "./pdfDocs";
@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, jobWorkStage, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
 
 function roleWhatsappUrl(job, isAdmin) {
@@ -55,6 +55,7 @@ class AppErrorBoundary extends React.Component {
 }
 
 function AppContent() {
+  const publicToken = new URLSearchParams(window.location.search).get("track");
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [booting, setBooting] = useState(true);
@@ -70,6 +71,7 @@ function AppContent() {
     if (!session) { setProfile(null); return; }
     supabase.from("profiles").select("role, full_name").eq("id", session.user.id).single().then(({ data }) => setProfile(data));
   }, [session]);
+  if (publicToken) return <PublicJobPage token={publicToken} />;
   if (booting) return <div className="kd-center">Загрузка…</div>;
   if (!session) return <Login />;
   return <Dashboard session={session} profile={profile} />;
@@ -99,6 +101,93 @@ function Login() {
         {err && <div className="kd-err">{err}</div>}
         <button className="kd-btn primary wide" disabled={loading || !email || !pass}>{loading ? "Входим…" : "Войти"}</button>
       </form>
+    </div>
+  );
+}
+
+function PublicJobPage({ token }) {
+  const [job, setJob] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    supabase.rpc("get_public_job", { p_token: token }).then(({ data, error: rpcError }) => {
+      if (!active) return;
+      const item = Array.isArray(data) ? data[0] : data;
+      if (rpcError) setError("Страница заявки пока недоступна. Попросите менеджера проверить ссылку.");
+      else if (!item) setError("Ссылка недействительна или доступ к заявке закрыт.");
+      else setJob(item);
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [token]);
+
+  async function sendFeedback() {
+    if (!rating || sending) return;
+    setSending(true); setError("");
+    const { error: rpcError } = await supabase.rpc("submit_public_feedback", { p_token: token, p_rating: rating, p_comment: comment.trim() || null });
+    if (rpcError) setError("Не удалось отправить оценку. Попробуйте ещё раз.");
+    else setSent(true);
+    setSending(false);
+  }
+
+  if (loading) return <div className="kd-public"><div className="kd-public-card kd-public-state">Загрузка заявки…</div></div>;
+  if (!job) return <div className="kd-public"><div className="kd-public-card kd-public-state"><AlertTriangle size={28} /><h1>Заявка не найдена</h1><p>{error}</p></div></div>;
+  const stageKey = job.job_status === "done" ? "done" : job.job_status === "canceled" ? "canceled" : (WORK_STAGE[job.work_stage] ? job.work_stage : "new");
+  const stage = WORK_STAGE[stageKey];
+  const steps = ["confirmed", "assigned", "en_route", "on_site", "done"];
+  const stageStep = stage.step;
+  return (
+    <div className="kd-public">
+      <main className="kd-public-card">
+        <header className="kd-public-head">
+          <div className="kd-logo-big"><span className="kd-logo-mark"><Bug size={18} /></span>KazDez</div>
+          <span className="kd-public-id">Заявка #{String(job.job_id || "").slice(-6)}</span>
+        </header>
+        <section className="kd-public-hero">
+          <div>
+            <div className="kd-public-kicker">Статус работы</div>
+            <h1>{stage.label}</h1>
+            <p>{job.contact_name}, здесь всегда виден актуальный статус вашей заявки.</p>
+          </div>
+          <span className="kd-public-status" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>
+        </section>
+
+        {stageKey !== "canceled" && <div className="kd-public-progress" aria-label="Этапы выполнения">
+          {steps.map((key, index) => {
+            const item = WORK_STAGE[key]; const active = stageStep >= item.step;
+            return <div key={key} className={active ? "done" : ""}><span>{active ? <CheckCircle2 size={16} /> : index + 1}</span><small>{item.short}</small></div>;
+          })}
+        </div>}
+
+        <section className="kd-public-details">
+          <div><Calendar size={18} /><span>Дата и время</span><strong>{isoToRu(job.scheduled_date) || "Уточняется"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</strong></div>
+          <div><ClipboardList size={18} /><span>Услуга</span><strong>{job.service_type}{job.pest ? ` · ${job.pest}` : ""}</strong></div>
+          <div><MapPin size={18} /><span>Адрес</span><strong>{addressPlain(job.address) || "Уточняется"}</strong></div>
+          {job.technician_name && <div><Users size={18} /><span>Исполнитель</span><strong>{job.technician_name}</strong></div>}
+          {job.guarantee_months && <div><ShieldCheck size={18} /><span>Гарантия</span><strong>{job.guarantee_months} мес.</strong></div>}
+        </section>
+
+        {job.address && <a className="kd-btn primary wide kd-public-map" href={yandexMapUrl(job.address)} target="_blank" rel="noreferrer"><Navigation size={17} />Открыть маршрут в Яндекс Картах</a>}
+
+        {stageKey === "done" && <section className="kd-public-feedback">
+          <div className="kd-title">Как прошла работа?</div>
+          {sent ? <div className="kd-public-thanks"><CheckCircle2 size={22} />Спасибо! Ваша оценка отправлена.</div> : <>
+            <div className="kd-public-stars" aria-label="Оценка от 1 до 5">
+              {[1, 2, 3, 4, 5].map((value) => <button key={value} className={value <= rating ? "on" : ""} onClick={() => setRating(value)} aria-label={`${value} из 5`}><Star size={27} /></button>)}
+            </div>
+            <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий (необязательно)" rows={3} />
+            <button className="kd-btn primary" disabled={!rating || sending} onClick={sendFeedback}>{sending ? "Отправляем…" : "Отправить оценку"}</button>
+          </>}
+        </section>}
+        {error && <div className="kd-err">{error}</div>}
+        <footer className="kd-public-footer">Эта страница содержит только информацию по вашей заявке.</footer>
+      </main>
     </div>
   );
 }
@@ -141,6 +230,8 @@ function Dashboard({ session, profile }) {
   const [followups, setFollowups] = useState([]);
   const [qualityChecks, setQualityChecks] = useState([]);
   const [contracts, setContracts] = useState([]);
+  const [clientEvents, setClientEvents] = useState([]);
+  const [publicFeedback, setPublicFeedback] = useState([]);
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
   const [taskFilter, setTaskFilter] = useState("open");
@@ -220,9 +311,11 @@ function Dashboard({ session, profile }) {
       supabase.from("client_followups").select("*").order("due_date", { ascending: true }),
       supabase.from("quality_checks").select("*").order("contacted_at", { ascending: false }),
       supabase.from("service_contracts").select("*").order("next_service_date", { ascending: true }),
+      supabase.from("client_events").select("*").order("created_at", { ascending: false }),
+      supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
@@ -260,6 +353,8 @@ function Dashboard({ session, profile }) {
     setFollowups(fur.data || []);
     setQualityChecks(qcr.data || []);
     setContracts(cor.data || []);
+    setClientEvents(cer.data || []);
+    setPublicFeedback(pfr.data || []);
     setLastLoadedAt(new Date());
     setLoading(false);
     } catch (error) {
@@ -271,6 +366,54 @@ function Dashboard({ session, profile }) {
 
   async function logAction(action, summary) {
     await supabase.from("audit_log").insert({ actor: actorName, actor_id: session.user.id, action, summary });
+  }
+  async function recordClientEvent(job, eventType, title, details = "") {
+    if (!job?.client_phone || !title) return;
+    const { data, error } = await supabase.from("client_events").insert({
+      client_phone: job.client_phone,
+      job_id: job.id ? String(job.id) : null,
+      event_type: eventType || "note",
+      title,
+      details: details || null,
+      created_by: session.user.id,
+    }).select("*").single();
+    if (!error && data) setClientEvents((items) => [data, ...items]);
+  }
+  async function addClientNote(job, note) {
+    const text = String(note || "").trim();
+    if (!text) return false;
+    const { data, error } = await supabase.from("client_events").insert({
+      client_phone: job.client_phone,
+      job_id: String(job.id),
+      event_type: "note",
+      title: "Внутренняя заметка",
+      details: text,
+      created_by: session.user.id,
+    }).select("*").single();
+    if (error) { showToast("Не удалось сохранить заметку: " + error.message); return false; }
+    setClientEvents((items) => [data, ...items]); showToast("Заметка добавлена"); return true;
+  }
+  function publicJobUrl(job) {
+    if (!job?.public_token) return "";
+    const url = new URL(window.location.href);
+    url.search = ""; url.hash = ""; url.searchParams.set("track", job.public_token);
+    return url.toString();
+  }
+  function copyPublicJobLink(job) {
+    const url = publicJobUrl(job);
+    if (!url) { showToast("Сначала выполни SQL этапа 3 в Supabase"); return; }
+    copyText(url, () => showToast("Ссылка для клиента скопирована"));
+  }
+  async function setJobWorkStage(job, stageKey) {
+    if (!WORK_STAGE[stageKey]) return;
+    const now = new Date().toISOString();
+    const payload = { work_stage: stageKey, stage_updated_at: now };
+    if (stageKey === "en_route") payload.en_route_at = now;
+    if (stageKey === "on_site") payload.arrived_at = now;
+    const { error } = await supabase.from("jobs").update(payload).eq("id", job.id);
+    if (error) { showToast("Не удалось изменить этап: " + error.message); return; }
+    await recordClientEvent(job, "stage", WORK_STAGE[stageKey].label, actorName);
+    showToast(`Статус: ${WORK_STAGE[stageKey].short}`); load();
   }
   const chemById = (id) => chemicals.find((x) => x.id === id);
   const lineChem = (l) => (l.chemical_id ? chemById(l.chemical_id) : chemicals.find((x) => norm(x.name) === norm(l.name)));
@@ -353,11 +496,12 @@ function Dashboard({ session, profile }) {
     await supabase.from(table).insert({ name: v });
   }
   async function createJob(payload) {
-    const { error } = await supabase.from("jobs").insert({ ...payload, created_by: session.user.id });
+    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
     if (error) { showToast("Ошибка: " + error.message); return false; }
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
+    await recordClientEvent({ ...payload, id: created?.id, client_phone: created?.client_phone || payload.client_phone }, "created", "Заявка создана", `${payload.pest || "Услуга"} · ${isoToRu(payload.scheduled_date) || "дата уточняется"}`);
     setModal(null); showToast("Заявка создана"); load();
     return true;
   }
@@ -367,6 +511,7 @@ function Dashboard({ session, profile }) {
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Редактирование", `${payload.pest || job.pest} · ${payload.address || job.address}`);
+    await recordClientEvent({ ...job, ...payload }, "updated", "Данные заявки обновлены", actorName);
     setModal(null); showToast("Заявка обновлена"); load();
     return true;
   }
@@ -377,15 +522,17 @@ function Dashboard({ session, profile }) {
     showToast("Заявка на повторе"); load();
   }
   async function cancelJob(job, reason) {
-    const { error } = await supabase.from("jobs").update({ status: "canceled", cancel_reason: reason || null, canceled_at: new Date().toISOString(), canceled_by: session.user.id }).eq("id", job.id);
+    const { error } = await supabase.from("jobs").update({ status: "canceled", work_stage: "canceled", cancel_reason: reason || null, canceled_at: new Date().toISOString(), canceled_by: session.user.id }).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Отмена заявки", `${job.pest} · ${job.address}${reason ? " — " + reason : ""}`);
+    await recordClientEvent(job, "canceled", "Заявка отменена", reason || actorName);
     setModal(null); showToast("Заявка отменена"); load();
   }
   async function restoreCanceled(job) {
-    const { error } = await supabase.from("jobs").update({ status: job.assigned_to ? "assigned" : "new", cancel_reason: null, canceled_at: null, canceled_by: null }).eq("id", job.id);
+    const { error } = await supabase.from("jobs").update({ status: job.assigned_to ? "assigned" : "new", work_stage: job.assigned_to ? "assigned" : "new", cancel_reason: null, canceled_at: null, canceled_by: null }).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Отмена заявки", `Восстановлена · ${job.pest} · ${job.address}`);
+    await recordClientEvent(job, "restored", "Заявка возвращена в работу", actorName);
     showToast("Заявка возвращена в работу"); load();
   }
   async function saveRepeatNote(job, note) {
@@ -418,11 +565,13 @@ function Dashboard({ session, profile }) {
   }
   async function assignJob(job, techId) {
     const newStatus = job.status === "done" ? "done" : (techId ? "assigned" : "new");
-    const { error } = await supabase.from("jobs").update({ assigned_to: techId, status: newStatus }).eq("id", job.id);
+    const nextStage = job.status === "done" ? "done" : (techId ? "assigned" : "new");
+    const { error } = await supabase.from("jobs").update({ assigned_to: techId || null, status: newStatus, work_stage: nextStage, stage_updated_at: new Date().toISOString() }).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     const from = job.assigned_to ? (techById(job.assigned_to)?.full_name || "—") : "—";
     const to = techId ? (techById(techId)?.full_name || "—") : "не назначен";
     await logAction("Назначение", `${job.pest} · ${from} → ${to}`);
+    await recordClientEvent(job, "assignment", techId ? "Назначен исполнитель" : "Исполнитель снят", techId ? to : actorName);
     setModal(null); showToast("Дезинфектор назначен"); load();
   }
   async function submitReport(job, report, chems, docs) {
@@ -439,6 +588,7 @@ function Dashboard({ session, profile }) {
       p_transfer: Number(report.transfer) || 0, p_method: report.method,
     });
     if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); load(); return; }
+    await recordClientEvent(job, "done", "Работа выполнена", `Оплата: ${fmt((Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0))} ₸`);
     setModal({ kind: "reportSuccess" }); load();
   }
   async function markTransferPaid(job, accountId, paidDate) {
@@ -1449,6 +1599,9 @@ function Dashboard({ session, profile }) {
   const dueFollowups = openFollowups.filter((f) => f.due_date && f.due_date <= todayIso);
   const qualityByJob = (jobId) => qualityChecks.find((q) => q.job_id === jobId);
   const qualityPending = doneJobs.filter((j) => !qualityByJob(j.id) && daysSince(j.reported_at || j.scheduled_date) >= 1);
+  const qualityProblems = qualityChecks.filter((q) => q.status === "problem" || q.result === "complaint");
+  const overdueTransfers = doneJobs.filter((j) => Number(j.report_transfer) > 0 && !j.transfer_paid && daysSince(j.reported_at || j.scheduled_date) >= 3);
+  const recentLowFeedback = publicFeedback.filter((f) => Number(f.rating) <= 3 && daysSince(f.created_at) <= 14);
   const activeContracts = contracts.filter((c) => c.active !== false);
   const dueContracts = activeContracts.filter((c) => c.next_service_date && c.next_service_date <= todayIso);
   const upsellCandidates = doneJobs.filter((j) => daysSince(j.reported_at || j.scheduled_date) <= 120 && !followups.some((f) => f.job_id === j.id && f.kind === "upsell")).slice(0, 20);
@@ -1481,6 +1634,9 @@ function Dashboard({ session, profile }) {
     isAdmin && dueFollowups.length ? { id: "client-followups", label: "Пора связаться с клиентами", value: dueFollowups.length, tab: "retention", tone: "warning" } : null,
     isAdmin && qualityPending.length ? { id: "quality", label: "Ждут контроля качества", value: qualityPending.length, tab: "retention", tone: "warning" } : null,
     isAdmin && dueContracts.length ? { id: "contracts", label: "Пора создать плановые выезды", value: dueContracts.length, tab: "subscriptions", tone: "danger" } : null,
+    isAdmin && overdueTransfers.length ? { id: "transfers", label: "Оплата просрочена более 3 дней", value: overdueTransfers.length, tab: "done", tone: "danger" } : null,
+    isAdmin && qualityProblems.length ? { id: "complaints", label: "Есть проблемы по качеству", value: qualityProblems.length, tab: "retention", tone: "danger" } : null,
+    isAdmin && recentLowFeedback.length ? { id: "low-feedback", label: "Низкие оценки клиентов за 14 дней", value: recentLowFeedback.length, tab: "retention", tone: "danger" } : null,
   ].filter(Boolean);
   const globalQ = globalSearch.trim().toLowerCase();
   const globalDigits = globalQ.replace(/\D/g, "");
@@ -1507,7 +1663,7 @@ function Dashboard({ session, profile }) {
     if (result.kind === "profile") setTab("team");
   }
   const baseTabs = isAdmin ? [
-    { id: "today", icon: LayoutDashboard, label: `Сегодня${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
+    { id: "today", icon: LayoutDashboard, label: `Командный центр${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "schedule", icon: CalendarClock, label: "График" },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
@@ -1532,7 +1688,7 @@ function Dashboard({ session, profile }) {
     { id: "journal", icon: History, label: "Журнал" },
     { id: "trash", icon: Trash2, label: `Корзина${trash.length ? " · " + trash.length : ""}` },
   ] : [
-    { id: "today", icon: LayoutDashboard, label: `Сегодня${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
+    { id: "today", icon: LayoutDashboard, label: `Мой день${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
     { id: "jobs", icon: ClipboardList, label: `Мои заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `${canManageTasks ? "Задачи" : "Мои задачи"}${(canManageTasks ? allOpenTasks : myOpenTasks) ? " · " + (canManageTasks ? allOpenTasks : myOpenTasks) : ""}` },
@@ -1602,7 +1758,7 @@ function Dashboard({ session, profile }) {
         <header className="kd-topbar">
           <div className="kd-topleft">
             <button className="kd-burger" onClick={() => setSideOpen((v) => !v)} aria-label="Меню"><ClipboardList size={18} /></button>
-            <h1 className="kd-pagetitle">{TAB_LABELS[tab] || (tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
+            <h1 className="kd-pagetitle">{tab === "today" ? (isAdmin ? "Командный центр" : "Мой день") : TAB_LABELS[tab] || (tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
           </div>
           <div className="kd-globalsearch" onBlur={() => setTimeout(() => setGlobalSearchOpen(false), 120)}>
             <Search size={16} />
@@ -1629,7 +1785,7 @@ function Dashboard({ session, profile }) {
         </header>
 
         <nav className="kd-mobile-nav" aria-label="Основная навигация">
-          {mobileTabs.map((item) => <button key={item.id} className={tab === item.id ? "on" : ""} onClick={() => setTab(item.id)}>{item.icon ? <item.icon size={19} /> : null}<span>{TAB_LABELS[item.id] || item.id}</span></button>)}
+          {mobileTabs.map((item) => <button key={item.id} className={tab === item.id ? "on" : ""} onClick={() => setTab(item.id)}>{item.icon ? <item.icon size={19} /> : null}<span>{item.id === "today" ? (isAdmin ? "Центр" : "Мой день") : TAB_LABELS[item.id] || item.id}</span></button>)}
           <button onClick={() => setSideOpen(true)}><Menu size={19} /><span>Ещё</span></button>
         </nav>
 
@@ -1643,8 +1799,8 @@ function Dashboard({ session, profile }) {
             <section className="kd-todayhero">
               <div>
                 <div className="kd-eyebrow">{WEEKDAYS[new Date().getDay()]} · {isoToRu(todayIso)}</div>
-                <h2>{todayActive.length ? `В работе ${todayActive.length} заяв.` : "На сегодня активных заявок нет"}</h2>
-                <p>{todayJobs.length ? `Всего ${todayJobs.length}, выполнено ${todayDone.length}. План на день — ${fmt(todayPlan)} ₸.` : "Можно заняться повторами, задачами и подготовкой следующих выездов."}</p>
+                <h2>{isAdmin ? (dashboardAlerts.length ? `${dashboardAlerts.length} решений требуют внимания` : "Компания работает по плану") : (todayActive.length ? `Сегодня ${todayActive.length} выезд.` : "На сегодня активных выездов нет")}</h2>
+                <p>{todayJobs.length ? `Всего ${todayJobs.length}, выполнено ${todayDone.length}. ${isAdmin ? `План дня — ${fmt(todayPlan)} ₸.` : "Следующий шаг виден в каждой заявке."}` : "Можно заняться задачами и подготовкой следующих выездов."}</p>
               </div>
               <div className="kd-todayhero-actions">
                 {isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
@@ -1661,7 +1817,7 @@ function Dashboard({ session, profile }) {
             </section>
 
             <section className="kd-todaysection">
-              <div className="kd-todaysection-head"><div><div className="kd-title">Требуют внимания</div><div className="kd-muted">Главные просрочки и риски на текущий момент</div></div></div>
+              <div className="kd-todaysection-head"><div><div className="kd-title">{isAdmin ? "SLA и решения" : "Требуют внимания"}</div><div className="kd-muted">{isAdmin ? "Автоматически рассчитанные просрочки, риски и контрольные точки" : "Только то, что нужно решить сейчас"}</div></div></div>
               {dashboardAlerts.length === 0 ? <div className="kd-allgood"><CheckCircle2 size={20} />Критичных предупреждений нет</div> : <div className="kd-alertgrid">
                 {dashboardAlerts.map((a) => <button key={a.id} className={a.tone} onClick={() => setTab(a.tab)}><AlertTriangle size={18} /><span>{a.label}</span><strong>{a.value}</strong><ArrowRight size={16} /></button>)}
               </div>}
@@ -1674,15 +1830,19 @@ function Dashboard({ session, profile }) {
                   const phone = String(j.client_phone || "").replace(/\D/g, "");
                   const directMap = yandexMapUrl(j.address);
                   const late = j.status !== "done" && Number.isFinite(jobTime(j)) && jobTime(j) < Date.now();
+                  const stageKey = jobWorkStage(j); const stage = WORK_STAGE[stageKey];
                   return <div className={`kd-todayjob ${j.status === "done" ? "done" : ""} ${late ? "late" : ""}`} key={j.id}>
                     <div className="kd-todaytime">{j.scheduled_time || "—"}</div>
                     <div className="kd-todayjobmain">
-                      <strong>{j.pest || "Заявка"}</strong><span>{addressPlain(j.address) || "Адрес не указан"}</span><small>{techById(j.assigned_to)?.full_name || (j.executor_partner_id ? partnerById(j.executor_partner_id)?.name : "Не назначен")}</small>
+                      <strong>{j.pest || "Заявка"}</strong><span>{addressPlain(j.address) || "Адрес не указан"}</span><small><b style={{ color: stage.color }}>{stage.short}</b> · {techById(j.assigned_to)?.full_name || (j.executor_partner_id ? partnerById(j.executor_partner_id)?.name : "Не назначен")}</small>
                     </div>
                     <div className="kd-todayjobactions">
                       {phone && <a href={`tel:+${phone}`} title="Позвонить"><Phone size={16} /></a>}
                       {phone && <a className="wa" href={roleWhatsappUrl(j, isAdmin)} target="_blank" rel="noreferrer" title="WhatsApp"><MessageCircle size={16} /></a>}
                       {j.address && <a href={directMap} target="_blank" rel="noreferrer" title="Открыть в Яндекс Картах"><MapPin size={16} /></a>}
+                      {!isAdmin && j.status !== "done" && j.status !== "canceled" && ["new", "confirmed", "assigned"].includes(stageKey) && <button className="primary" onClick={() => setJobWorkStage(j, "en_route")}>В путь</button>}
+                      {!isAdmin && stageKey === "en_route" && <button className="primary" onClick={() => setJobWorkStage(j, "on_site")}>На объекте</button>}
+                      {!isAdmin && stageKey === "on_site" && <button className="primary" onClick={() => setModal({ kind: "report", job: j })}>Отчёт</button>}
                       <button onClick={() => setModal(j.status === "done" ? { kind: "view", job: j } : isAdmin ? { kind: "edit", job: j } : { kind: "details", job: j })}>{j.status === "done" ? "Отчёт" : "Открыть"}</button>
                     </div>
                   </div>;
@@ -1733,6 +1893,8 @@ function Dashboard({ session, profile }) {
                     {g.jobs.map((j) => (
                       <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                         onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
+                        onCopyPublicLink={() => copyPublicJobLink(j)}
+                        onStageChange={(stage) => setJobWorkStage(j, stage)}
                         onReport={() => setModal({ kind: "report", job: j })}
                         onAssign={() => setModal({ kind: "assign", job: j })}
                         onView={() => setModal({ kind: "view", job: j })}
@@ -1851,6 +2013,8 @@ function Dashboard({ session, profile }) {
                     {g.jobs.map((j) => (
                       <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
+                      onCopyPublicLink={() => copyPublicJobLink(j)}
+                      onStageChange={(stage) => setJobWorkStage(j, stage)}
                       onReport={() => setModal({ kind: "report", job: j })}
                       onAssign={() => setModal({ kind: "assign", job: j })}
                       onView={() => setModal({ kind: "view", job: j })}
@@ -2244,6 +2408,8 @@ function Dashboard({ session, profile }) {
               [...canceledFiltered].sort((a, b) => new Date(b.canceled_at || 0) - new Date(a.canceled_at || 0)).map((j) => (
                 <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat="" share={partnerShareAmt(j)}
                   onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
+                  onCopyPublicLink={() => copyPublicJobLink(j)}
+                  onStageChange={(stage) => setJobWorkStage(j, stage)}
                   onReport={() => setModal({ kind: "report", job: j })}
                   onAssign={() => setModal({ kind: "assign", job: j })}
                   onView={() => setModal({ kind: "view", job: j })}
@@ -3037,7 +3203,13 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "reportSuccess" && <ReportSuccessModal onClose={() => setModal(null)} />}
       {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} />}
       {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} onReport={() => setModal({ kind: "report", job: modal.job })} onClose={() => setModal(null)} />}
-      {modal?.kind === "history" && <HistoryModal job={modal.job} jobs={jobs} onClose={() => setModal(null)} onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : { kind: "edit", job: j })} />}
+      {modal?.kind === "history" && <HistoryModal
+        job={modal.job} jobs={jobs} followups={followups} qualityChecks={qualityChecks} contracts={contracts}
+        events={clientEvents} feedback={publicFeedback} profiles={allProfiles} canPlanFollowup={isAdmin || isManager}
+        onAddNote={addClientNote} onCopyPublicLink={copyPublicJobLink}
+        onPlanFollowup={(j) => setModal({ kind: "followup", job: j, defaultKind: "lost" })}
+        onClose={() => setModal(null)}
+        onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : isAdmin || isManager ? { kind: "edit", job: j } : { kind: "details", job: j })} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
