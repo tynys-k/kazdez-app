@@ -1,4 +1,5 @@
-// KAZDEZ-WHATSAPP-FIX-V4-2026-07-17 — разные сообщения для администратора и дезинфектора
+// KAZDEZ-STAGE-2-MODALS-2026-07-17
+// Модальные окна Этапа 2 плюс ролевой WhatsApp из предыдущего этапа.
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin } from "lucide-react";
 import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
@@ -1983,4 +1984,115 @@ function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, on
   );
 }
 
-export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CatalogList, ConfirmDepositModal, ConfirmModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm };
+// ===================== ЭТАП 2: ПРИБЫЛЬ И КОНТРОЛЬ =====================
+function JobEconomicsModal({ job, economics, onClose, onSave }) {
+  const [transport, setTransport] = useState(job.transport_cost ?? "");
+  const [other, setOther] = useState(job.other_cost ?? "");
+  const [otherNote, setOtherNote] = useState(job.other_cost_note || "");
+  const [saving, setSaving] = useState(false);
+  const projected = economics.profit + (Number(job.transport_cost) || 0) + (Number(job.other_cost) || 0) - (Number(transport) || 0) - (Number(other) || 0);
+  async function save() {
+    setSaving(true);
+    await onSave({ transport_cost: Number(transport) || 0, other_cost: Number(other) || 0, other_cost_note: otherNote.trim() || null });
+    setSaving(false);
+  }
+  return <ModalShell title="Юнит-экономика заявки" onClose={onClose} footer={<>
+    <button className="kd-btn ghost" onClick={onClose}>Закрыть</button>
+    <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Сохранить расходы"}</button>
+  </>}>
+    <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
+    <div className="kd-row"><span>Выручка</span><strong>{fmt(economics.revenue)} ₸</strong></div>
+    <div className="kd-row"><span>Препараты</span><strong className="kd-neg">− {fmt(economics.chemicals)} ₸</strong></div>
+    <div className="kd-row"><span>Комиссия QR</span><strong className="kd-neg">− {fmt(economics.qrFee)} ₸</strong></div>
+    <div className="kd-row"><span>Партнёры / исполнители</span><strong className="kd-neg">− {fmt(economics.partners)} ₸</strong></div>
+    <div className="kd-row"><span>Бонус и дорожные сотруднику</span><strong className="kd-neg">− {fmt(economics.techExtras)} ₸</strong></div>
+    <div className="kd-grid2" style={{ marginTop: 14 }}>
+      <Field label="Транспорт / топливо (₸)"><input value={transport} onChange={(e) => setTransport(e.target.value)} inputMode="numeric" placeholder="1000" /></Field>
+      <Field label="Другие расходы (₸)"><input value={other} onChange={(e) => setOther(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
+    </div>
+    <Field label="Пояснение других расходов"><input value={otherNote} onChange={(e) => setOtherNote(e.target.value)} placeholder="парковка, закупка на объекте…" /></Field>
+    <div className="kd-econresult"><span>Чистая прибыль</span><strong className={projected >= 0 ? "pos" : "neg"}>{fmt(projected)} ₸</strong><small>Маржа {economics.revenue > 0 ? Math.round(projected / economics.revenue * 100) : 0}%</small></div>
+  </ModalShell>;
+}
+
+function FollowupModal({ followup, job, lead, people = [], defaultKind = "lost", onClose, onSave }) {
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const [kind, setKind] = useState(followup?.kind || defaultKind);
+  const [dueDate, setDueDate] = useState(followup?.due_date || tomorrow);
+  const [ownerId, setOwnerId] = useState(followup?.owner_id || "");
+  const [note, setNote] = useState(followup?.note || "");
+  const [saving, setSaving] = useState(false);
+  const [phone, setPhone] = useState(followup?.phone || job?.client_phone || lead?.phone || "+7 ");
+  const [clientName, setClientName] = useState(followup?.client_name || job?.contact_name || lead?.name || "");
+  async function save() {
+    setSaving(true);
+    await onSave({ job_id: job?.id || followup?.job_id || null, lead_id: lead?.id || followup?.lead_id || null, phone, client_name: clientName || null, kind, due_date: dueDate, owner_id: ownerId || null, note: note.trim() || null, status: followup?.status || "open" }, followup);
+    setSaving(false);
+  }
+  return <ModalShell title={followup ? "Изменить касание" : "Запланировать касание"} onClose={onClose} footer={<>
+    <button className="kd-btn ghost" onClick={onClose}>Отмена</button><button className="kd-btn primary" disabled={!phone || !dueDate || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+  </>}>
+    <div className="kd-grid2"><Field label="Клиент"><input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Имя / организация" /></Field><Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 ..." /></Field></div>
+    <div className="kd-grid2">
+      <Field label="Причина касания"><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="lost">Вернуть потерянного клиента</option><option value="quality">Контроль качества</option><option value="review">Запросить отзыв</option><option value="upsell">Допродажа</option><option value="contract">Абонентский договор</option></select></Field>
+      <Field label="Дата"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>
+    </div>
+    <Field label="Ответственный"><select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}><option value="">— без назначения —</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.id.slice(0, 6)}</option>)}</select></Field>
+    <Field label="Что сказать / заметка"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Напомнить о цене, предложить удобную дату…" /></Field>
+  </ModalShell>;
+}
+
+function QualityModal({ job, check, defaultReviewUrl = "", onClose, onSave }) {
+  const [result, setResult] = useState(check?.result || "positive");
+  const [rating, setRating] = useState(check?.rating ?? "5");
+  const [note, setNote] = useState(check?.note || "");
+  const [reviewRequested, setReviewRequested] = useState(!!check?.review_requested);
+  const [reviewUrl, setReviewUrl] = useState(check?.review_url || defaultReviewUrl);
+  const [saving, setSaving] = useState(false);
+  async function save() {
+    setSaving(true);
+    await onSave({ job_id: job.id, result, rating: Number(rating) || null, note: note.trim() || null, review_requested: reviewRequested, review_url: reviewUrl.trim() || null, contacted_at: new Date().toISOString(), status: result === "complaint" ? "problem" : "done" }, check);
+    setSaving(false);
+  }
+  return <ModalShell title="Контроль качества" onClose={onClose} footer={<>
+    <button className="kd-btn ghost" onClick={onClose}>Отмена</button><button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+  </>}>
+    <div className="kd-muted" style={{ marginBottom: 12 }}>{job.client_phone} · {job.pest} · {job.address}</div>
+    <Field label="Результат звонка"><select value={result} onChange={(e) => setResult(e.target.value)}><option value="positive">Всё хорошо</option><option value="repeat">Нужен повтор</option><option value="complaint">Есть претензия</option><option value="no_answer">Не ответил</option></select></Field>
+    <Field label="Оценка клиента"><select value={rating} onChange={(e) => setRating(e.target.value)}><option value="5">5 — отлично</option><option value="4">4 — хорошо</option><option value="3">3 — нормально</option><option value="2">2 — плохо</option><option value="1">1 — очень плохо</option></select></Field>
+    <Field label="Комментарий"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что сказал клиент, что нужно сделать…" /></Field>
+    {result === "positive" && <><label className="kd-check"><input type="checkbox" checked={reviewRequested} onChange={(e) => setReviewRequested(e.target.checked)} /><span>Запросить отзыв после сохранения</span></label>{reviewRequested && <Field label="Ссылка на отзывы 2GIS"><input value={reviewUrl} onChange={(e) => setReviewUrl(e.target.value)} placeholder="https://2gis.kz/..." /></Field>}</>}
+  </ModalShell>;
+}
+
+function ContractModal({ contract, people = [], onClose, onSave }) {
+  const [clientName, setClientName] = useState(contract?.client_name || "");
+  const [phone, setPhone] = useState(contract?.phone || "+7 ");
+  const [address, setAddress] = useState(contract?.address || "");
+  const [service, setService] = useState(contract?.service || "Дезинсекция");
+  const [price, setPrice] = useState(contract?.price ?? "");
+  const [intervalDays, setIntervalDays] = useState(contract?.interval_days ?? "30");
+  const [nextDate, setNextDate] = useState(contract?.next_service_date || new Date().toISOString().slice(0, 10));
+  const [managerId, setManagerId] = useState(contract?.manager_id || "");
+  const [note, setNote] = useState(contract?.note || "");
+  const [active, setActive] = useState(contract?.active !== false);
+  const [saving, setSaving] = useState(false);
+  async function save() {
+    setSaving(true);
+    await onSave({ client_name: clientName.trim(), phone: phone.trim(), address: address.trim(), service: service.trim(), price: Number(price) || 0, interval_days: Number(intervalDays) || 30, next_service_date: nextDate, manager_id: managerId || null, note: note.trim() || null, active }, contract);
+    setSaving(false);
+  }
+  return <ModalShell title={contract ? "Абонентский договор" : "Новый абонент"} onClose={onClose} footer={<>
+    <button className="kd-btn ghost" onClick={onClose}>Отмена</button><button className="kd-btn primary" disabled={!clientName || !phone || !address || !nextDate || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+  </>}>
+    <div className="kd-grid2"><Field label="Клиент / организация"><input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="ТОО / имя" /></Field><Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} /></Field></div>
+    <Field label="Адрес"><input value={address} onChange={(e) => setAddress(e.target.value)} /></Field>
+    <div className="kd-grid2"><Field label="Услуга"><input value={service} onChange={(e) => setService(e.target.value)} placeholder="Дезинсекция / дератизация" /></Field><Field label="Стоимость выезда (₸)"><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" /></Field></div>
+    <div className="kd-grid2"><Field label="Периодичность"><select value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)}><option value="14">Два раза в месяц</option><option value="30">Раз в месяц</option><option value="60">Раз в 2 месяца</option><option value="90">Раз в квартал</option><option value="180">Раз в полгода</option><option value="365">Раз в год</option></select></Field><Field label="Следующий выезд"><input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} /></Field></div>
+    <Field label="Ответственный менеджер"><select value={managerId} onChange={(e) => setManagerId(e.target.value)}><option value="">— не назначен —</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.id.slice(0, 6)}</option>)}</select></Field>
+    <Field label="Примечание"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+    <label className="kd-check"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /><span>Договор активен</span></label>
+  </ModalShell>;
+}
+
+export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm };
