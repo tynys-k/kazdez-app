@@ -1,4 +1,4 @@
-// KAZDEZ-STAGE-2-2GIS-ROUTES-2026-07-17
+// KAZDEZ-USABILITY-YANDEX-2026-07-18
 // Этап 2: юнит-экономика, касания, качество, абоненты, маршруты, допродажи и рейтинги.
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
@@ -6,11 +6,11 @@ import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin, twoGisSearchUrl } from "./shared";
+import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
 
 function roleWhatsappUrl(job, isAdmin) {
@@ -24,7 +24,37 @@ function roleWhatsappUrl(job, isAdmin) {
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
-export default function App() {
+function yandexMapUrl(text) {
+  const raw = String(text || "").trim();
+  const existingYandex = (raw.match(/https?:\/\/(?:[^/\s]+\.)?yandex\.(?:ru|com|kz)\/maps[^\s]*/i) || [])[0];
+  if (existingYandex) return existingYandex;
+  let decoded = raw;
+  try { decoded = decodeURIComponent(raw); } catch { /* оставляем исходную строку */ }
+  const coords = decoded.match(/@(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/)
+    || decoded.match(/[?&](?:q|query|destination)=(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/i);
+  if (coords) return `https://yandex.com/maps/?rtext=~${coords[1]},${coords[2]}&rtt=auto`;
+  const clean = addressPlain(raw);
+  return clean && clean !== "📍 точка на карте" ? `https://yandex.com/maps/?text=${encodeURIComponent(clean)}` : "https://yandex.com/maps/";
+}
+
+function yandexRouteUrl(addresses) {
+  const points = addresses.filter(Boolean).slice(0, 8);
+  if (!points.length) return "https://yandex.com/maps/routes/";
+  const rtext = points.length === 1 ? `~${points[0]}` : points.join("~");
+  return `https://yandex.com/maps/?rtext=${encodeURIComponent(rtext)}&rtt=auto`;
+}
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error) { console.error("KazDez UI error", error); }
+  render() {
+    if (this.state.failed) return <div className="kd-crash"><div><Bug size={30} /><h1>Интерфейс временно не загрузился</h1><p>Данные не потеряны. Обнови страницу; если ошибка повторится, проверь последнюю сборку Vercel.</p><button className="kd-btn primary" onClick={() => window.location.reload()}>Обновить страницу</button></div></div>;
+    return this.props.children;
+  }
+}
+
+function AppContent() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [booting, setBooting] = useState(true);
@@ -43,6 +73,10 @@ export default function App() {
   if (booting) return <div className="kd-center">Загрузка…</div>;
   if (!session) return <Login />;
   return <Dashboard session={session} profile={profile} />;
+}
+
+export default function App() {
+  return <AppErrorBoundary><AppContent /></AppErrorBoundary>;
 }
 
 function Login() {
@@ -109,7 +143,6 @@ function Dashboard({ session, profile }) {
   const [contracts, setContracts] = useState([]);
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
-  const [routing2Gis, setRouting2Gis] = useState("");
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [jobsDateFilter, setJobsDateFilter] = useState({ preset: "all" });
@@ -133,65 +166,27 @@ function Dashboard({ session, profile }) {
   const [pMode, setPMode] = useState("all");
   const [brandFilter, setBrandFilter] = useState("all");
   const [pOff, setPOff] = useState(0);
+  const [moreNavOpen, setMoreNavOpen] = useState(() => localStorage.getItem("kd-more-nav") === "1");
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [dataWarnings, setDataWarnings] = useState([]);
+  const [lastLoadedAt, setLastLoadedAt] = useState(null);
   const isAdmin = profile?.role === "admin";
   const isManager = profile?.role === "manager";
   const canManageTasks = isAdmin || isManager;
   const actorName = profile?.full_name || (isAdmin ? "Админ" : session.user.email);
 
+  useEffect(() => {
+    const setOn = () => setOnline(true); const setOff = () => setOnline(false);
+    window.addEventListener("online", setOn); window.addEventListener("offline", setOff);
+    return () => { window.removeEventListener("online", setOn); window.removeEventListener("offline", setOff); };
+  }, []);
+
   function showToast(t) { setToast(t); setTimeout(() => setToast(""), 2200); }
-
-  async function geocode2GisAddress(address, apiKey) {
-    const url = new URL("https://catalog.api.2gis.com/3.0/items/geocode");
-    url.searchParams.set("q", address);
-    url.searchParams.set("fields", "items.point");
-    url.searchParams.set("key", apiKey);
-    const response = await fetch(url.toString());
-    if (!response.ok) throw new Error(`2GIS geocoder: ${response.status}`);
-    const payload = await response.json();
-    const item = payload?.result?.items?.find((row) => Number.isFinite(Number(row?.point?.lon)) && Number.isFinite(Number(row?.point?.lat)));
-    if (!item) throw new Error(`Адрес не найден: ${address}`);
-    const objectId = String(item.id || "").split("_")[0];
-    return `${item.point.lon},${item.point.lat}${objectId ? `;${objectId}` : ""}`;
-  }
-
-  async function open2GisRoute(list, routeKey) {
-    const addresses = list.map((job) => addressPlain(job.address)).filter((address) => address && address !== "📍 точка на карте");
-    if (!addresses.length) { showToast("В заявках не указаны текстовые адреса"); return; }
-
-    const routeWindow = window.open("https://2gis.ru/directions/tab/car", "_blank");
-    if (routeWindow) routeWindow.opener = null;
-    const apiKey = String(import.meta.env.VITE_2GIS_API_KEY || "").trim();
-
-    // Без API-ключа 2GIS не принимает текстовые адреса в многоточечном deeplink.
-    // Поэтому открываем автомобильный маршрут и кладём точки в буфер в нужном порядке.
-    if (!apiKey) {
-      const ordered = addresses.map((address, index) => `${index + 1}. ${address}`).join("\n");
-      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(ordered).catch(() => {});
-      showToast(addresses.length === 1 ? "Адрес открыт в 2GIS" : "2GIS открыт · адреса скопированы по порядку");
-      if (addresses.length === 1 && routeWindow) routeWindow.location.href = twoGisSearchUrl(addresses[0]);
-      return;
-    }
-
-    setRouting2Gis(routeKey);
-    try {
-      const points = await Promise.all(addresses.map((address) => geocode2GisAddress(address, apiKey)));
-      const routeUrl = `https://2gis.ru/directions/points/${points.join("|")}`;
-      if (routeWindow) routeWindow.location.href = routeUrl;
-      else window.location.assign(routeUrl);
-      showToast("Маршрут построен в 2GIS");
-    } catch (error) {
-      const ordered = addresses.map((address, index) => `${index + 1}. ${address}`).join("\n");
-      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(ordered).catch(() => {});
-      showToast("Не удалось определить один из адресов · список скопирован");
-      if (!routeWindow) window.open("https://2gis.ru/directions/tab/car", "_blank", "noopener,noreferrer");
-    } finally {
-      setRouting2Gis("");
-    }
-  }
 
   async function load() {
     setLoading(true);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor] = await Promise.all([
+    try {
+    const responses = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
       supabase.from("chemicals").select("*"),
@@ -226,6 +221,9 @@ function Dashboard({ session, profile }) {
       supabase.from("quality_checks").select("*").order("contacted_at", { ascending: false }),
       supabase.from("service_contracts").select("*").order("next_service_date", { ascending: true }),
     ]);
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты"];
+    setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     const chems = cr.data || [];
     setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
     setChemicals(chr.data || []);
@@ -262,7 +260,12 @@ function Dashboard({ session, profile }) {
     setFollowups(fur.data || []);
     setQualityChecks(qcr.data || []);
     setContracts(cor.data || []);
+    setLastLoadedAt(new Date());
     setLoading(false);
+    } catch (error) {
+      setDataWarnings([`Не удалось связаться с базой: ${error?.message || "неизвестная ошибка"}`]);
+      setLoading(false);
+    }
   }
   useEffect(() => { load(); }, []);
 
@@ -1435,7 +1438,6 @@ function Dashboard({ session, profile }) {
   const overdueJobs = activeJobs.filter((j) => j.scheduled_date && j.scheduled_date < todayIso && visibleForToday(j));
   const unassignedSoon = isAdmin ? activeJobs.filter((j) => !j.assigned_to && !j.executor_partner_id && j.scheduled_date && j.scheduled_date <= tomorrowIso) : [];
   const overdueTaskList = visibleTasks.filter((t) => t.status !== "done" && t.due_date && t.due_date < todayIso);
-  const followupDue = isAdmin ? doneJobs.filter((j) => j.type === "Первичная" && !j.repeat_state && daysSince(j.reported_at) >= 5) : [];
   const pendingDeposits = isAdmin ? deposits.filter((d) => d.status === "pending") : [];
   const completedEconomics = doneJobs.map((job) => ({ job, econ: jobEconomics(job) }));
   const totalJobProfit = completedEconomics.reduce((s, r) => s + r.econ.profit, 0);
@@ -1473,7 +1475,6 @@ function Dashboard({ session, profile }) {
     overdueJobs.length ? { id: "overdue-jobs", label: "Просроченные заявки", value: overdueJobs.length, tab: "jobs", tone: "danger" } : null,
     unassignedSoon.length ? { id: "unassigned", label: "Не назначены на сегодня/завтра", value: unassignedSoon.length, tab: "jobs", tone: "warning" } : null,
     overdueTaskList.length ? { id: "tasks", label: "Просроченные задачи", value: overdueTaskList.length, tab: "tasks", tone: "danger" } : null,
-    followupDue.length ? { id: "followups", label: "Пора связаться после обработки", value: followupDue.length, tab: "done", tone: "warning" } : null,
     pendingDeposits.length ? { id: "cash", label: "Наличка ждёт подтверждения", value: pendingDeposits.length, tab: "cash", tone: "warning" } : null,
     isAdmin && lowCount ? { id: "stock", label: "Заканчиваются препараты", value: lowCount, tab: "stock", tone: "danger" } : null,
     isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
@@ -1549,18 +1550,19 @@ function Dashboard({ session, profile }) {
       })
     : baseTabs;
   const navGroups = isAdmin ? [
-    { label: "Работа", ids: ["today", "jobs", "schedule", "repeats", "tasks", "done", "canceled"] },
-    { label: "Продажи", ids: ["leads", "retention", "subscriptions"] },
-    { label: "Контроль", ids: ["routes", "growth"] },
-    { label: "Деньги", ids: ["finance", "opex", "cash"] },
-    { label: "Ресурсы", ids: ["stock", "team"] },
-    { label: "Контрагенты", ids: ["partners", "tenders", "docs"] },
-    { label: "Система", ids: ["materials", "knowledge", "journal", "trash"] },
+    { label: "Работа", ids: ["today", "jobs", "schedule", "routes", "tasks"] },
+    { label: "Клиенты", ids: ["leads", "retention", "subscriptions", "repeats"] },
+    { label: "Результаты", ids: ["done", "canceled", "growth", "finance"] },
+    { label: "Учёт", ids: ["opex", "cash", "stock"] },
+    { label: "Команда", ids: ["team", "partners"] },
   ] : [
     { label: "Работа", ids: ["today", "jobs", "tasks", "done"] },
     { label: "Учёт", ids: ["cash", "myequip"] },
     { label: "Помощь", ids: ["materials", "knowledge"] },
   ];
+  const moreNavGroup = { label: "Ещё разделы", ids: ["tenders", "docs", "materials", "knowledge", "journal", "trash"] };
+  const mobileTabIds = isAdmin ? ["today", "jobs", "leads", "routes"] : ["today", "jobs", "tasks", "cash"];
+  const mobileTabs = mobileTabIds.map((id) => tabs.find((item) => item.id === id)).filter(Boolean);
 
   return (
     <div className={`kd-app ${sideOpen ? "side-open" : ""}`}>
@@ -1573,15 +1575,24 @@ function Dashboard({ session, profile }) {
         </div>
         <nav className="kd-tabs">
           {navGroups.map((group) => {
-            const groupTabs = group.ids.map((id) => tabs.find((t) => t.id === id)).filter(Boolean);
+            const groupTabs = tabs.filter((item) => group.ids.includes(item.id));
             if (!groupTabs.length) return null;
             return <div className="kd-navgroup" key={group.label}>
               <div className="kd-navlabel">{group.label}</div>
               {groupTabs.map((t) => (<button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => { setTab(t.id); setSideOpen(false); }}>{t.icon ? <t.icon size={17} /> : null}<span className="kd-tab-lbl">{t.label}</span></button>))}
             </div>;
           })}
+          {isAdmin && <div className="kd-navgroup kd-navgroup-more">
+            <button className={`kd-navmore ${moreNavOpen ? "on" : ""}`} onClick={() => { const next = !moreNavOpen; setMoreNavOpen(next); localStorage.setItem("kd-more-nav", next ? "1" : "0"); }}>
+              <Menu size={16} /><span>Ещё разделы</span><ChevronRight size={15} />
+            </button>
+            {moreNavOpen && <div className="kd-navmore-list">{tabs.filter((item) => moreNavGroup.ids.includes(item.id)).map((t) => (
+              <button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => { setTab(t.id); setSideOpen(false); }}>{t.icon ? <t.icon size={17} /> : null}<span className="kd-tab-lbl">{t.label}</span></button>
+            ))}</div>}
+          </div>}
         </nav>
         <div className="kd-navfoot">
+          <div className={`kd-connection ${online ? "online" : "offline"}`}>{online ? <Wifi size={14} /> : <WifiOff size={14} />}<span>{online ? `На связи${lastLoadedAt ? ` · ${lastLoadedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Нет подключения"}</span></div>
           {isAdmin && <button className="kd-tab" onClick={() => { setModal({ kind: "settings" }); setSideOpen(false); }}><Settings size={17} /><span className="kd-tab-lbl">Настройки</span></button>}
           <button className="kd-tab" onClick={() => supabase.auth.signOut()}><LogOut size={17} /><span className="kd-tab-lbl">Выйти</span></button>
         </div>
@@ -1591,7 +1602,7 @@ function Dashboard({ session, profile }) {
         <header className="kd-topbar">
           <div className="kd-topleft">
             <button className="kd-burger" onClick={() => setSideOpen((v) => !v)} aria-label="Меню"><ClipboardList size={18} /></button>
-            <h1 className="kd-pagetitle">{(tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
+            <h1 className="kd-pagetitle">{TAB_LABELS[tab] || (tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
           </div>
           <div className="kd-globalsearch" onBlur={() => setTimeout(() => setGlobalSearchOpen(false), 120)}>
             <Search size={16} />
@@ -1612,13 +1623,20 @@ function Dashboard({ session, profile }) {
             {tab === "partners" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}><Plus size={15} />Партнёр</button>}
             {tab === "docs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}><Plus size={15} />Документ</button>}
             {tab === "opex" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "opex" })}><Plus size={15} />Расход</button>}
-            {isAdmin && <button className="kd-btn ghost" onClick={exportExcel}><Download size={15} />Выгрузить в Excel</button>}
+            {isAdmin && ["growth", "finance", "journal"].includes(tab) && <button className="kd-btn ghost" onClick={exportExcel}><Download size={15} />Excel</button>}
+            <button className="kd-iconbtn" disabled={loading} onClick={load} title="Обновить данные" aria-label="Обновить данные"><RefreshCw size={16} /></button>
           </div>
         </header>
+
+        <nav className="kd-mobile-nav" aria-label="Основная навигация">
+          {mobileTabs.map((item) => <button key={item.id} className={tab === item.id ? "on" : ""} onClick={() => setTab(item.id)}>{item.icon ? <item.icon size={19} /> : null}<span>{TAB_LABELS[item.id] || item.id}</span></button>)}
+          <button onClick={() => setSideOpen(true)}><Menu size={19} /><span>Ещё</span></button>
+        </nav>
 
       <main className="kd-main">
 
         {loading && <div className="kd-empty">Загрузка…</div>}
+        {!loading && isAdmin && dataWarnings.length > 0 && <details className="kd-systemwarning"><summary><AlertTriangle size={17} />Не все данные загрузились · {dataWarnings.length}</summary><div>{dataWarnings.map((warning) => <span key={warning}>{warning}</span>)}<button className="kd-btn ghost sm" onClick={load}>Повторить загрузку</button></div></details>}
 
         {!loading && tab === "today" && (
           <div className="kd-today">
@@ -1631,6 +1649,7 @@ function Dashboard({ session, profile }) {
               <div className="kd-todayhero-actions">
                 {isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
                 {isAdmin && <button className="kd-btn ghost" onClick={() => setTab("schedule")}><CalendarClock size={15} />Открыть график</button>}
+                {isAdmin && todayJobs.length > 0 && <button className="kd-btn ghost" onClick={() => setTab("routes")}><Route size={15} />Маршруты дня</button>}
               </div>
             </section>
 
@@ -1653,7 +1672,7 @@ function Dashboard({ session, profile }) {
               {todayJobs.length === 0 ? <div className="kd-empty">На сегодня заявок нет.</div> : <div className="kd-todayjobs">
                 {todayJobs.map((j) => {
                   const phone = String(j.client_phone || "").replace(/\D/g, "");
-                  const directMap = twoGisSearchUrl(j.address);
+                  const directMap = yandexMapUrl(j.address);
                   const late = j.status !== "done" && Number.isFinite(jobTime(j)) && jobTime(j) < Date.now();
                   return <div className={`kd-todayjob ${j.status === "done" ? "done" : ""} ${late ? "late" : ""}`} key={j.id}>
                     <div className="kd-todaytime">{j.scheduled_time || "—"}</div>
@@ -1663,7 +1682,7 @@ function Dashboard({ session, profile }) {
                     <div className="kd-todayjobactions">
                       {phone && <a href={`tel:+${phone}`} title="Позвонить"><Phone size={16} /></a>}
                       {phone && <a className="wa" href={roleWhatsappUrl(j, isAdmin)} target="_blank" rel="noreferrer" title="WhatsApp"><MessageCircle size={16} /></a>}
-                      {j.address && <a href={directMap} target="_blank" rel="noreferrer" title="Открыть в 2GIS"><MapPin size={16} /></a>}
+                      {j.address && <a href={directMap} target="_blank" rel="noreferrer" title="Открыть в Яндекс Картах"><MapPin size={16} /></a>}
                       <button onClick={() => setModal(j.status === "done" ? { kind: "view", job: j } : isAdmin ? { kind: "edit", job: j } : { kind: "details", job: j })}>{j.status === "done" ? "Отчёт" : "Открыть"}</button>
                     </div>
                   </div>;
@@ -2368,15 +2387,18 @@ function Dashboard({ session, profile }) {
             <div className="kd-routegrid">{groups.map((g) => <section className="kd-card" key={g.techId}>
               <div className="kd-stage2head"><div>
                 <div className="kd-title">{g.techId === "none" ? "Не назначено" : techById(g.techId)?.full_name}</div>
-                <div className="kd-muted">{g.jobs.length} адресов · по времени заявок · 2GIS</div>
+                <div className="kd-muted">{g.jobs.length} адресов · по времени заявок{g.jobs.length > 8 ? " · в маршрут войдут первые 8" : ""}</div>
               </div>
-                <button className="kd-btn primary sm" disabled={routing2Gis === g.techId} onClick={() => open2GisRoute(g.jobs, g.techId)}>
-                  <Navigation size={14} />{routing2Gis === g.techId ? "Строим…" : "Маршрут в 2GIS"}
-                </button>
+                <div className="kd-route-actions">
+                  <button className="kd-btn ghost sm" onClick={() => copyText(g.jobs.map((j, index) => `${index + 1}. ${j.scheduled_time || "без времени"} · ${addressPlain(j.address)}`).join("\n"), () => showToast("Адреса скопированы"))}>Скопировать</button>
+                  <a className="kd-btn primary sm" href={yandexRouteUrl(g.jobs.map((j) => addressPlain(j.address)).filter((address) => address && address !== "📍 точка на карте"))} target="_blank" rel="noreferrer">
+                    <Navigation size={14} />Маршрут в Яндекс
+                  </a>
+                </div>
               </div>
               <div className="kd-routelist">{g.jobs.map((j, i) => <div key={j.id}>
                 <b>{i + 1}</b><span><strong>{j.scheduled_time || "без времени"} · {j.pest}</strong><small>{addressPlain(j.address)} · {j.client_phone}</small></span>
-                <a href={twoGisSearchUrl(j.address)} target="_blank" rel="noreferrer" title="Открыть адрес в 2GIS"><MapPin size={16} /></a>
+                <a href={yandexMapUrl(j.address)} target="_blank" rel="noreferrer" title="Открыть адрес в Яндекс Картах"><MapPin size={16} /></a>
               </div>)}</div>
             </section>)}</div>
           </div>;
