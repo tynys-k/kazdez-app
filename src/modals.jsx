@@ -1,11 +1,15 @@
-import React, { useState } from "react";
-import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin } from "lucide-react";
 import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct }) {
   const st = STATUS[job.status] || STATUS.new;
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
+  const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
+  const addressUrl = (String(job.address || "").match(/https?:\/\/[^\s]+/) || [])[0];
+  const mapUrl = addressUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.address || "")}`;
+  const whatsappUrl = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(buildMsg(job, brandLabel))}`;
   return (
     <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span></div>
@@ -55,6 +59,11 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {job.status === "canceled" && <span className="kd-muted" style={{ color: "#B3261E", fontWeight: 700 }}>Отменена{job.cancel_reason ? ": " + job.cancel_reason : ""}</span>}
         {job.edit_request_status === "requested" && <span className="kd-muted" style={{ color: "#B4650B", fontWeight: 700 }}>⏳ Запрос на изменение отчёта{job.edit_request_reason ? ": " + job.edit_request_reason : ""}{isAdmin ? " — нужно решение" : " — ждём ответа админа"}</span>}
         {job.edit_request_status === "approved" && <span className="kd-muted" style={{ color: "#0E7C66", fontWeight: 700 }}>✅ Изменение отчёта разрешено{!isAdmin ? " — можешь переоткрыть отчёт" : ""}</span>}
+      </div>
+      <div className="kd-quickactions" aria-label="Быстрые действия">
+        {phoneDigits && <a className="kd-quickbtn" href={`tel:+${phoneDigits}`}><Phone size={15} />Позвонить</a>}
+        {phoneDigits && <a className="kd-quickbtn wa" href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle size={15} />WhatsApp</a>}
+        {job.address && <a className="kd-quickbtn" href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={15} />Маршрут</a>}
       </div>
       <div className="kd-actions">
         {isAdmin && job.status !== "canceled" && <button className="kd-btn wa" onClick={onCopy}><MessageCircle size={15} />Скопировать для WhatsApp</button>}
@@ -203,24 +212,77 @@ function jobToForm(job) {
   const po = job.price_options || [];
   const [timeFrom, timeTo] = (job.scheduled_time || "").split(/[–-]/).map((s) => s.trim());
   return {
+    status: job.status || "new",
     type: job.type || "Первичная", scheduled_date: job.scheduled_date || "", time_from: timeFrom || "", time_to: timeTo || "",
     address: job.address || "", floor: job.floor || "", area: job.area ?? "", source: job.source || "", pest: job.pest || "",
     p1label: po[0]?.label || "С запахом", p1amount: po[0]?.amount ?? "",
     p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
     client_phone: job.client_phone || "+7 ", contact_name: job.contact_name || "", extra_contacts: Array.isArray(job.extra_contacts) ? job.extra_contacts : [], guarantee_months: job.guarantee_months ?? 6,
     brand: job.brand || "KazDez", partner_id: job.partner_id || "", partner_share: job.partner_share ?? "",
-    note: job.note || "", executor_kind: job.executor_partner_id ? "partner" : "tech", executor_partner_id: job.executor_partner_id || "", executor_share_pct: job.executor_share_pct ?? "", joint_work: !!job.joint_work, joint_supplier: job.joint_supplier || "us", joint_cost_share: job.joint_cost_share ?? "", partner_comp: job.partner_comp ?? "",
+    note: job.note || "", assigned_to: job.assigned_to || "", executor_kind: job.executor_partner_id ? "partner" : "tech", executor_partner_id: job.executor_partner_id || "", executor_share_pct: job.executor_share_pct ?? "", joint_work: !!job.joint_work, joint_supplier: job.joint_supplier || "us", joint_cost_share: job.joint_cost_share ?? "", partner_comp: job.partner_comp ?? "",
   };
 }
 
-function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], sources = [], pestTypes = [], pestGuide = {}, defaultGuarantee = 6, onClose, onSave }) {
-  const [f, setF] = useState(initial || { type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "С запахом", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
+const JOB_DRAFT_KEY = "kazdez-new-job-draft-v2";
+const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
+
+function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, defaultGuarantee = 6, onClose, onSave }) {
+  const draftRef = useRef(undefined);
+  if (draftRef.current === undefined) {
+    try { draftRef.current = !initial ? JSON.parse(localStorage.getItem(JOB_DRAFT_KEY) || "null") : null; }
+    catch { draftRef.current = null; }
+  }
+  const draft = draftRef.current;
+  const startingForm = initial || draft?.form || emptyJobForm(defaultGuarantee);
+  const [f, setF] = useState(startingForm);
+  const [formMode, setFormMode] = useState(initial ? "expanded" : (draft?.mode || "quick"));
+  const [draftRestored, setDraftRestored] = useState(!!draft?.form);
+  const initialSnapshot = useRef(JSON.stringify(startingForm));
   const [pestInfoOpen, setPestInfoOpen] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
-  const ok = f.address && f.pest && (f.p1amount || f.p2amount || f.type === "Осмотр");
+  const phoneDigits = String(f.client_phone || "").replace(/\D/g, "");
+  const clientHistory = phoneDigits.length >= 10
+    ? existingJobs.filter((j) => String(j.client_phone || "").replace(/\D/g, "") === phoneDigits).sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || "")))
+    : [];
+  const latestClient = clientHistory[0];
+  const activeGuarantee = clientHistory.find((j) => {
+    if (j.status !== "done" || !j.scheduled_date || !j.guarantee_months) return false;
+    const until = new Date(`${j.scheduled_date}T00:00:00`);
+    until.setMonth(until.getMonth() + Number(j.guarantee_months || 0));
+    return until.getTime() >= Date.now();
+  });
+  const ok = phoneDigits.length >= 10 && f.address && f.pest && (f.p1amount || f.p2amount || f.type === "Осмотр");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (initial) return undefined;
+    const meaningful = f.address || f.pest || f.p1amount || phoneDigits.length > 1;
+    const timer = setTimeout(() => {
+      if (meaningful) localStorage.setItem(JOB_DRAFT_KEY, JSON.stringify({ form: f, mode: formMode, savedAt: new Date().toISOString() }));
+      else localStorage.removeItem(JOB_DRAFT_KEY);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [f, formMode, initial, phoneDigits.length]);
+
+  function requestClose() {
+    const dirty = JSON.stringify(f) !== initialSnapshot.current;
+    if (!dirty || window.confirm("Есть несохранённые изменения. Закрыть форму? Черновик новой заявки останется сохранённым.")) onClose();
+  }
+
+  function useClientData() {
+    if (!latestClient) return;
+    setF({ ...f, address: latestClient.address || f.address, contact_name: latestClient.contact_name || f.contact_name, source: latestClient.source || f.source });
+  }
+
+  function clearDraft() {
+    localStorage.removeItem(JOB_DRAFT_KEY);
+    setF(emptyJobForm(defaultGuarantee));
+    setFormMode("quick");
+    setDraftRestored(false);
+  }
+
   async function save() {
     setSaving(true);
     const price_options = [];
@@ -231,19 +293,36 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
     const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
       executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
       executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
-    if (!keepStatus) payload.status = "new";
-    await onSave(payload);
+    if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
+    if (!keepStatus) payload.status = payload.assigned_to ? "assigned" : "new";
+    else if (f.status === "new" || f.status === "assigned") payload.status = payload.assigned_to ? "assigned" : "new";
+    const saved = await onSave(payload);
+    if (saved !== false && !initial) localStorage.removeItem(JOB_DRAFT_KEY);
     setSaving(false);
   }
   return (
-    <ModalShell title={title} onClose={onClose} footer={<>
-      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+    <ModalShell title={title} onClose={requestClose} footer={<>
+      <button className="kd-btn ghost" onClick={requestClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : submitLabel}</button>
     </>}>
+      {!initial && <div className="kd-formmode">
+        <button type="button" className={formMode === "quick" ? "on" : ""} onClick={() => setFormMode("quick")}>Быстрая заявка</button>
+        <button type="button" className={formMode === "expanded" ? "on" : ""} onClick={() => setFormMode("expanded")}>Расширенная</button>
+      </div>}
+      {draftRestored && <div className="kd-draftnotice"><span>Черновик восстановлен автоматически</span><button type="button" onClick={clearDraft}>Очистить</button></div>}
       <div className="kd-grid2">
-        <Field label="Бренд"><select value={f.brand} onChange={onBrand}><option value="KazDez">KazDez</option><option value="Sanitex">Sanitex</option><option value="partner">Партнёрская</option></select></Field>
-        <Field label="Тип"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Плановая</option><option>Тендерная</option><option>Гарантийная</option><option>Осмотр</option></select></Field>
+        <Field label="Телефон клиента"><input value={f.client_phone} onChange={set("client_phone")} placeholder="+7 701 ..." inputMode="tel" autoFocus={!initial} /></Field>
+        <Field label="Имя контактного лица"><input value={f.contact_name} onChange={set("contact_name")} placeholder="Айгуль" /></Field>
       </div>
+      {latestClient && <div className={`kd-clientfound ${activeGuarantee ? "warning" : ""}`}>
+        <div><strong>{activeGuarantee ? "⚠ У клиента есть действующая гарантия" : "Клиент уже обращался"}</strong><span>{clientHistory.length} заяв. · последняя: {isoToRu(latestClient.scheduled_date) || "без даты"} · {latestClient.pest || "—"}</span></div>
+        <button type="button" className="kd-btn ghost sm" onClick={useClientData}>Подставить данные</button>
+      </div>}
+      {formMode === "expanded" && <>
+        <div className="kd-grid2">
+          <Field label="Бренд"><select value={f.brand} onChange={onBrand}><option value="KazDez">KazDez</option><option value="Sanitex">Sanitex</option><option value="partner">Партнёрская</option></select></Field>
+          <Field label="Тип"><select value={f.type} onChange={set("type")}><option>Первичная</option><option>Вторичная</option><option>Плановая</option><option>Тендерная</option><option>Гарантийная</option><option>Осмотр</option></select></Field>
+        </div>
       {f.brand === "partner" && (
         <>
           <div className="kd-grid2">
@@ -262,6 +341,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
           </Field>
         </>
       )}
+      </>}
       <datalist id="kd-pests-list">{pestTypes.map((p) => <option key={p.id} value={p.name} />)}</datalist>
       <datalist id="kd-sources-list">{sources.map((s) => <option key={s.id} value={s.name} />)}</datalist>
       <div className="kd-grid2">
@@ -297,11 +377,25 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
         <Field label="Время до (необязательно)"><input type="time" value={f.time_to} onChange={set("time_to")} /></Field>
       </div>
       <Field label="Адрес"><input value={f.address} onChange={set("address")} placeholder="ул. ..., кв. ..." /></Field>
-      <div className="kd-section">Исполнитель</div>
-      <div className="kd-seg" style={{ width: "100%", marginBottom: 12 }}>
-        <button type="button" className={`kd-segbtn ${f.executor_kind !== "partner" ? "on" : ""}`} onClick={() => setF({ ...f, executor_kind: "tech", executor_partner_id: "", executor_share_pct: "" })}>Наш дезинфектор</button>
-        <button type="button" className={`kd-segbtn ${f.executor_kind === "partner" ? "on" : ""}`} onClick={() => setF({ ...f, executor_kind: "partner" })}>Партнёр</button>
-      </div>
+      {formMode === "quick" ? (
+        <Field label="Назначить дезинфектора">
+          <select value={f.assigned_to || ""} onChange={set("assigned_to")}>
+            <option value="">— назначить позже —</option>
+            {techs.map((t) => <option key={t.id} value={t.id}>{t.full_name || t.id.slice(0, 6)}</option>)}
+          </select>
+        </Field>
+      ) : <>
+        <div className="kd-section">Исполнитель</div>
+        <div className="kd-seg" style={{ width: "100%", marginBottom: 12 }}>
+          <button type="button" className={`kd-segbtn ${f.executor_kind !== "partner" ? "on" : ""}`} onClick={() => setF({ ...f, executor_kind: "tech", executor_partner_id: "", executor_share_pct: "" })}>Наш дезинфектор</button>
+          <button type="button" className={`kd-segbtn ${f.executor_kind === "partner" ? "on" : ""}`} onClick={() => setF({ ...f, executor_kind: "partner", assigned_to: "" })}>Партнёр</button>
+        </div>
+        {f.executor_kind !== "partner" && <Field label="Наш дезинфектор">
+          <select value={f.assigned_to || ""} onChange={set("assigned_to")}>
+            <option value="">— назначить позже —</option>
+            {techs.map((t) => <option key={t.id} value={t.id}>{t.full_name || t.id.slice(0, 6)}</option>)}
+          </select>
+        </Field>}
       {f.executor_kind === "partner" && (
         <>
           <div className="kd-grid2">
@@ -311,30 +405,21 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
           <div className="kd-muted" style={{ marginTop: -6, marginBottom: 12 }}>Партнёр отчёт не заполняет. Когда выполнит — нажмёшь «Выполнено (оплата)» и укажешь, как прошли деньги.</div>
         </>
       )}
-      <div className="kd-grid2">
+      </>}
+      {formMode === "expanded" && <div className="kd-grid2">
         <Field label="Этаж"><input value={f.floor} onChange={set("floor")} inputMode="numeric" placeholder="5" /></Field>
         <Field label="Метраж (м²)"><input value={f.area} onChange={set("area")} inputMode="numeric" placeholder="45" /></Field>
-      </div>
+      </div>}
       {f.type === "Осмотр" && <div className="kd-muted" style={{ marginBottom: 10 }}>Для осмотра цену можно не заполнять.</div>}
-      <div className="kd-grid2">
-        <Field label="Цена 1 — подпись"><input value={f.p1label} onChange={set("p1label")} /></Field>
-        <Field label="Цена 1 — сумма (₸)"><input value={f.p1amount} onChange={set("p1amount")} inputMode="numeric" placeholder="15000" /></Field>
-        <Field label="Цена 2 — подпись"><input value={f.p2label} onChange={set("p2label")} /></Field>
-        <Field label="Цена 2 — сумма (₸)"><input value={f.p2amount} onChange={set("p2amount")} inputMode="numeric" placeholder="20000" /></Field>
-      </div>
-      <div className="kd-grid2">
-        <Field label="Телефон клиента">
-          <div style={{ display: "flex", gap: 8 }}>
-            <input value={f.client_phone} onChange={set("client_phone")} placeholder="+7 701 ..." style={{ flex: 1 }} />
-            {((f.client_phone || "").replace(/\D/g, "").length >= 10) && (
-              <a className="kd-btn wa" href={`https://api.whatsapp.com/send/?phone=${(f.client_phone || "").replace(/\D/g, "")}&text&type=phone_number&app_absent=0`} target="_blank" rel="noreferrer" title="Написать в WhatsApp" style={{ textDecoration: "none", minWidth: 46, padding: "0 12px" }}>
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 14.4c-.3-.2-1.7-.8-1.9-.9-.3-.1-.5-.2-.6.1-.2.3-.7.9-.8 1-.2.2-.3.2-.6.1-.3-.2-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.2.2-.3.3-.5.1-.2 0-.4 0-.5-.1-.1-.6-1.5-.8-2.1-.2-.5-.4-.5-.6-.5h-.5c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2s.9 2.5 1.1 2.7c.1.2 1.8 2.8 4.4 3.9.6.3 1.1.4 1.5.5.6.2 1.2.2 1.6.1.5-.1 1.7-.7 1.9-1.3.2-.7.2-1.2.2-1.3-.1-.2-.3-.2-.6-.4z M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2zm0 18.3a8.3 8.3 0 0 1-4.2-1.2l-.3-.2-2.9.8.8-2.8-.2-.3A8.3 8.3 0 1 1 12 20.3z" /></svg>
-              </a>
-            )}
-          </div>
-        </Field>
-        <Field label="Имя контактного лица"><input value={f.contact_name} onChange={set("contact_name")} placeholder="Айгуль" /></Field>
-      </div>
+      {formMode === "quick" ? (
+        <Field label="Стоимость (₸)"><input value={f.p1amount} onChange={set("p1amount")} inputMode="numeric" placeholder="15000" /></Field>
+      ) : <div className="kd-grid2">
+          <Field label="Цена 1 — подпись"><input value={f.p1label} onChange={set("p1label")} /></Field>
+          <Field label="Цена 1 — сумма (₸)"><input value={f.p1amount} onChange={set("p1amount")} inputMode="numeric" placeholder="15000" /></Field>
+          <Field label="Цена 2 — подпись"><input value={f.p2label} onChange={set("p2label")} /></Field>
+          <Field label="Цена 2 — сумма (₸)"><input value={f.p2amount} onChange={set("p2amount")} inputMode="numeric" placeholder="20000" /></Field>
+        </div>}
+      {formMode === "expanded" && <>
       <datalist id="kd-contact-roles">{["Муж", "Жена", "Сестра", "Брат", "Коллега", "Директор", "Диспетчер", "Охранник", "Бухгалтер", "Администратор", "Сосед"].map((r) => <option key={r} value={r} />)}</datalist>
       {(f.extra_contacts || []).map((c, i) => (
         <div className="kd-grid2" key={i}>
@@ -352,6 +437,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
         <Field label="Гарантия (мес.)"><input value={f.guarantee_months} onChange={set("guarantee_months")} inputMode="numeric" /></Field>
         <div />
       </div>
+      </>}
       <Field label="Примечание / комментарий (видно только команде, клиенту не идёт)">
         <textarea className="kd-textarea" value={f.note} onChange={set("note")} placeholder="Напр.: домофон не работает, звонить за 30 мин, есть собака" />
       </Field>
