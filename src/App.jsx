@@ -1,4 +1,4 @@
-// KAZDEZ-STAGE-2-PROFIT-CONTROL-2026-07-17
+// KAZDEZ-STAGE-2-2GIS-ROUTES-2026-07-17
 // Этап 2: юнит-экономика, касания, качество, абоненты, маршруты, допродажи и рейтинги.
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin, twoGisSearchUrl } from "./shared";
 import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
 
 function roleWhatsappUrl(job, isAdmin) {
@@ -109,6 +109,7 @@ function Dashboard({ session, profile }) {
   const [contracts, setContracts] = useState([]);
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
+  const [routing2Gis, setRouting2Gis] = useState("");
   const [taskFilter, setTaskFilter] = useState("open");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [jobsDateFilter, setJobsDateFilter] = useState({ preset: "all" });
@@ -138,6 +139,55 @@ function Dashboard({ session, profile }) {
   const actorName = profile?.full_name || (isAdmin ? "Админ" : session.user.email);
 
   function showToast(t) { setToast(t); setTimeout(() => setToast(""), 2200); }
+
+  async function geocode2GisAddress(address, apiKey) {
+    const url = new URL("https://catalog.api.2gis.com/3.0/items/geocode");
+    url.searchParams.set("q", address);
+    url.searchParams.set("fields", "items.point");
+    url.searchParams.set("key", apiKey);
+    const response = await fetch(url.toString());
+    if (!response.ok) throw new Error(`2GIS geocoder: ${response.status}`);
+    const payload = await response.json();
+    const item = payload?.result?.items?.find((row) => Number.isFinite(Number(row?.point?.lon)) && Number.isFinite(Number(row?.point?.lat)));
+    if (!item) throw new Error(`Адрес не найден: ${address}`);
+    const objectId = String(item.id || "").split("_")[0];
+    return `${item.point.lon},${item.point.lat}${objectId ? `;${objectId}` : ""}`;
+  }
+
+  async function open2GisRoute(list, routeKey) {
+    const addresses = list.map((job) => addressPlain(job.address)).filter((address) => address && address !== "📍 точка на карте");
+    if (!addresses.length) { showToast("В заявках не указаны текстовые адреса"); return; }
+
+    const routeWindow = window.open("https://2gis.ru/directions/tab/car", "_blank");
+    if (routeWindow) routeWindow.opener = null;
+    const apiKey = String(import.meta.env.VITE_2GIS_API_KEY || "").trim();
+
+    // Без API-ключа 2GIS не принимает текстовые адреса в многоточечном deeplink.
+    // Поэтому открываем автомобильный маршрут и кладём точки в буфер в нужном порядке.
+    if (!apiKey) {
+      const ordered = addresses.map((address, index) => `${index + 1}. ${address}`).join("\n");
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(ordered).catch(() => {});
+      showToast(addresses.length === 1 ? "Адрес открыт в 2GIS" : "2GIS открыт · адреса скопированы по порядку");
+      if (addresses.length === 1 && routeWindow) routeWindow.location.href = twoGisSearchUrl(addresses[0]);
+      return;
+    }
+
+    setRouting2Gis(routeKey);
+    try {
+      const points = await Promise.all(addresses.map((address) => geocode2GisAddress(address, apiKey)));
+      const routeUrl = `https://2gis.ru/directions/points/${points.join("|")}`;
+      if (routeWindow) routeWindow.location.href = routeUrl;
+      else window.location.assign(routeUrl);
+      showToast("Маршрут построен в 2GIS");
+    } catch (error) {
+      const ordered = addresses.map((address, index) => `${index + 1}. ${address}`).join("\n");
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(ordered).catch(() => {});
+      showToast("Не удалось определить один из адресов · список скопирован");
+      if (!routeWindow) window.open("https://2gis.ru/directions/tab/car", "_blank", "noopener,noreferrer");
+    } finally {
+      setRouting2Gis("");
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -1603,7 +1653,7 @@ function Dashboard({ session, profile }) {
               {todayJobs.length === 0 ? <div className="kd-empty">На сегодня заявок нет.</div> : <div className="kd-todayjobs">
                 {todayJobs.map((j) => {
                   const phone = String(j.client_phone || "").replace(/\D/g, "");
-                  const directMap = (String(j.address || "").match(/https?:\/\/[^\s]+/) || [])[0] || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(j.address || "")}`;
+                  const directMap = twoGisSearchUrl(j.address);
                   const late = j.status !== "done" && Number.isFinite(jobTime(j)) && jobTime(j) < Date.now();
                   return <div className={`kd-todayjob ${j.status === "done" ? "done" : ""} ${late ? "late" : ""}`} key={j.id}>
                     <div className="kd-todaytime">{j.scheduled_time || "—"}</div>
@@ -1613,7 +1663,7 @@ function Dashboard({ session, profile }) {
                     <div className="kd-todayjobactions">
                       {phone && <a href={`tel:+${phone}`} title="Позвонить"><Phone size={16} /></a>}
                       {phone && <a className="wa" href={roleWhatsappUrl(j, isAdmin)} target="_blank" rel="noreferrer" title="WhatsApp"><MessageCircle size={16} /></a>}
-                      {j.address && <a href={directMap} target="_blank" rel="noreferrer" title="Маршрут"><MapPin size={16} /></a>}
+                      {j.address && <a href={directMap} target="_blank" rel="noreferrer" title="Открыть в 2GIS"><MapPin size={16} /></a>}
                       <button onClick={() => setModal(j.status === "done" ? { kind: "view", job: j } : isAdmin ? { kind: "edit", job: j } : { kind: "details", job: j })}>{j.status === "done" ? "Отчёт" : "Открыть"}</button>
                     </div>
                   </div>;
@@ -2305,8 +2355,31 @@ function Dashboard({ session, profile }) {
         {!loading && tab === "routes" && (() => {
           const rows = jobs.filter((j) => j.scheduled_date === routeDate && j.status !== "canceled" && (routeTech === "all" || (routeTech === "none" ? !j.assigned_to : j.assigned_to === routeTech))).sort((a, b) => jobTime(a) - jobTime(b));
           const groups = [...new Set(rows.map((j) => j.assigned_to || "none"))].map((techId) => ({ techId, jobs: rows.filter((j) => (j.assigned_to || "none") === techId) }));
-          const routeUrl = (list) => { const addresses = list.map((j) => addressPlain(j.address)).filter(Boolean); if (!addresses.length) return ""; if (addresses.length === 1) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addresses[0])}`; const origin = addresses[0], destination = addresses[addresses.length - 1], waypoints = addresses.slice(1, -1).join("|"); return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}${waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : ""}&travelmode=driving`; };
-          return <div className="kd-stage2"><div className="kd-routebar"><input type="date" value={routeDate} onChange={(e) => setRouteDate(e.target.value)} /><select value={routeTech} onChange={(e) => setRouteTech(e.target.value)}><option value="all">Все исполнители</option><option value="none">Не назначено</option>{techs.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}</select><button className="kd-btn ghost" onClick={() => setRouteDate(todayIso)}>Сегодня</button></div>{rows.length === 0 && <div className="kd-empty">На выбранную дату заявок нет.</div>}<div className="kd-routegrid">{groups.map((g) => <section className="kd-card" key={g.techId}><div className="kd-stage2head"><div><div className="kd-title">{g.techId === "none" ? "Не назначено" : techById(g.techId)?.full_name}</div><div className="kd-muted">{g.jobs.length} адресов · по времени заявок</div></div>{routeUrl(g.jobs) && <a className="kd-btn primary sm" href={routeUrl(g.jobs)} target="_blank" rel="noreferrer"><Navigation size={14} />Открыть маршрут</a>}</div><div className="kd-routelist">{g.jobs.map((j, i) => <div key={j.id}><b>{i + 1}</b><span><strong>{j.scheduled_time || "без времени"} · {j.pest}</strong><small>{addressPlain(j.address)} · {j.client_phone}</small></span><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressPlain(j.address))}`} target="_blank" rel="noreferrer"><MapPin size={16} /></a></div>)}</div></section>)}</div></div>;
+          return <div className="kd-stage2">
+            <div className="kd-routebar">
+              <input type="date" value={routeDate} onChange={(e) => setRouteDate(e.target.value)} />
+              <select value={routeTech} onChange={(e) => setRouteTech(e.target.value)}>
+                <option value="all">Все исполнители</option><option value="none">Не назначено</option>
+                {techs.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+              </select>
+              <button className="kd-btn ghost" onClick={() => setRouteDate(todayIso)}>Сегодня</button>
+            </div>
+            {rows.length === 0 && <div className="kd-empty">На выбранную дату заявок нет.</div>}
+            <div className="kd-routegrid">{groups.map((g) => <section className="kd-card" key={g.techId}>
+              <div className="kd-stage2head"><div>
+                <div className="kd-title">{g.techId === "none" ? "Не назначено" : techById(g.techId)?.full_name}</div>
+                <div className="kd-muted">{g.jobs.length} адресов · по времени заявок · 2GIS</div>
+              </div>
+                <button className="kd-btn primary sm" disabled={routing2Gis === g.techId} onClick={() => open2GisRoute(g.jobs, g.techId)}>
+                  <Navigation size={14} />{routing2Gis === g.techId ? "Строим…" : "Маршрут в 2GIS"}
+                </button>
+              </div>
+              <div className="kd-routelist">{g.jobs.map((j, i) => <div key={j.id}>
+                <b>{i + 1}</b><span><strong>{j.scheduled_time || "без времени"} · {j.pest}</strong><small>{addressPlain(j.address)} · {j.client_phone}</small></span>
+                <a href={twoGisSearchUrl(j.address)} target="_blank" rel="noreferrer" title="Открыть адрес в 2GIS"><MapPin size={16} /></a>
+              </div>)}</div>
+            </section>)}</div>
+          </div>;
         })()}
 
         {!loading && tab === "finance" && (
