@@ -1,3 +1,4 @@
+// KAZDEZ-WHATSAPP-FIX-V4-2026-07-17 — принудительная новая сборка Vercel
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { generateCertificate, generateAct } from "./pdfDocs";
@@ -10,6 +11,17 @@ import {
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
+
+function roleWhatsappUrl(job, isAdmin) {
+  const phone = String(job?.client_phone || "").replace(/\D/g, "");
+  if (!phone) return "";
+  if (isAdmin) return `https://wa.me/${phone}`;
+  const time = (String(job?.scheduled_time || "").match(/(?:[01]?\d|2[0-3]):[0-5]\d/) || [])[0];
+  const message = time
+    ? `Сәлеметсіз бе! Мен дезинфектормын, сізге дезинфекция бойынша жазып отырмын. Сіздерде сағат ${time}-де боламын.\n\nЗдравствуйте! Пишу по поводу дезинфекции. Я дезинфектор, приеду к вам к ${time}.`
+    : "Сәлеметсіз бе! Мен дезинфектормын, сізге дезинфекция бойынша жазып отырмын. Сіздерде келісілген уақытта боламын.\n\nЗдравствуйте! Пишу по поводу дезинфекции. Я дезинфектор, приеду к вам в согласованное время.";
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -1468,7 +1480,7 @@ function Dashboard({ session, profile }) {
                     </div>
                     <div className="kd-todayjobactions">
                       {phone && <a href={`tel:+${phone}`} title="Позвонить"><Phone size={16} /></a>}
-                      {phone && <a className="wa" href={`https://wa.me/${phone}?text=${encodeURIComponent(buildMsg(j, brandHeaderOf(j)))}`} target="_blank" rel="noreferrer" title="WhatsApp"><MessageCircle size={16} /></a>}
+                      {phone && <a className="wa" href={roleWhatsappUrl(j, isAdmin)} target="_blank" rel="noreferrer" title="WhatsApp"><MessageCircle size={16} /></a>}
                       {j.address && <a href={directMap} target="_blank" rel="noreferrer" title="Маршрут"><MapPin size={16} /></a>}
                       <button onClick={() => setModal(j.status === "done" ? { kind: "view", job: j } : isAdmin ? { kind: "edit", job: j } : { kind: "details", job: j })}>{j.status === "done" ? "Отчёт" : "Открыть"}</button>
                     </div>
