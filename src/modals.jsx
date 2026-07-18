@@ -1,8 +1,25 @@
 // KAZDEZ-USABILITY-YANDEX-MODALS-2026-07-18
 // Модальные окна Этапа 3: клиент 360 и единый жизненный цикл заявки.
 import React, { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin } from "lucide-react";
-import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, WORK_STAGE, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, jobWorkStage, lineAmount, norm } from "./shared";
+import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
+import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+
+// Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
+const WORK_STAGE = {
+  new: { label: "Новая", short: "Новая", color: "#2563EB", bg: "#EAF1FE", step: 0 },
+  confirmed: { label: "Подтверждена", short: "Подтверждена", color: "#7C3AED", bg: "#F0EAFE", step: 1 },
+  assigned: { label: "Исполнитель назначен", short: "Назначена", color: "#B45309", bg: "#FCF1E2", step: 2 },
+  en_route: { label: "Исполнитель в пути", short: "В пути", color: "#0369A1", bg: "#E0F2FE", step: 3 },
+  on_site: { label: "Исполнитель на объекте", short: "На объекте", color: "#0F766E", bg: "#CCFBF1", step: 4 },
+  done: { label: "Работа выполнена", short: "Выполнена", color: "#0E7C66", bg: "#E4F3EE", step: 5 },
+  canceled: { label: "Заявка отменена", short: "Отменена", color: "#B3261E", bg: "#FBE7E5", step: -1 },
+};
+function jobWorkStage(job) {
+  if (job?.status === "done") return "done";
+  if (job?.status === "canceled") return "canceled";
+  if (WORK_STAGE[job?.work_stage]) return job.work_stage;
+  return job?.assigned_to ? "assigned" : "new";
+}
 
 function yandexMapUrl(text) {
   const raw = String(text || "").trim();
@@ -23,11 +40,27 @@ function roleWhatsappUrl(job, isAdmin) {
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
-function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink }) {
+function PartnerOrigin({ name, compact = false }) {
+  if (!name) return null;
+  return (
+    <div className={`kd-partner-origin ${compact ? "compact" : ""}`} role="status" aria-label={`Заявка от партнёра ${name}`}>
+      <span className="kd-partner-origin-icon"><Handshake size={compact ? 16 : 19} /></span>
+      <span className="kd-partner-origin-copy">
+        <small>Заявка от партнёра</small>
+        <strong>{name}</strong>
+        {!compact && <em>Учитывайте партнёрский источник при общении с клиентом</em>}
+      </span>
+    </div>
+  );
+}
+
+function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete }) {
   const st = STATUS[job.status] || STATUS.new;
   const stageKey = jobWorkStage(job);
   const stage = WORK_STAGE[stageKey];
-  const brandLabel = job.brand === "Sanitex" ? "Sanitex" : job.brand === "partner" ? "Партнёр" : "KazDez";
+  const isPartnerJob = job.brand === "partner" || !!job.partner_id || !!job.partner_name;
+  const visiblePartnerName = isPartnerJob ? (partnerName || job.partner_name || "Партнёр не указан") : "";
+  const brandLabel = job.brand === "Sanitex" ? "Sanitex" : isPartnerJob ? "Партнёрская" : "KazDez";
   const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
   const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
   const mapUrl = yandexMapUrl(job.address);
@@ -41,6 +74,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {job.floor && (<><span>·</span><span>{job.floor} этаж</span></>)}
         {job.area && (<><span>·</span><span>{job.area} м²</span></>)}
       </div>
+      <PartnerOrigin name={visiblePartnerName} />
       <div className="kd-addr"><AddressText text={job.address} /></div>
       {job.note && <div className="kd-notebox">📝 {job.note}</div>}
       <div className="kd-prices">
@@ -86,6 +120,7 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {phoneDigits && <a className="kd-quickbtn" href={`tel:+${phoneDigits}`}><Phone size={15} />Позвонить</a>}
         {phoneDigits && <a className="kd-quickbtn wa" href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle size={15} />WhatsApp</a>}
         {job.address && <a className="kd-quickbtn" href={mapUrl} target="_blank" rel="noreferrer"><MapPin size={15} />Яндекс Карты</a>}
+        {onProof && <button className={`kd-quickbtn ${proofComplete ? "proof-done" : ""}`} onClick={onProof}><Camera size={15} />{proofComplete ? "Акт подтверждён" : "Фото и подпись"}</button>}
         {isAdmin && job.public_token && <button className="kd-quickbtn" onClick={onCopyPublicLink}><ChevronRight size={15} />Ссылка клиенту</button>}
       </div>
       <div className="kd-actions">
@@ -199,11 +234,12 @@ function AssignModal({ job, techs, onClose, onSave, assignInfo }) {
   const [saving, setSaving] = useState(false);
   async function save() { setSaving(true); await onSave(job, techId || null); setSaving(false); }
   const infoOf = (id) => (assignInfo ? assignInfo(id) : { off: false, night: false, count: 0 });
-  // приоритет: свободные и отдохнувшие сверху; выходной/ночной — вниз
+  // Лучший балл сверху; при равенстве — свободные и отдохнувшие.
   const ordered = [...techs].sort((a, b) => {
     const ia = infoOf(a.id), ib = infoOf(b.id);
-    return (ia.off - ib.off) || (ia.night - ib.night) || (ia.count - ib.count);
+    return ((Number(ib.score) || 0) - (Number(ia.score) || 0)) || (ia.off - ib.off) || (ia.night - ib.night) || (ia.count - ib.count);
   });
+  const recommendedId = ordered[0] && !infoOf(ordered[0].id).off ? ordered[0].id : null;
   return (
     <ModalShell title="Назначить дезинфектора" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
@@ -220,14 +256,17 @@ function AssignModal({ job, techs, onClose, onSave, assignInfo }) {
             <button key={t.id} className={`kd-btn ${techId === t.id ? "primary" : "ghost"}`} style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 6 }} onClick={() => setTechId(t.id)}>
               <span>{t.full_name || t.id.slice(0, 6)}</span>
               <span style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 12 }}>
+                {recommendedId === t.id && <span className="kd-assignbest">Рекомендуем · {Math.round(Number(inf.score) || 0)}</span>}
                 {inf.off && <span className="kd-assignwarn off">🌴 выходной</span>}
                 {inf.night && <span className="kd-assignwarn night">🌙 ночной выезд — дай отдохнуть</span>}
                 <span className="kd-assignload">{inf.count} заяв.</span>
               </span>
+              {Array.isArray(inf.reasons) && inf.reasons.length > 0 && <small className="kd-assignreasons">{inf.reasons.join(" · ")}</small>}
             </button>
           );
         })}
       </div>
+      {recommendedId && !techId && <button className="kd-smartassign" onClick={() => setTechId(recommendedId)}><span>Умная рекомендация</span><strong>{ordered.find((t) => t.id === recommendedId)?.full_name || "Исполнитель"}</strong><small>{(infoOf(recommendedId).reasons || []).join(" · ")}</small></button>}
       {(() => { const sel = techId && infoOf(techId); return sel && (sel.off || sel.night) ? <div className="kd-hint" style={{ marginTop: 10, background: "var(--rust-tint)", borderColor: "#F1C4BF", color: "#B3261E" }}>⚠ {sel.off ? "У этого сотрудника выходной в дату заявки." : "Он был на ночном выезде — лучше поставить другого."}</div> : null; })()}
     </ModalShell>
   );
@@ -569,14 +608,22 @@ function DocModal({ doc, partners, onClose, onSave }) {
   );
 }
 
-function ReportModal({ job, chemicals, primaryReport, onClose, onSave }) {
-  const [cash, setCash] = useState(""); const [qr, setQr] = useState(""); const [note, setNote] = useState("");
-  const [transfer, setTransfer] = useState("");
-  const [chems, setChems] = useState([{ chemical_id: "", amount: "", unit: "small" }, { chemical_id: "", amount: "", unit: "small" }]);
-  const [fuWanted, setFuWanted] = useState(false); const [fuDate, setFuDate] = useState(""); const [fuNote, setFuNote] = useState("");
-  const [docNeeded, setDocNeeded] = useState(false); const [avr, setAvr] = useState(false); const [dogovor, setDogovor] = useState(false); const [docNote, setDocNote] = useState("");
+function ReportModal({ job, partnerName, chemicals, primaryReport, onClose, onSave }) {
+  const draftKey = `kazdez-report-draft-v4:${job.id}`;
+  const draftRef = useRef(null);
+  if (draftRef.current === null) { try { draftRef.current = JSON.parse(localStorage.getItem(draftKey) || "null") || {}; } catch { draftRef.current = {}; } }
+  const draft = draftRef.current;
+  const [cash, setCash] = useState(draft.cash || ""); const [qr, setQr] = useState(draft.qr || ""); const [note, setNote] = useState(draft.note || "");
+  const [transfer, setTransfer] = useState(draft.transfer || "");
+  const [chems, setChems] = useState(draft.chems || [{ chemical_id: "", amount: "", unit: "small" }, { chemical_id: "", amount: "", unit: "small" }]);
+  const [fuWanted, setFuWanted] = useState(!!draft.fuWanted); const [fuDate, setFuDate] = useState(draft.fuDate || ""); const [fuNote, setFuNote] = useState(draft.fuNote || "");
+  const [docNeeded, setDocNeeded] = useState(!!draft.docNeeded); const [avr, setAvr] = useState(!!draft.avr); const [dogovor, setDogovor] = useState(!!draft.dogovor); const [docNote, setDocNote] = useState(draft.docNote || "");
   const [saving, setSaving] = useState(false);
+  const [offlineSaved, setOfflineSaved] = useState(false);
   const total = (Number(cash) || 0) + (Number(qr) || 0) + (Number(transfer) || 0);
+  useEffect(() => {
+    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, savedAt: new Date().toISOString() }));
+  }, [draftKey, cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote]);
   const setChem = (i, k) => (e) => { const n = chems.slice(); n[i] = { ...n[i], [k]: e.target.value }; setChems(n); };
   function methodLabel() {
     const parts = [];
@@ -586,6 +633,7 @@ function ReportModal({ job, chemicals, primaryReport, onClose, onSave }) {
     return parts.join(" + ") || "Наличные";
   }
   async function save() {
+    if (!navigator.onLine) { setOfflineSaved(true); return; }
     setSaving(true);
     const lines = chems.filter((c) => c.chemical_id && Number(c.amount) > 0).map((c) => {
       const ch = chemicals.find((x) => x.id === c.chemical_id);
@@ -593,7 +641,8 @@ function ReportModal({ job, chemicals, primaryReport, onClose, onSave }) {
       const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
       return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
     });
-    await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote } }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
+    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote } }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
+    if (ok !== false) localStorage.removeItem(draftKey);
     setSaving(false);
   }
   return (
@@ -602,6 +651,9 @@ function ReportModal({ job, chemicals, primaryReport, onClose, onSave }) {
       <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
     </>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
+      <PartnerOrigin name={partnerName || job.partner_name} />
+      {!navigator.onLine && <div className="kd-offline-draft"><Info size={17} /><div><strong>Нет связи</strong><span>Заполняйте отчёт — черновик сохраняется на этом устройстве. Отправьте его после восстановления интернета.</span></div></div>}
+      {offlineSaved && <div className="kd-allgood"><CheckCircle2 size={18} />Черновик сохранён на устройстве</div>}
 
       {primaryReport && (
         <div className="kd-card" style={{ marginBottom: 14, background: "var(--surface-sunk)", boxShadow: "none" }}>
@@ -665,7 +717,7 @@ function ReportModal({ job, chemicals, primaryReport, onClose, onSave }) {
   );
 }
 
-function DetailsModal({ job, header, onReport, onClose }) {
+function DetailsModal({ job, header, partnerName, onReport, onClose }) {
   const [view, setView] = useState("card");
   const [copied, setCopied] = useState(false);
   const msg = buildMsg(job, header);
@@ -676,6 +728,7 @@ function DetailsModal({ job, header, onReport, onClose }) {
       <button className="kd-btn ghost" onClick={onClose}>Закрыть</button>
       {job.status !== "done" && <button className="kd-btn primary" onClick={onReport}>Отметить выполненной</button>}
     </>}>
+      <PartnerOrigin name={partnerName || job.partner_name} />
       <div className="kd-seg" style={{ marginBottom: 16, width: "100%" }}>
         <button className={`kd-segbtn ${view === "card" ? "on" : ""}`} onClick={() => setView("card")}>Карточка</button>
         <button className={`kd-segbtn ${view === "wa" ? "on" : ""}`} onClick={() => setView("wa")}>Как в WhatsApp</button>
@@ -714,12 +767,13 @@ function DetailsModal({ job, header, onReport, onClose }) {
   );
 }
 
-function ViewModal({ job, chemicals, performedBy, onClose }) {
+function ViewModal({ job, partnerName, chemicals, performedBy, onClose }) {
   const hasSplit = (job.report_cash || 0) > 0 && (job.report_qr || 0) > 0;
   const chemOf = (l) => (l.chemical_id ? (chemicals || []).find((x) => x.id === l.chemical_id) : (chemicals || []).find((x) => norm(x.name) === norm(l.name)));
   return (
     <ModalShell title="Отчёт по заявке" onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
+      <PartnerOrigin name={partnerName || job.partner_name} />
       <div className="kd-row"><span>Выполнил</span><strong>{performedBy || "не указано"}</strong></div>
       {job.reported_at && <div className="kd-row"><span>Дата отчёта</span><strong>{fmtTs(job.reported_at)}</strong></div>}
       {hasSplit ? (<>
@@ -740,7 +794,7 @@ function ViewModal({ job, chemicals, performedBy, onClose }) {
   );
 }
 
-function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts = [], events = [], feedback = [], profiles = [], canPlanFollowup = false, onClose, onOpen, onAddNote, onPlanFollowup, onCopyPublicLink }) {
+function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts = [], events = [], feedback = [], profiles = [], canPlanFollowup = false, partnerNameOf = () => "", onClose, onOpen, onAddNote, onPlanFollowup, onCopyPublicLink }) {
   const [view, setView] = useState("overview");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -795,6 +849,7 @@ function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts
           {canPlanFollowup && <button className="kd-btn primary sm" onClick={() => onPlanFollowup(job)}><Plus size={14} />Касание</button>}
         </div>
       </div>
+      <PartnerOrigin name={partnerNameOf(job) || job.partner_name} />
 
       <div className="kd-client360-kpis">
         <div><span>Заявки</span><strong>{list.length}</strong><small>{doneCount} выполнено</small></div>
@@ -820,9 +875,77 @@ function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts
       {view === "jobs" && <div className="kd-client360-jobs">
         {list.map((j) => {
           const stage = WORK_STAGE[jobWorkStage(j)];
-          return <button key={j.id} className="kd-histrow" onClick={() => onOpen(j)}><div><div className="kd-histmain">{j.type} · {j.pest}</div><div className="kd-muted">{isoToRu(j.scheduled_date) || "без даты"} · {j.address}</div></div><div style={{ textAlign: "right" }}><span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>{j.report_paid != null && <div className="kd-muted" style={{ marginTop: 4 }}>{fmt(j.report_paid)} ₸</div>}</div></button>;
+          const rowPartnerName = partnerNameOf(j) || j.partner_name;
+          return <button key={j.id} className="kd-histrow" onClick={() => onOpen(j)}><div><div className="kd-histmain">{j.type} · {j.pest}</div><div className="kd-muted">{isoToRu(j.scheduled_date) || "без даты"} · {j.address}</div>{rowPartnerName && <PartnerOrigin name={rowPartnerName} compact />}</div><div style={{ textAlign: "right" }}><span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>{j.report_paid != null && <div className="kd-muted" style={{ marginTop: 4 }}>{fmt(j.report_paid)} ₸</div>}</div></button>;
         })}
       </div>}
+    </ModalShell>
+  );
+}
+
+function ProofModal({ job, proof, media = { before: [], after: [], signatureUrl: "" }, onClose, onSave }) {
+  const [beforeFiles, setBeforeFiles] = useState([]);
+  const [afterFiles, setAfterFiles] = useState([]);
+  const [signedName, setSignedName] = useState(proof?.signed_name || "");
+  const [arrival, setArrival] = useState(proof?.arrival_lat != null ? { lat: proof.arrival_lat, lng: proof.arrival_lng, accuracy: proof.arrival_accuracy } : null);
+  const [completion, setCompletion] = useState(proof?.completion_lat != null ? { lat: proof.completion_lat, lng: proof.completion_lng, accuracy: proof.completion_accuracy } : null);
+  const [locating, setLocating] = useState("");
+  const [geoError, setGeoError] = useState("");
+  const [hasSignature, setHasSignature] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const canvasRef = useRef(null);
+  const drawingRef = useRef(false);
+
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ratio = Math.max(1, window.devicePixelRatio || 1);
+    const width = Math.max(280, canvas.getBoundingClientRect().width);
+    canvas.width = width * ratio; canvas.height = 160 * ratio;
+    const ctx = canvas.getContext("2d"); ctx.scale(ratio, ratio);
+    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.lineWidth = 2.5; ctx.strokeStyle = "#E9F1EB";
+  }, []);
+
+  const point = (event) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  };
+  function startDraw(event) {
+    event.preventDefault(); drawingRef.current = true; canvasRef.current.setPointerCapture?.(event.pointerId);
+    const p = point(event), ctx = canvasRef.current.getContext("2d"); ctx.beginPath(); ctx.moveTo(p.x, p.y);
+  }
+  function moveDraw(event) {
+    if (!drawingRef.current) return; event.preventDefault(); const p = point(event), ctx = canvasRef.current.getContext("2d"); ctx.lineTo(p.x, p.y); ctx.stroke(); setHasSignature(true);
+  }
+  function stopDraw(event) { drawingRef.current = false; canvasRef.current?.releasePointerCapture?.(event.pointerId); }
+  function clearSignature() {
+    const canvas = canvasRef.current, ctx = canvas.getContext("2d"); ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.restore(); setHasSignature(false);
+  }
+  function locate(kind) {
+    setGeoError("");
+    if (!navigator.geolocation) { setGeoError("Геолокация не поддерживается этим устройством."); return; }
+    setLocating(kind);
+    navigator.geolocation.getCurrentPosition(({ coords }) => {
+      const value = { lat: coords.latitude, lng: coords.longitude, accuracy: coords.accuracy };
+      if (kind === "arrival") setArrival(value); else setCompletion(value);
+      setLocating("");
+    }, (error) => { setGeoError(error.code === 1 ? "Доступ к геолокации не разрешён. Можно сохранить без координат." : "Не удалось определить координаты. Попробуйте ещё раз."); setLocating(""); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 });
+  }
+  async function save() {
+    setSaving(true);
+    const signatureDataUrl = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
+    const ok = await onSave(job, { beforeFiles, afterFiles, signedName: signedName.trim(), arrival, completion, signatureDataUrl });
+    setSaving(false); if (ok) onClose();
+  }
+  const fileList = (files) => files.length ? <div className="kd-proof-newfiles">{files.map((file) => <span key={`${file.name}-${file.lastModified}`}>{file.name}</span>)}</div> : null;
+  return (
+    <ModalShell wide title="Подтверждение выполненной работы" onClose={onClose} footer={<><button className="kd-btn ghost" onClick={onClose}>Закрыть</button><button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "Загружаем…" : "Сохранить подтверждение"}</button></>}>
+      <div className="kd-proof-head"><div><strong>{job.pest || "Заявка"}</strong><span>{job.address}</span></div><span className={`kd-proof-state ${(proof?.before_paths?.length && proof?.after_paths?.length) ? "done" : ""}`}>{proof?.before_paths?.length && proof?.after_paths?.length ? "Фото зафиксированы" : "Нужно заполнить"}</span></div>
+      <div className="kd-proof-grid">
+        <section className="kd-proof-panel"><div className="kd-section"><Camera size={17} />Фото до обработки</div><div className="kd-proof-gallery">{media.before.map((item) => <a key={item.path} href={item.url} target="_blank" rel="noreferrer"><img src={item.url} alt="До обработки" /></a>)}</div><label className="kd-proof-upload"><Camera size={17} /><span>Добавить фотографии</span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={(e) => setBeforeFiles([...e.target.files].slice(0, 5))} /></label>{fileList(beforeFiles)}</section>
+        <section className="kd-proof-panel"><div className="kd-section"><CheckCircle2 size={17} />Фото после обработки</div><div className="kd-proof-gallery">{media.after.map((item) => <a key={item.path} href={item.url} target="_blank" rel="noreferrer"><img src={item.url} alt="После обработки" /></a>)}</div><label className="kd-proof-upload"><Camera size={17} /><span>Добавить фотографии</span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={(e) => setAfterFiles([...e.target.files].slice(0, 5))} /></label>{fileList(afterFiles)}</section>
+      </div>
+      <section className="kd-proof-panel kd-proof-location"><div className="kd-section"><LocateFixed size={17} />Местоположение</div><p>Координаты сохраняются только после нажатия кнопки и используются для подтверждения факта выезда.</p><div className="kd-proof-locactions"><button className="kd-btn ghost" disabled={!!locating} onClick={() => locate("arrival")}><LocateFixed size={15} />{locating === "arrival" ? "Определяем…" : arrival ? "Обновить точку прибытия" : "Зафиксировать прибытие"}</button><button className="kd-btn ghost" disabled={!!locating} onClick={() => locate("completion")}><LocateFixed size={15} />{locating === "completion" ? "Определяем…" : completion ? "Обновить точку завершения" : "Зафиксировать завершение"}</button></div><div className="kd-proof-coords">{arrival && <span>Прибытие: {Number(arrival.lat).toFixed(5)}, {Number(arrival.lng).toFixed(5)} · ±{Math.round(arrival.accuracy || 0)} м</span>}{completion && <span>Завершение: {Number(completion.lat).toFixed(5)}, {Number(completion.lng).toFixed(5)} · ±{Math.round(completion.accuracy || 0)} м</span>}</div>{geoError && <div className="kd-hint">{geoError}</div>}</section>
+      <section className="kd-proof-panel kd-signature"><div className="kd-section"><ShieldCheck size={17} />Подпись клиента</div><Field label="Имя клиента"><input value={signedName} onChange={(e) => setSignedName(e.target.value)} placeholder="Как зовут клиента" /></Field>{media.signatureUrl && !hasSignature && <a className="kd-existing-signature" href={media.signatureUrl} target="_blank" rel="noreferrer">Открыть сохранённую подпись</a>}<div className="kd-signature-wrap"><canvas ref={canvasRef} onPointerDown={startDraw} onPointerMove={moveDraw} onPointerUp={stopDraw} onPointerCancel={stopDraw} onPointerLeave={stopDraw} /><span>Попросите клиента расписаться пальцем или мышью</span></div><button className="kd-btn ghost sm" onClick={clearSignature}><Eraser size={14} />Очистить подпись</button><p className="kd-proof-consent">Сохраняйте подпись только после того, как клиент согласился подтвердить выполнение работы.</p></section>
     </ModalShell>
   );
 }
@@ -2164,4 +2287,4 @@ function ContractModal({ contract, people = [], onClose, onSave }) {
   </ModalShell>;
 }
 
-export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm };
+export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm };
