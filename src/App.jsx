@@ -6,12 +6,29 @@ import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, jobWorkStage, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
+import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
+
+// Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
+const WORK_STAGE = {
+  new: { label: "Новая", short: "Новая", color: "#2563EB", bg: "#EAF1FE", step: 0 },
+  confirmed: { label: "Подтверждена", short: "Подтверждена", color: "#7C3AED", bg: "#F0EAFE", step: 1 },
+  assigned: { label: "Исполнитель назначен", short: "Назначена", color: "#B45309", bg: "#FCF1E2", step: 2 },
+  en_route: { label: "Исполнитель в пути", short: "В пути", color: "#0369A1", bg: "#E0F2FE", step: 3 },
+  on_site: { label: "Исполнитель на объекте", short: "На объекте", color: "#0F766E", bg: "#CCFBF1", step: 4 },
+  done: { label: "Работа выполнена", short: "Выполнена", color: "#0E7C66", bg: "#E4F3EE", step: 5 },
+  canceled: { label: "Заявка отменена", short: "Отменена", color: "#B3261E", bg: "#FBE7E5", step: -1 },
+};
+function jobWorkStage(job) {
+  if (job?.status === "done") return "done";
+  if (job?.status === "canceled") return "canceled";
+  if (WORK_STAGE[job?.work_stage]) return job.work_stage;
+  return job?.assigned_to ? "assigned" : "new";
+}
 
 function roleWhatsappUrl(job, isAdmin) {
   const phone = String(job?.client_phone || "").replace(/\D/g, "");
@@ -232,6 +249,9 @@ function Dashboard({ session, profile }) {
   const [contracts, setContracts] = useState([]);
   const [clientEvents, setClientEvents] = useState([]);
   const [publicFeedback, setPublicFeedback] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [jobProofs, setJobProofs] = useState([]);
+  const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
   const [taskFilter, setTaskFilter] = useState("open");
@@ -261,15 +281,25 @@ function Dashboard({ session, profile }) {
   const [online, setOnline] = useState(() => navigator.onLine);
   const [dataWarnings, setDataWarnings] = useState([]);
   const [lastLoadedAt, setLastLoadedAt] = useState(null);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [offlineQueued, setOfflineQueued] = useState(() => { try { return JSON.parse(localStorage.getItem("kd-offline-actions-v4") || "[]").length; } catch { return 0; } });
+  const [syncingOffline, setSyncingOffline] = useState(false);
   const isAdmin = profile?.role === "admin";
   const isManager = profile?.role === "manager";
   const canManageTasks = isAdmin || isManager;
   const actorName = profile?.full_name || (isAdmin ? "Админ" : session.user.email);
 
   useEffect(() => {
-    const setOn = () => setOnline(true); const setOff = () => setOnline(false);
+    const setOn = () => { setOnline(true); syncOfflineQueue(); }; const setOff = () => setOnline(false);
     window.addEventListener("online", setOn); window.addEventListener("offline", setOff);
     return () => { window.removeEventListener("online", setOn); window.removeEventListener("offline", setOff); };
+  }, []);
+
+  useEffect(() => {
+    const capture = (event) => { event.preventDefault(); setInstallPrompt(event); };
+    window.addEventListener("beforeinstallprompt", capture);
+    return () => window.removeEventListener("beforeinstallprompt", capture);
   }, []);
 
   function showToast(t) { setToast(t); setTimeout(() => setToast(""), 2200); }
@@ -277,6 +307,7 @@ function Dashboard({ session, profile }) {
   async function load() {
     setLoading(true);
     try {
+    await supabase.rpc("stage4_refresh_notifications");
     const responses = await Promise.all([
       supabase.from("jobs").select("*"),
       supabase.from("report_chemicals").select("*"),
@@ -313,17 +344,25 @@ function Dashboard({ session, profile }) {
       supabase.from("service_contracts").select("*").order("next_service_date", { ascending: true }),
       supabase.from("client_events").select("*").order("created_at", { ascending: false }),
       supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }),
+      supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(80),
+      supabase.from("job_proofs").select("*").order("updated_at", { ascending: false }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
+    let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
+    const useOfflineSnapshot = !navigator.onLine && !!jr.error && !!offlineSnapshot?.jobs;
     const chems = cr.data || [];
-    setJobs((jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) })));
-    setChemicals(chr.data || []);
+    const mappedJobs = (jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) }));
+    const currentJobs = useOfflineSnapshot ? offlineSnapshot.jobs : mappedJobs;
+    const currentChemicals = useOfflineSnapshot ? (offlineSnapshot.chemicals || []) : (chr.data || []);
+    const currentProfiles = useOfflineSnapshot ? (offlineSnapshot.profiles || []) : (pr.data || []);
+    setJobs(currentJobs);
+    setChemicals(currentChemicals);
     setAudit(ar.data || []);
     setTrash(tr.data || []);
-    setTechs((pr.data || []).filter((p) => p.role === "tech"));
-    setAllProfiles(pr.data || []);
+    setTechs(currentProfiles.filter((p) => p.role === "tech"));
+    setAllProfiles(currentProfiles);
     setHandouts(hr.data || []);
     setPartners(ptr.data || []);
     setDocs(dsr.data || []);
@@ -332,8 +371,8 @@ function Dashboard({ session, profile }) {
     setEquipHandouts(ehr.data || []);
     setSources(scr.data || []);
     setPestTypes(ptyr.data || []);
-    const settingsMap = {};
-    (str.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
+    const settingsMap = useOfflineSnapshot ? (offlineSnapshot.settings || {}) : {};
+    if (!useOfflineSnapshot) (str.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
     setSettings(settingsMap);
     setExpCats(ecr.data || []);
     setOpex(opr.data || []);
@@ -355,17 +394,128 @@ function Dashboard({ session, profile }) {
     setContracts(cor.data || []);
     setClientEvents(cer.data || []);
     setPublicFeedback(pfr.data || []);
-    setLastLoadedAt(new Date());
+    setNotifications(ntr.data || []);
+    setJobProofs(jpr.data || []);
+    if (!useOfflineSnapshot && !jr.error) {
+      try {
+        const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
+        localStorage.setItem("kd-offline-snapshot-v4", JSON.stringify({ jobs: cacheJobs, chemicals: chr.data || [], profiles: pr.data || [], settings: settingsMap, savedAt: new Date().toISOString() }));
+      } catch { /* локальное хранилище может быть заполнено — онлайн-работе это не мешает */ }
+    }
+    if (useOfflineSnapshot) setDataWarnings([`Офлайн-режим: показаны данные на ${fmtTs(offlineSnapshot.savedAt)}`]);
+    setLastLoadedAt(useOfflineSnapshot && offlineSnapshot.savedAt ? new Date(offlineSnapshot.savedAt) : new Date());
     setLoading(false);
     } catch (error) {
-      setDataWarnings([`Не удалось связаться с базой: ${error?.message || "неизвестная ошибка"}`]);
+      let snapshot = null; try { snapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { snapshot = null; }
+      if (snapshot?.jobs) {
+        setJobs(snapshot.jobs); setChemicals(snapshot.chemicals || []); setAllProfiles(snapshot.profiles || []); setTechs((snapshot.profiles || []).filter((p) => p.role === "tech")); setSettings(snapshot.settings || {}); setLastLoadedAt(snapshot.savedAt ? new Date(snapshot.savedAt) : null);
+        setDataWarnings([`Нет связи с базой. Показана сохранённая копия на ${fmtTs(snapshot.savedAt)}`]);
+      } else setDataWarnings([`Не удалось связаться с базой: ${error?.message || "неизвестная ошибка"}`]);
       setLoading(false);
     }
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const timer = setInterval(() => { if (navigator.onLine) refreshNotificationCenter(); }, 5 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [session.user.id]);
 
   async function logAction(action, summary) {
     await supabase.from("audit_log").insert({ actor: actorName, actor_id: session.user.id, action, summary });
+  }
+  const OFFLINE_QUEUE_KEY = "kd-offline-actions-v4";
+  function readOfflineQueue() { try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]"); } catch { return []; } }
+  function writeOfflineQueue(items) { localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(items)); setOfflineQueued(items.length); }
+  function queueOfflineAction(action) { const items = readOfflineQueue(); items.push({ ...action, queuedAt: new Date().toISOString() }); writeOfflineQueue(items); }
+  async function syncOfflineQueue() {
+    if (!navigator.onLine || syncingOffline) return;
+    const items = readOfflineQueue(); if (!items.length) return;
+    setSyncingOffline(true); const failed = [];
+    for (const item of items) {
+      if (item.kind === "stage") {
+        const { error } = await supabase.from("jobs").update(item.payload).eq("id", item.jobId);
+        if (error) failed.push(item);
+      } else failed.push(item);
+    }
+    writeOfflineQueue(failed); setSyncingOffline(false);
+    if (!failed.length) { showToast("Офлайн-изменения синхронизированы"); load(); }
+  }
+  async function installApplication() {
+    if (!installPrompt) return;
+    await installPrompt.prompt(); await installPrompt.userChoice; setInstallPrompt(null);
+  }
+  const unreadNotifications = notifications.filter((item) => !item.read_at);
+  async function refreshNotificationCenter() {
+    await supabase.rpc("stage4_refresh_notifications");
+    const { data } = await supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(80);
+    if (data) setNotifications(data);
+  }
+  async function markNotificationRead(item) {
+    if (!item.read_at) {
+      const now = new Date().toISOString(); setNotifications((rows) => rows.map((row) => row.id === item.id ? { ...row, read_at: now } : row));
+      await supabase.from("notifications").update({ read_at: now }).eq("id", item.id);
+    }
+  }
+  async function markAllNotificationsRead() {
+    const now = new Date().toISOString(); setNotifications((rows) => rows.map((row) => ({ ...row, read_at: row.read_at || now })));
+    await supabase.from("notifications").update({ read_at: now }).is("read_at", null);
+  }
+  function clientReminderWhatsappUrl(job) {
+    const phone = String(job?.client_phone || "").replace(/\D/g, ""); if (!phone) return "";
+    const message = `Сәлеметсіз бе! KazDez компаниясынан еске саламыз: дезинфекция ${isoToRu(job.scheduled_date)} күні${job.scheduled_time ? `, сағат ${job.scheduled_time}` : ""} жоспарланған.\n\nЗдравствуйте! Напоминаем: дезинфекция запланирована на ${isoToRu(job.scheduled_date)}${job.scheduled_time ? `, время ${job.scheduled_time}` : ""}.`;
+    return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  }
+  async function openNotification(item) {
+    await markNotificationRead(item); setNotificationOpen(false);
+    const job = item.job_id ? jobs.find((row) => String(row.id) === String(item.job_id)) : null;
+    if (item.kind === "client_reminder" && job) { window.open(clientReminderWhatsappUrl(job), "_blank", "noopener,noreferrer"); return; }
+    if (item.link_tab) setTab(item.link_tab);
+    if (job && ["assignment", "visit_reminder"].includes(item.kind)) setModal(job.status === "done" ? { kind: "view", job } : isAdmin || isManager ? { kind: "edit", job } : { kind: "details", job });
+    if (job && item.kind === "unassigned") setModal({ kind: "assign", job });
+  }
+  const proofByJob = (jobId) => jobProofs.find((proof) => String(proof.job_id) === String(jobId));
+  const proofIsComplete = (jobId) => { const proof = proofByJob(jobId); return !!(proof?.before_paths?.length && proof?.after_paths?.length && proof?.signature_path); };
+  async function openJobProof(job) {
+    const proof = proofByJob(job.id); setProofMedia({ before: [], after: [], signatureUrl: "" }); setModal({ kind: "proof", job });
+    if (!proof) return;
+    const paths = [...(proof.before_paths || []), ...(proof.after_paths || []), ...(proof.signature_path ? [proof.signature_path] : [])];
+    if (!paths.length) return;
+    const { data } = await supabase.storage.from("job-proofs").createSignedUrls(paths, 3600);
+    const byPath = new Map((data || []).filter((item) => item.signedUrl).map((item) => [item.path, item.signedUrl]));
+    setProofMedia({
+      before: (proof.before_paths || []).filter((path) => byPath.has(path)).map((path) => ({ path, url: byPath.get(path) })),
+      after: (proof.after_paths || []).filter((path) => byPath.has(path)).map((path) => ({ path, url: byPath.get(path) })),
+      signatureUrl: proof.signature_path ? byPath.get(proof.signature_path) || "" : "",
+    });
+  }
+  async function uploadProofBlob(job, blob, kind, index, extension = "jpg") {
+    const safeExt = ["jpg", "jpeg", "png", "webp"].includes(extension) ? extension : "jpg";
+    const path = `${job.id}/${kind}-${Date.now()}-${index}.${safeExt}`;
+    const { error } = await supabase.storage.from("job-proofs").upload(path, blob, { cacheControl: "3600", upsert: false, contentType: blob.type || `image/${safeExt}` });
+    if (error) throw error; return path;
+  }
+  async function saveJobProof(job, payload) {
+    if (!navigator.onLine) { showToast("Для загрузки фото нужен интернет. Данные формы не закрыты."); return false; }
+    const existing = proofByJob(job.id);
+    try {
+      const beforeNew = await Promise.all(payload.beforeFiles.map((file, index) => uploadProofBlob(job, file, "before", index, (file.name.split(".").pop() || "jpg").toLowerCase())));
+      const afterNew = await Promise.all(payload.afterFiles.map((file, index) => uploadProofBlob(job, file, "after", index, (file.name.split(".").pop() || "jpg").toLowerCase())));
+      let signaturePath = existing?.signature_path || null;
+      if (payload.signatureDataUrl) { const blob = await fetch(payload.signatureDataUrl).then((response) => response.blob()); signaturePath = await uploadProofBlob(job, blob, "signature", 0, "png"); }
+      const now = new Date().toISOString();
+      const row = {
+        job_id: String(job.id), before_paths: [...(existing?.before_paths || []), ...beforeNew], after_paths: [...(existing?.after_paths || []), ...afterNew],
+        signature_path: signaturePath, signed_name: payload.signedName || existing?.signed_name || null,
+        arrival_lat: payload.arrival?.lat ?? existing?.arrival_lat ?? null, arrival_lng: payload.arrival?.lng ?? existing?.arrival_lng ?? null, arrival_accuracy: payload.arrival?.accuracy ?? existing?.arrival_accuracy ?? null, arrived_at: payload.arrival && (existing?.arrival_lat == null || Number(existing.arrival_lat) !== Number(payload.arrival.lat) || Number(existing.arrival_lng) !== Number(payload.arrival.lng)) ? now : existing?.arrived_at || null,
+        completion_lat: payload.completion?.lat ?? existing?.completion_lat ?? null, completion_lng: payload.completion?.lng ?? existing?.completion_lng ?? null, completion_accuracy: payload.completion?.accuracy ?? existing?.completion_accuracy ?? null, completed_at: payload.completion && (existing?.completion_lat == null || Number(existing.completion_lat) !== Number(payload.completion.lat) || Number(existing.completion_lng) !== Number(payload.completion.lng)) ? now : existing?.completed_at || null,
+        created_by: existing?.created_by || session.user.id, updated_at: now,
+      };
+      const { data, error } = await supabase.from("job_proofs").upsert(row, { onConflict: "job_id" }).select("*").single();
+      if (error) throw error;
+      setJobProofs((rows) => [data, ...rows.filter((item) => item.id !== data.id)]);
+      await recordClientEvent(job, "proof", "Подтверждение работы обновлено", [row.before_paths.length && `до: ${row.before_paths.length}`, row.after_paths.length && `после: ${row.after_paths.length}`, signaturePath && "подпись клиента"].filter(Boolean).join(" · "));
+      showToast("Подтверждение работы сохранено"); return true;
+    } catch (error) { showToast("Не удалось сохранить подтверждение: " + (error?.message || "ошибка загрузки")); return false; }
   }
   async function recordClientEvent(job, eventType, title, details = "") {
     if (!job?.client_phone || !title) return;
@@ -410,6 +560,11 @@ function Dashboard({ session, profile }) {
     const payload = { work_stage: stageKey, stage_updated_at: now };
     if (stageKey === "en_route") payload.en_route_at = now;
     if (stageKey === "on_site") payload.arrived_at = now;
+    if (!navigator.onLine) {
+      queueOfflineAction({ kind: "stage", jobId: job.id, payload });
+      setJobs((rows) => rows.map((row) => row.id === job.id ? { ...row, ...payload } : row));
+      showToast(`Сохранено офлайн: ${WORK_STAGE[stageKey].short}`); return;
+    }
     const { error } = await supabase.from("jobs").update(payload).eq("id", job.id);
     if (error) { showToast("Не удалось изменить этап: " + error.message); return; }
     await recordClientEvent(job, "stage", WORK_STAGE[stageKey].label, actorName);
@@ -517,7 +672,7 @@ function Dashboard({ session, profile }) {
   }
   async function putOnRepeat(job) {
     const { error } = await supabase.from("jobs").update({ repeat_state: "on_repeat", repeat_since: new Date().toISOString() }).eq("id", job.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
+    if (error) { showToast("Ошибка: " + error.message); return false; }
     await logAction("Повтор", `На повтор · ${job.pest} · ${job.address}`);
     showToast("Заявка на повторе"); load();
   }
@@ -581,15 +736,15 @@ function Dashboard({ session, profile }) {
       p_fu_wanted: report.followUp.wanted, p_fu_date: report.followUp.date, p_fu_note: report.followUp.note,
       p_docs_needed: docs.needed, p_docs_avr: docs.avr, p_docs_dogovor: docs.dogovor, p_docs_note: docs.note,
     });
-    if (error) { showToast("Ошибка: " + error.message); return; }
+    if (error) { showToast("Ошибка: " + error.message); return false; }
     // перечисление + пересчёт report_paid — через защищённую функцию (RLS блокировал прямой update)
     const upd = await supabase.rpc("save_report_extras", {
       p_job: job.id, p_cash: Number(report.cash) || 0, p_qr: Number(report.qr) || 0,
       p_transfer: Number(report.transfer) || 0, p_method: report.method,
     });
-    if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); load(); return; }
+    if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); load(); return false; }
     await recordClientEvent(job, "done", "Работа выполнена", `Оплата: ${fmt((Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0))} ₸`);
-    setModal({ kind: "reportSuccess" }); load();
+    setModal({ kind: "reportSuccess" }); load(); return true;
   }
   async function markTransferPaid(job, accountId, paidDate) {
     const { error } = await supabase.from("jobs").update({ transfer_paid: true, transfer_account_id: accountId || null, transfer_paid_date: paidDate || new Date().toISOString().slice(0, 10) }).eq("id", job.id);
@@ -715,9 +870,13 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Записано"); load();
   }
   const partnerById = (id) => partners.find((p) => p.id === id);
+  function partnerNameOf(job) {
+    if (!job || (job.brand !== "partner" && !job.partner_id && !job.partner_name)) return "";
+    return job.partner_name || partnerById(job.partner_id)?.name || "Партнёр не указан";
+  }
   function brandHeaderOf(job) {
     if (job.brand === "Sanitex") return "Sanitex";
-    if (job.brand === "partner") return partnerById(job.partner_id)?.name || "KazDez";
+    if (job.brand === "partner" || job.partner_id || job.partner_name) return `Партнёр · ${partnerNameOf(job)}`;
     return "KazDez";
   }
   const partnerShareAmt = (job) => {
@@ -1584,7 +1743,12 @@ function Dashboard({ session, profile }) {
   const todayDone = todayJobs.filter((j) => j.status === "done");
   const todayActive = todayJobs.filter((j) => j.status !== "done");
   const todayRevenue = todayDone.reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
+  const todayProfit = todayDone.reduce((s, j) => s + jobEconomics(j).profit, 0);
   const todayPlan = todayJobs.reduce((s, j) => s + Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0)), 0);
+  const totalReceivables = doneJobs.filter((j) => Number(j.report_transfer) > 0 && !j.transfer_paid).reduce((s, j) => s + (Number(j.report_transfer) || 0), 0);
+  const enRouteNow = activeJobs.filter((j) => jobWorkStage(j) === "en_route").length;
+  const onSiteNow = activeJobs.filter((j) => jobWorkStage(j) === "on_site").length;
+  const proofMissingToday = todayDone.filter((j) => !proofIsComplete(j.id)).length;
   const overdueJobs = activeJobs.filter((j) => j.scheduled_date && j.scheduled_date < todayIso && visibleForToday(j));
   const unassignedSoon = isAdmin ? activeJobs.filter((j) => !j.assigned_to && !j.executor_partner_id && j.scheduled_date && j.scheduled_date <= tomorrowIso) : [];
   const overdueTaskList = visibleTasks.filter((t) => t.status !== "done" && t.due_date && t.due_date < todayIso);
@@ -1638,6 +1802,16 @@ function Dashboard({ session, profile }) {
     isAdmin && qualityProblems.length ? { id: "complaints", label: "Есть проблемы по качеству", value: qualityProblems.length, tab: "retention", tone: "danger" } : null,
     isAdmin && recentLowFeedback.length ? { id: "low-feedback", label: "Низкие оценки клиентов за 14 дней", value: recentLowFeedback.length, tab: "retention", tone: "danger" } : null,
   ].filter(Boolean);
+  const ownerSummaryText = [
+    `KazDez · ${isoToRu(todayIso)}`,
+    `Заявки: ${todayJobs.length}, выполнено ${todayDone.length}`,
+    `Выручка: ${fmt(todayRevenue)} ₸`,
+    `Прибыль: ${fmt(todayProfit)} ₸`,
+    `Ожидаем оплату: ${fmt(totalReceivables)} ₸`,
+    `В пути: ${enRouteNow}, на объектах: ${onSiteNow}`,
+    `Требуют внимания: ${dashboardAlerts.length}`,
+    proofMissingToday ? `Без полного подтверждения: ${proofMissingToday}` : "Все выполненные работы подтверждены",
+  ].join("\n");
   const globalQ = globalSearch.trim().toLowerCase();
   const globalDigits = globalQ.replace(/\D/g, "");
   const includesGlobal = (...parts) => {
@@ -1772,6 +1946,15 @@ function Dashboard({ session, profile }) {
             </div>}
           </div>
           <div className="kd-tabactions">
+            {installPrompt && <button className="kd-btn ghost kd-installbtn" onClick={installApplication}><Smartphone size={15} />Установить</button>}
+            {offlineQueued > 0 && <button className="kd-btn ghost kd-syncbtn" disabled={!online || syncingOffline} onClick={syncOfflineQueue}><CloudUpload size={15} />{syncingOffline ? "Синхронизация…" : `Офлайн · ${offlineQueued}`}</button>}
+            <div className="kd-notifications" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setNotificationOpen(false); }}>
+              <button className={`kd-iconbtn kd-bell ${unreadNotifications.length ? "has-new" : ""}`} onClick={() => setNotificationOpen((value) => !value)} title="Уведомления" aria-label="Уведомления">{unreadNotifications.length ? <BellRing size={17} /> : <Bell size={17} />}{unreadNotifications.length > 0 && <span>{unreadNotifications.length > 99 ? "99+" : unreadNotifications.length}</span>}</button>
+              {notificationOpen && <div className="kd-notification-panel">
+                <div className="kd-notification-head"><div><strong>Уведомления</strong><span>{unreadNotifications.length ? `${unreadNotifications.length} непрочитано` : "Всё прочитано"}</span></div>{unreadNotifications.length > 0 && <button onClick={markAllNotificationsRead}>Прочитать все</button>}</div>
+                <div className="kd-notification-list">{notifications.length === 0 ? <div className="kd-globalempty">Новых уведомлений нет</div> : notifications.slice(0, 30).map((item) => <button key={item.id} className={`${item.read_at ? "read" : ""} ${item.priority || "normal"}`} onClick={() => openNotification(item)}><span className="kd-notification-dot" /><span><strong>{item.title}</strong><small>{item.body}</small><time>{fmtTs(item.created_at)}</time></span><ChevronRight size={15} /></button>)}</div>
+              </div>}
+            </div>
             {(tab === "jobs" || tab === "today") && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
             {tab === "subscriptions" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "contract" })}><Plus size={15} />Абонент</button>}
             {tab === "retention" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "followup" })}><Plus size={15} />Касание</button>}
@@ -1816,6 +1999,11 @@ function Dashboard({ session, profile }) {
               <button onClick={() => dashboardAlerts[0] && setTab(dashboardAlerts[0].tab)}><span>Требуют внимания</span><strong className={dashboardAlerts.length ? "danger" : "ok"}>{dashboardAlerts.length}</strong><small>{dashboardAlerts.length ? "открой список ниже" : "всё под контролем"}</small></button>
             </section>
 
+            {isAdmin && <section className="kd-ownerpulse">
+              <div className="kd-ownerpulse-head"><div><div className="kd-eyebrow">Пульс компании</div><div className="kd-title">Сводка владельца</div><p>Деньги, поле и контроль — без переходов между разделами.</p></div><button className="kd-btn ghost sm" onClick={() => copyText(ownerSummaryText, () => showToast("Сводка скопирована"))}>Скопировать сводку</button></div>
+              <div className="kd-ownerpulse-grid"><button onClick={() => setTab("finance")}><span>Прибыль сегодня</span><strong className={todayProfit < 0 ? "danger" : ""}>{fmt(todayProfit)} ₸</strong><small>выручка {fmt(todayRevenue)} ₸</small></button><button onClick={() => setTab("done")}><span>Ожидаем оплату</span><strong>{fmt(totalReceivables)} ₸</strong><small>{overdueTransfers.length} просрочено</small></button><button onClick={() => setTab("routes")}><span>Сейчас в поле</span><strong>{enRouteNow + onSiteNow}</strong><small>{enRouteNow} в пути · {onSiteNow} на объекте</small></button><button onClick={() => setTab("done")}><span>Подтверждение работ</span><strong className={proofMissingToday ? "danger" : "ok"}>{proofMissingToday}</strong><small>{proofMissingToday ? "не заполнено сегодня" : "всё заполнено"}</small></button></div>
+            </section>}
+
             <section className="kd-todaysection">
               <div className="kd-todaysection-head"><div><div className="kd-title">{isAdmin ? "SLA и решения" : "Требуют внимания"}</div><div className="kd-muted">{isAdmin ? "Автоматически рассчитанные просрочки, риски и контрольные точки" : "Только то, что нужно решить сейчас"}</div></div></div>
               {dashboardAlerts.length === 0 ? <div className="kd-allgood"><CheckCircle2 size={20} />Критичных предупреждений нет</div> : <div className="kd-alertgrid">
@@ -1834,12 +2022,13 @@ function Dashboard({ session, profile }) {
                   return <div className={`kd-todayjob ${j.status === "done" ? "done" : ""} ${late ? "late" : ""}`} key={j.id}>
                     <div className="kd-todaytime">{j.scheduled_time || "—"}</div>
                     <div className="kd-todayjobmain">
-                      <strong>{j.pest || "Заявка"}</strong><span>{addressPlain(j.address) || "Адрес не указан"}</span><small><b style={{ color: stage.color }}>{stage.short}</b> · {techById(j.assigned_to)?.full_name || (j.executor_partner_id ? partnerById(j.executor_partner_id)?.name : "Не назначен")}</small>
+                      <strong>{j.pest || "Заявка"}</strong><span>{addressPlain(j.address) || "Адрес не указан"}</span>{partnerNameOf(j) && <span className="kd-todaypartner"><Handshake size={12} />Партнёр: <b>{partnerNameOf(j)}</b></span>}<small><b style={{ color: stage.color }}>{stage.short}</b> · {techById(j.assigned_to)?.full_name || (j.executor_partner_id ? partnerById(j.executor_partner_id)?.name : "Не назначен")}</small>
                     </div>
                     <div className="kd-todayjobactions">
                       {phone && <a href={`tel:+${phone}`} title="Позвонить"><Phone size={16} /></a>}
                       {phone && <a className="wa" href={roleWhatsappUrl(j, isAdmin)} target="_blank" rel="noreferrer" title="WhatsApp"><MessageCircle size={16} /></a>}
                       {j.address && <a href={directMap} target="_blank" rel="noreferrer" title="Открыть в Яндекс Картах"><MapPin size={16} /></a>}
+                      <button onClick={() => openJobProof(j)} title="Фото, геолокация и подпись"><Camera size={16} />{proofIsComplete(j.id) ? "✓" : ""}</button>
                       {!isAdmin && j.status !== "done" && j.status !== "canceled" && ["new", "confirmed", "assigned"].includes(stageKey) && <button className="primary" onClick={() => setJobWorkStage(j, "en_route")}>В путь</button>}
                       {!isAdmin && stageKey === "en_route" && <button className="primary" onClick={() => setJobWorkStage(j, "on_site")}>На объекте</button>}
                       {!isAdmin && stageKey === "on_site" && <button className="primary" onClick={() => setModal({ kind: "report", job: j })}>Отчёт</button>}
@@ -1891,8 +2080,9 @@ function Dashboard({ session, profile }) {
                   <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                         onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
+                        onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                         onCopyPublicLink={() => copyPublicJobLink(j)}
                         onStageChange={(stage) => setJobWorkStage(j, stage)}
                         onReport={() => setModal({ kind: "report", job: j })}
@@ -2011,8 +2201,9 @@ function Dashboard({ session, profile }) {
                   <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
+                      onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                       onCopyPublicLink={() => copyPublicJobLink(j)}
                       onStageChange={(stage) => setJobWorkStage(j, stage)}
                       onReport={() => setModal({ kind: "report", job: j })}
@@ -2406,8 +2597,9 @@ function Dashboard({ session, profile }) {
             {canceledJobs.length === 0 ? <div className="kd-empty">Отменённых заявок нет.</div> :
               canceledFiltered.length === 0 ? <div className="kd-empty">По этому фильтру ничего не найдено.</div> :
               [...canceledFiltered].sort((a, b) => new Date(b.canceled_at || 0) - new Date(a.canceled_at || 0)).map((j) => (
-                <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerById(j.partner_id)?.name} partnerRepeat="" share={partnerShareAmt(j)}
+                <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat="" share={partnerShareAmt(j)}
                   onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
+                  onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                   onCopyPublicLink={() => copyPublicJobLink(j)}
                   onStageChange={(stage) => setJobWorkStage(j, stage)}
                   onReport={() => setModal({ kind: "report", job: j })}
@@ -3174,7 +3366,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} assignInfo={(techId) => {
         const d = modal.job.scheduled_date;
-        if (!d) return { off: false, night: false, count: 0 };
+        if (!d) return { off: false, night: false, count: 0, score: 50, reasons: ["дата ещё не задана"] };
         const off = daysOff.some((x) => x.tech_id === techId && x.off_date === d);
         const prev = parseIso(d); prev.setDate(prev.getDate() - 1); const prevIso = isoOf(prev);
         // ночной выезд: заявка накануне с началом >= 22:00 ИЛИ в этот же день 00:00–05:59
@@ -3187,9 +3379,17 @@ function Dashboard({ session, profile }) {
           return false;
         });
         const count = jobs.filter((j) => j.assigned_to === techId && j.scheduled_date === d && j.status !== "canceled").length;
-        return { off, night, count };
+        const addressWords = (text) => norm(addressPlain(text)).split(/[^a-zа-яё0-9]+/i).filter((word) => word.length >= 5 && !["улица", "квартира", "микрорайон", "алматы"].includes(word));
+        const targetWords = new Set(addressWords(modal.job.address));
+        const sameArea = jobs.some((j) => j.assigned_to === techId && j.scheduled_date === d && j.status !== "canceled" && addressWords(j.address).some((word) => targetWords.has(word)));
+        const techJobIds = new Set(jobs.filter((j) => j.assigned_to === techId).map((j) => String(j.id)));
+        const ratings = qualityChecks.filter((q) => techJobIds.has(String(q.job_id)) && Number(q.rating) > 0).slice(0, 20).map((q) => Number(q.rating));
+        const avgRating = ratings.length ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length : 0;
+        const score = Math.max(0, Math.round(100 - count * 18 - (off ? 100 : 0) - (night ? 35 : 0) + (sameArea ? 18 : 0) + (avgRating ? (avgRating - 4) * 8 : 0)));
+        const reasons = [count === 0 ? "свободен в этот день" : `${count} заяв. в этот день`, sameArea ? "есть выезд рядом" : "", avgRating ? `качество ${avgRating.toFixed(1)}/5` : ""].filter(Boolean);
+        return { off, night, count, score, reasons };
       }} />}
-      {modal?.kind === "report" && <ReportModal job={modal.job} chemicals={chemicals} primaryReport={(() => {
+      {modal?.kind === "report" && <ReportModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} primaryReport={(() => {
         if (!modal.job.repeat_of) return null;
         const p = jobs.find((x) => x.id === modal.job.repeat_of);
         if (!p) return null;
@@ -3201,11 +3401,12 @@ function Dashboard({ session, profile }) {
         };
       })()} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "reportSuccess" && <ReportSuccessModal onClose={() => setModal(null)} />}
-      {modal?.kind === "view" && <ViewModal job={modal.job} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} />}
-      {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} onReport={() => setModal({ kind: "report", job: modal.job })} onClose={() => setModal(null)} />}
+      {modal?.kind === "view" && <ViewModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} />}
+      {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} partnerName={partnerNameOf(modal.job)} onReport={() => setModal({ kind: "report", job: modal.job })} onClose={() => setModal(null)} />}
+      {modal?.kind === "proof" && <ProofModal job={modal.job} proof={proofByJob(modal.job.id)} media={proofMedia} onClose={() => setModal(null)} onSave={saveJobProof} />}
       {modal?.kind === "history" && <HistoryModal
         job={modal.job} jobs={jobs} followups={followups} qualityChecks={qualityChecks} contracts={contracts}
-        events={clientEvents} feedback={publicFeedback} profiles={allProfiles} canPlanFollowup={isAdmin || isManager}
+        events={clientEvents} feedback={publicFeedback} profiles={allProfiles} canPlanFollowup={isAdmin || isManager} partnerNameOf={partnerNameOf}
         onAddNote={addClientNote} onCopyPublicLink={copyPublicJobLink}
         onPlanFollowup={(j) => setModal({ kind: "followup", job: j, defaultKind: "lost" })}
         onClose={() => setModal(null)}
