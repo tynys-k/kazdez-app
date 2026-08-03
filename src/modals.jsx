@@ -1050,6 +1050,71 @@ function HandoutModal({ tech, chemicals, onClose, onSave }) {
   );
 }
 
+const INVENTORY_MOVE_LABELS = {
+  revision: "Ревизия (указать фактический остаток)",
+  office_return: "Забрали в офис / на склад",
+  writeoff: "Списание",
+  correction_in: "Корректировка в плюс",
+  transfer: "Передача другому дезинфектору",
+};
+
+function InventoryMovementModal({ tech, techs, chemicals, ledger, onClose, onSave }) {
+  const [kind, setKind] = useState("revision");
+  const [chemId, setChemId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [unit, setUnit] = useState("big");
+  const [toTechId, setToTechId] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const chem = chemicals.find((item) => String(item.id) === String(chemId));
+  const current = ledger.find((item) => String(item.chem.id) === String(chemId))?.balance || 0;
+  const units = chemUnit(chem?.unit_kind);
+  const baseAmount = (Number(amount) || 0) * (unit === "big" ? (units.factor || 1000) : 1);
+  const ok = chemId && Number(amount) >= 0 && reason.trim() && date && (kind !== "transfer" || toTechId) && (kind === "revision" || baseAmount > 0);
+  async function save() {
+    setSaving(true);
+    await onSave({ kind, chemical_id: chemId, amount: baseAmount, current_balance: current, to_tech_id: toTechId || null, event_date: date, reason: reason.trim(), note: note.trim() || null });
+    setSaving(false);
+  }
+  return <ModalShell title={`Остатки и движения — ${tech.full_name || "сотрудник"}`} onClose={onClose} footer={<>
+    <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+    <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Зафиксировать"}</button>
+  </>}>
+    <div className="kd-hint">Запись не заменяет старые данные: система сохранит изменение, остаток до/после, дату, причину и администратора.</div>
+    <Field label="Операция"><select value={kind} onChange={(e) => setKind(e.target.value)}>{Object.entries(INVENTORY_MOVE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+    <Field label="Препарат"><select value={chemId} onChange={(e) => { setChemId(e.target.value); setAmount(""); }}><option value="">— выбери —</option>{chemicals.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+    {chem && <div className="kd-revision-current"><span>Сейчас по программе</span><strong>{fmtAmount(current, chem.unit_kind)}</strong></div>}
+    <div className="kd-grid2">
+      <Field label={kind === "revision" ? "Фактически насчитали" : "Количество"}><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder={kind === "revision" ? "4" : "1"} /></Field>
+      <Field label="Единица"><select value={unit} onChange={(e) => setUnit(e.target.value)} disabled={!chem || units.factor === 1}><option value="small">{units.small}</option>{units.factor !== 1 && <option value="big">{units.big}</option>}</select></Field>
+    </div>
+    {kind === "transfer" && <Field label="Кому передали"><select value={toTechId} onChange={(e) => setToTechId(e.target.value)}><option value="">— выбери —</option>{techs.filter((item) => item.id !== tech.id).map((item) => <option key={item.id} value={item.id}>{item.full_name || item.id.slice(0, 6)}</option>)}</select></Field>}
+    <div className="kd-grid2"><Field label="Дата"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field><Field label="Причина (обязательно)"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="еженедельная ревизия" /></Field></div>
+    <Field label="Комментарий / документ"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Кто пересчитал, акт, пояснение расхождения…" /></Field>
+  </ModalShell>;
+}
+
+function CashRevisionModal({ tech, currentBalance, onClose, onSave }) {
+  const [actual, setActual] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = actual !== "" && Number(actual) >= 0 && date && reason.trim();
+  async function save() { setSaving(true); await onSave({ actual_balance: Number(actual) || 0, current_balance: Number(currentBalance) || 0, event_date: date, reason: reason.trim(), note: note.trim() || null }); setSaving(false); }
+  return <ModalShell title={`Ревизия наличных — ${tech.full_name || "сотрудник"}`} onClose={onClose} footer={<>
+    <button className="kd-btn ghost" onClick={onClose}>Отмена</button><button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Зафиксировать"}</button>
+  </>}>
+    <div className="kd-revision-current"><span>По программе сейчас</span><strong>{fmt(currentBalance)} ₸</strong></div>
+    <div className="kd-hint">Введи сумму, которая реально находится у дезинфектора. Разница сохранится отдельной корректировкой и останется в истории. Лучше проводить сверку после завершения операций за выбранный день.</div>
+    <div className="kd-grid2"><Field label="Фактически на руках (₸)"><input value={actual} onChange={(e) => setActual(e.target.value)} inputMode="numeric" placeholder="0" /></Field><Field label="Дата ревизии"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field></div>
+    <Field label="Причина (обязательно)"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="ревизия на 03.08.2026 / старые отчёты" /></Field>
+    <Field label="Комментарий"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Деньги ранее сданы / забраны директором…" /></Field>
+  </ModalShell>;
+}
+
 function ExpenseModal({ tech, onClose, onSave }) {
   const [type, setType] = useState("salary");
   const [amount, setAmount] = useState("");
@@ -2287,4 +2352,4 @@ function ContractModal({ contract, people = [], onClose, onSave }) {
   </ModalShell>;
 }
 
-export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm };
+export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm };
