@@ -11,7 +11,7 @@ import {
 
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
+import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -216,6 +216,8 @@ function Dashboard({ session, profile }) {
   const [techs, setTechs] = useState([]);
   const [allProfiles, setAllProfiles] = useState([]);
   const [handouts, setHandouts] = useState([]);
+  const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
+  const [cashAdjustments, setCashAdjustments] = useState([]);
   const [partners, setPartners] = useState([]);
   const [docs, setDocs] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -314,7 +316,7 @@ function Dashboard({ session, profile }) {
       supabase.from("chemicals").select("*"),
       supabase.from("audit_log").select("*").order("ts", { ascending: false }),
       supabase.from("trash").select("*").order("deleted_at", { ascending: false }),
-      supabase.from("profiles").select("id, full_name, phone, role"),
+      supabase.from("profiles").select("id, full_name, phone, role, cash_opening_balance, cash_opening_date"),
       supabase.from("handouts").select("*"),
       supabase.from("partners").select("*"),
       supabase.from("doc_services").select("*").order("created_at", { ascending: false }),
@@ -346,9 +348,11 @@ function Dashboard({ session, profile }) {
       supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }),
       supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(80),
       supabase.from("job_proofs").select("*").order("updated_at", { ascending: false }),
+      supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
+      supabase.from("cash_adjustments").select("*").order("created_at", { ascending: false }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr, iar, car] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ", "Корректировки препаратов", "Корректировки наличных"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
     const useOfflineSnapshot = !navigator.onLine && !!jr.error && !!offlineSnapshot?.jobs;
@@ -364,6 +368,8 @@ function Dashboard({ session, profile }) {
     setTechs(currentProfiles.filter((p) => p.role === "tech"));
     setAllProfiles(currentProfiles);
     setHandouts(hr.data || []);
+    setInventoryAdjustments(iar.data || []);
+    setCashAdjustments(car.data || []);
     setPartners(ptr.data || []);
     setDocs(dsr.data || []);
     setExpenses(exr.data || []);
@@ -570,17 +576,28 @@ function Dashboard({ session, profile }) {
     await recordClientEvent(job, "stage", WORK_STAGE[stageKey].label, actorName);
     showToast(`Статус: ${WORK_STAGE[stageKey].short}`); load();
   }
-  const chemById = (id) => chemicals.find((x) => x.id === id);
+  const chemById = (id) => chemicals.find((x) => String(x.id) === String(id));
   const lineChem = (l) => (l.chemical_id ? chemById(l.chemical_id) : chemicals.find((x) => norm(x.name) === norm(l.name)));
   const jobChemCost = (job) => (job.chemicals || []).reduce((s, l) => { const c = lineChem(l); return s + lineAmount(l) * pricePerBase(c); }, 0);
   const qrFeeRate = (Number(settings.qr_fee_rate) || 0.95) / 100;
   const defaultGuarantee = Number(settings.default_guarantee_months) || 6;
   function techLedger(techId) {
     const m = {};
-    const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0 });
+    const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0, adjusted: 0 });
     handouts.filter((h) => h.tech_id === techId).forEach((h) => { const g = get(h.chemical_id); if (h.kind === "opening") g.opening += Number(h.amount) || 0; else g.issued += Number(h.amount) || 0; });
     jobs.filter((j) => j.assigned_to === techId).forEach((j) => (j.chemicals || []).forEach((l) => { if (l.chemical_id) get(l.chemical_id).consumed += lineAmount(l); }));
-    return Object.entries(m).map(([cid, v]) => { const c = chemById(cid); const received = v.issued + v.opening; return c ? { chem: c, ...v, received, balance: received - v.consumed } : null; }).filter(Boolean);
+    inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId)).forEach((a) => { get(a.chemical_id).adjusted += Number(a.amount_delta) || 0; });
+    return Object.entries(m).map(([cid, v]) => {
+      const c = chemById(cid); if (!c) return null;
+      const received = v.issued + v.opening;
+      const revisions = inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.chemical_id) === String(cid) && a.kind === "revision").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      if (!revisions.length) return { chem: c, ...v, received, balance: received - v.consumed + v.adjusted };
+      const checkpoint = revisions[0];
+      const issuedAfter = handouts.filter((h) => String(h.tech_id) === String(techId) && String(h.chemical_id) === String(cid) && (h.created_at || "").slice(0, 10) > checkpoint.event_date).reduce((s, h) => s + (Number(h.amount) || 0), 0);
+      const consumedAfter = jobs.filter((j) => String(j.assigned_to) === String(techId) && j.scheduled_date > checkpoint.event_date).reduce((sum, j) => sum + (j.chemicals || []).filter((l) => String(l.chemical_id) === String(cid)).reduce((s, l) => s + lineAmount(l), 0), 0);
+      const adjustedAfter = inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.chemical_id) === String(cid) && String(a.created_at) > String(checkpoint.created_at)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
+      return { chem: c, ...v, received, balance: Number(checkpoint.balance_after) + issuedAfter - consumedAfter + adjustedAfter, revision: checkpoint };
+    }).filter(Boolean);
   }
 
   const techById = (id) => techs.find((t) => t.id === id);
@@ -642,7 +659,16 @@ function Dashboard({ session, profile }) {
   // Сумма ожидающих подтверждения внесений (деньги «в пути», ещё не подтверждены)
   const techDepositedPending = (techId) => { const op = techOpening(techId); return deposits.filter((d) => d.tech_id === techId && d.status === "pending" && (!op.date || (d.requested_at || "").slice(0, 10) >= op.date)).reduce((s, d) => s + (Number(d.amount) || 0), 0); };
   // Наличные, реально лежащие на руках прямо сейчас = собрано − подтверждено − в ожидании
-  const techCashOnHand = (techId) => techOpening(techId).bal + techCashCollected(techId) - techDepositedConfirmed(techId) - techDepositedPending(techId);
+  const techCashRevisions = (techId) => cashAdjustments.filter((a) => String(a.tech_id) === String(techId) && a.kind === "revision").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const techCashAdjusted = (techId) => cashAdjustments.filter((a) => String(a.tech_id) === String(techId)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
+  const techCashOnHand = (techId) => {
+    const latest = techCashRevisions(techId)[0];
+    if (!latest) return techOpening(techId).bal + techCashCollected(techId) - techDepositedConfirmed(techId) - techDepositedPending(techId);
+    const collectedAfter = jobs.filter((j) => String(j.assigned_to) === String(techId) && j.status === "done" && j.scheduled_date > latest.event_date).reduce((s, j) => s + (Number(j.report_cash) || 0), 0);
+    const depositedAfter = deposits.filter((d) => String(d.tech_id) === String(techId) && ["confirmed", "pending"].includes(d.status) && (d.requested_at || "").slice(0, 10) > latest.event_date).reduce((s, d) => s + (Number(d.amount) || 0), 0);
+    const laterAdjustments = cashAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.created_at) > String(latest.created_at)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
+    return Number(latest.balance_after) + collectedAfter - depositedAfter + laterAdjustments;
+  };
 
   async function ensureCatalog(table, list, value) {
     const v = (value || "").trim();
@@ -868,6 +894,44 @@ function Dashboard({ session, profile }) {
     const kindLabel = payload.kind === "opening" ? "стартовый остаток" : "выдача";
     await logAction("Выдача", `${t?.full_name || "?"} · ${c?.name || "?"} +${fmtAmount(payload.amount, c?.unit_kind)} (${kindLabel})`);
     setModal(null); showToast("Записано"); load();
+  }
+  async function saveInventoryMovement(tech, payload) {
+    const current = Number(payload.current_balance) || 0;
+    const quantity = Number(payload.amount) || 0;
+    const common = {
+      chemical_id: String(payload.chemical_id), event_date: payload.event_date,
+      reason: payload.reason, note: payload.note || null, created_by: session.user.id,
+    };
+    let rows;
+    if (payload.kind === "transfer") {
+      const targetBefore = techLedger(payload.to_tech_id).find((r) => String(r.chem.id) === String(payload.chemical_id))?.balance || 0;
+      const transferGroup = crypto.randomUUID();
+      rows = [
+        { ...common, tech_id: String(tech.id), kind: "transfer_out", amount_delta: -quantity, balance_before: current, balance_after: current - quantity, counterparty_tech_id: String(payload.to_tech_id), transfer_group: transferGroup },
+        { ...common, tech_id: String(payload.to_tech_id), kind: "transfer_in", amount_delta: quantity, balance_before: targetBefore, balance_after: targetBefore + quantity, counterparty_tech_id: String(tech.id), transfer_group: transferGroup },
+      ];
+    } else {
+      const delta = payload.kind === "revision" ? quantity - current : payload.kind === "correction_in" ? quantity : -quantity;
+      rows = [{ ...common, tech_id: String(tech.id), kind: payload.kind, amount_delta: delta, balance_before: current, balance_after: current + delta }];
+    }
+    const { error } = await supabase.from("inventory_adjustments").insert(rows);
+    if (error) { showToast("Ошибка: " + error.message); return false; }
+    const chem = chemById(payload.chemical_id);
+    const after = rows[0].balance_after;
+    await logAction("Остатки препаратов", `${tech.full_name || "?"} · ${chem?.name || "?"}: ${fmtAmount(current, chem?.unit_kind)} → ${fmtAmount(after, chem?.unit_kind)} · ${payload.reason}`);
+    setModal(null); showToast("Движение сохранено"); load(); return true;
+  }
+  async function saveCashRevision(tech, payload) {
+    const before = Number(payload.current_balance) || 0;
+    const after = Number(payload.actual_balance) || 0;
+    const { error } = await supabase.from("cash_adjustments").insert({
+      tech_id: String(tech.id), kind: "revision", amount_delta: after - before,
+      balance_before: before, balance_after: after, event_date: payload.event_date,
+      reason: payload.reason, note: payload.note || null, created_by: session.user.id,
+    });
+    if (error) { showToast("Ошибка: " + error.message); return false; }
+    await logAction("Ревизия наличных", `${tech.full_name || "?"}: ${fmt(before)} ₸ → ${fmt(after)} ₸ · ${payload.reason}`);
+    setModal(null); showToast("Фактическая касса сохранена"); load(); return true;
   }
   const partnerById = (id) => partners.find((p) => p.id === id);
   function partnerNameOf(job) {
@@ -2306,11 +2370,16 @@ function Dashboard({ session, profile }) {
                   <div className="kd-meta">
                     <span>Собрано: {fmt(techCashCollected(t.id))} ₸</span><span>·</span>
                     <span>Внесено: {fmt(techDepositedConfirmed(t.id))} ₸</span>
+                    {techCashRevisions(t.id)[0] && <><span>·</span><span style={{ color: "#0E7C66" }}>сверено: {isoToRu(techCashRevisions(t.id)[0].event_date)}</span></>}
                     {pending > 0 && <><span>·</span><span style={{ color: "#B4650B" }}>в ожидании: {fmt(pending)} ₸</span></>}
                   </div>
+                  <div className="kd-actions"><button className="kd-btn primary sm" onClick={() => setModal({ kind: "cashRevision", tech: t })}><ClipboardCheck size={13} />Ревизия кассы</button></div>
                 </div>
               );
             })}
+            <div className="kd-section" style={{ marginTop: 8 }}>История корректировок кассы</div>
+            {cashAdjustments.length === 0 && <div className="kd-muted">Корректировок пока нет.</div>}
+            {cashAdjustments.map((a) => <div className="kd-histrow" key={a.id} style={{ cursor: "default" }}><div><div className="kd-histmain">{techById(a.tech_id)?.full_name || "?"} · {fmt(a.balance_before)} → {fmt(a.balance_after)} ₸</div><div className="kd-muted">{isoToRu(a.event_date)} · {a.reason}{a.note ? " · " + a.note : ""}</div></div><strong style={{ color: Number(a.amount_delta) < 0 ? "#B42318" : "#0E7C66" }}>{Number(a.amount_delta) > 0 ? "+" : ""}{fmt(a.amount_delta)} ₸</strong></div>)}
             <div className="kd-section" style={{ marginTop: 8 }}>История внесений</div>
             {deposits.filter((d) => d.status !== "pending").length === 0 && <div className="kd-muted">Подтверждённых или отклонённых внесений пока нет.</div>}
             {deposits.filter((d) => d.status !== "pending").map((d) => {
@@ -3152,6 +3221,7 @@ function Dashboard({ session, profile }) {
                     <div className="kd-actions" style={{ marginBottom: 0 }}>
                       <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "techedit", tech: t })}><Pencil size={13} />Имя</button>
                       <button className="kd-btn primary sm" onClick={() => setModal({ kind: "handout", tech: t })}>Выдать / остаток</button>
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "inventoryMovement", tech: t })}><ClipboardCheck size={13} />Ревизия / движение</button>
                       <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "expense", tech: t })}><Plus size={13} />Выплата</button>
                     </div>
                   </div>
@@ -3170,6 +3240,13 @@ function Dashboard({ session, profile }) {
                         ))}
                       </div>
                     )}
+                  {inventoryAdjustments.filter((a) => String(a.tech_id) === String(t.id)).length > 0 && <div className="kd-change-list">
+                    <div className="kd-section" style={{ margin: 0 }}>Последние изменения остатков</div>
+                    {inventoryAdjustments.filter((a) => String(a.tech_id) === String(t.id)).slice(0, 5).map((a) => {
+                      const chem = chemById(a.chemical_id); const other = a.counterparty_tech_id ? techById(a.counterparty_tech_id)?.full_name : "";
+                      return <div className="kd-change-row" key={a.id}><span>{isoToRu(a.event_date)}</span><span>{chem?.name || "Препарат"} · {a.reason}{other ? ` · ${a.kind === "transfer_in" ? "от" : "кому"}: ${other}` : ""}{a.note ? ` · ${a.note}` : ""}</span><strong>{fmtAmount(a.balance_before, chem?.unit_kind)} → {fmtAmount(a.balance_after, chem?.unit_kind)}</strong></div>;
+                    })}
+                  </div>}
                   {(() => {
                     const techExp = expenses.filter((e) => e.tech_id === t.id);
                     if (techExp.length === 0) return null;
@@ -3441,6 +3518,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "account" && <AccountModal item={modal.item} onClose={() => setModal(null)} onSave={saveAccount} onRemove={removeAccount} />}
       {modal?.kind === "confirmDeposit" && <ConfirmDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} accounts={accounts} defaultAccountId={cashDepositAccountId} onClose={() => setModal(null)} onConfirm={(accId) => { decideDeposit(modal.dep, "confirmed", null, accId); setModal(null); }} />}
       {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}
+      {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
+      {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
