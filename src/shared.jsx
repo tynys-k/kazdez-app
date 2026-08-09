@@ -47,8 +47,9 @@ const DRIVE_LINKS = [
 const TAB_LABELS = { today: "Командный центр", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", growth: "Прибыль и KPI", retention: "Касания", subscriptions: "Абоненты", routes: "Маршруты", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
 const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "done", "canceled", "tasks", "repeats", "leads", "retention", "subscriptions", "routes", "growth", "finance", "opex", "cash", "stock", "team", "partners", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
 
-// Стандартные права ролей. Серверная проверка в Supabase использует тот же
-// список; здесь он нужен для меню и кнопок интерфейса.
+// Единый справочник ролей для экрана «Команда и доступы».
+// Поля permissions и defaultPermissions намеренно содержат один набор:
+// это сохраняет совместимость с обеими версиями интерфейса ролей.
 const ROLE_DEFAULT_PERMISSIONS = {
   tech: ["tab.today", "tab.jobs", "tab.done", "tab.tasks", "tab.cash", "tab.materials", "tab.knowledge", "tab.myequip", "data.stock_self", "data.equipment"],
   manager: ["tab.today", "tab.jobs", "tab.schedule", "tab.done", "tab.canceled", "tab.routes", "tab.tasks", "action.tasks_manage", "action.jobs_edit", "tab.leads", "action.leads_edit", "tab.repeats", "tab.retention", "tab.subscriptions", "tab.partners", "action.partners_edit", "tab.materials", "tab.knowledge"],
@@ -58,9 +59,24 @@ const ROLE_DEFAULT_PERMISSIONS = {
   curator: ["tab.today", "tab.jobs", "tab.schedule", "tab.done", "tab.canceled", "tab.routes", "tab.tasks", "action.tasks_manage", "action.jobs_edit", "tab.retention", "action.leads_edit", "tab.team", "tab.stock", "data.stock_self", "data.equipment", "tab.materials", "tab.knowledge"],
 };
 
-// Принимает либо профиль целиком, либо (role, access_overrides).
-// Возвращает Set, поэтому потребители могут использовать .has(), .includes()
-// или перебор. Для admin .has() всегда возвращает true.
+const makeRole = (label, description, permissions = []) => ({
+  label,
+  name: label,
+  description,
+  permissions,
+  defaultPermissions: permissions,
+});
+
+const ROLE_DEFINITIONS = {
+  admin: makeRole("Администратор", "Полный доступ и управление сотрудниками", ["*"]),
+  tech: makeRole("Дезинфектор", "Свои заявки, касса, препараты и оборудование", ROLE_DEFAULT_PERMISSIONS.tech),
+  manager: makeRole("Менеджер", "Клиенты, заявки, маршруты и повторные обращения", ROLE_DEFAULT_PERMISSIONS.manager),
+  marketer: makeRole("Маркетолог", "Лиды, касания, показатели роста и материалы", ROLE_DEFAULT_PERMISSIONS.marketer),
+  accountant: makeRole("Бухгалтер", "Финансы, касса и документы", ROLE_DEFAULT_PERMISSIONS.accountant),
+  tender: makeRole("Тендерщик", "Тендеры, задачи и документы", ROLE_DEFAULT_PERMISSIONS.tender),
+  curator: makeRole("Куратор", "Контроль заявок, команды, склада и задач", ROLE_DEFAULT_PERMISSIONS.curator),
+};
+
 function effectivePermissions(profileOrRole, overridesArg = {}) {
   const profile = typeof profileOrRole === "object" && profileOrRole !== null ? profileOrRole : null;
   const role = profile ? profile.role : profileOrRole;
@@ -303,4 +319,4 @@ function copyText(text, onDone) {
 
 // ----------------------------- root -----------------------------
 
-export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
