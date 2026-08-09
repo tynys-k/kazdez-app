@@ -10,8 +10,8 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm } from "./modals";
+import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -86,11 +86,12 @@ function AppContent() {
   }, []);
   useEffect(() => {
     if (!session) { setProfile(null); return; }
-    supabase.from("profiles").select("role, full_name").eq("id", session.user.id).single().then(({ data }) => setProfile(data));
+    supabase.from("profiles").select("id, role, full_name, phone, is_active, access_overrides").eq("id", session.user.id).single().then(({ data }) => setProfile(data));
   }, [session]);
   if (publicToken) return <PublicJobPage token={publicToken} />;
   if (booting) return <div className="kd-center">Загрузка…</div>;
   if (!session) return <Login />;
+  if (profile?.is_active === false) return <div className="kd-center"><div className="kd-card" style={{ maxWidth: 460 }}><h2>Доступ отключён</h2><p className="kd-muted">Администратор временно отключил эту учётную запись.</p><button className="kd-btn ghost" onClick={() => supabase.auth.signOut()}>Выйти</button></div></div>;
   return <Dashboard session={session} profile={profile} />;
 }
 
@@ -215,9 +216,8 @@ function Dashboard({ session, profile }) {
   const [chemicals, setChemicals] = useState([]);
   const [techs, setTechs] = useState([]);
   const [allProfiles, setAllProfiles] = useState([]);
+  const [authUsers, setAuthUsers] = useState([]);
   const [handouts, setHandouts] = useState([]);
-  const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
-  const [cashAdjustments, setCashAdjustments] = useState([]);
   const [partners, setPartners] = useState([]);
   const [docs, setDocs] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -288,8 +288,15 @@ function Dashboard({ session, profile }) {
   const [offlineQueued, setOfflineQueued] = useState(() => { try { return JSON.parse(localStorage.getItem("kd-offline-actions-v4") || "[]").length; } catch { return 0; } });
   const [syncingOffline, setSyncingOffline] = useState(false);
   const isAdmin = profile?.role === "admin";
-  const isManager = profile?.role === "manager";
-  const canManageTasks = isAdmin || isManager;
+  const permissions = effectivePermissions(profile);
+  const canAccess = (key) => isAdmin || permissions.has(key);
+  const canManageTasks = canAccess("action.tasks_manage");
+  const canEditJobs = canAccess("action.jobs_edit");
+  const isFieldTech = profile?.role === "tech";
+  const canManageCash = canAccess("action.finance_edit");
+  const canEditPartners = canAccess("action.partners_edit");
+  const canEditDocs = canAccess("action.docs_edit");
+  const canEditTenders = canAccess("action.tenders_edit");
   const actorName = profile?.full_name || (isAdmin ? "Админ" : session.user.email);
 
   useEffect(() => {
@@ -304,7 +311,31 @@ function Dashboard({ session, profile }) {
     return () => window.removeEventListener("beforeinstallprompt", capture);
   }, []);
 
+  useEffect(() => { if (isAdmin) refreshAuthUsers(); }, [isAdmin]);
+
   function showToast(t) { setToast(t); setTimeout(() => setToast(""), 2200); }
+
+  async function refreshAuthUsers() {
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action: "list" } });
+    if (error) { setDataWarnings((items) => [...items.filter((x) => !x.startsWith("Пользователи:")), `Пользователи: ${error.message}`]); return; }
+    setAuthUsers(data?.users || []);
+  }
+
+  async function saveAdminUser(payload) {
+    const action = payload.id ? "update" : "create";
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action, user: payload } });
+    if (error || data?.error) { showToast("Ошибка: " + (data?.error || error?.message || "не удалось сохранить")); return; }
+    await logAction("Доступы", `${action === "create" ? "Создан" : "Изменён"} сотрудник: ${payload.full_name} · ${ROLE_DEFINITIONS[payload.role]?.label || payload.role}`);
+    setModal(null); showToast(action === "create" ? "Сотрудник добавлен" : "Права сохранены"); await load(); await refreshAuthUsers();
+  }
+
+  async function deleteAdminUser(user) {
+    if (!user?.id || user.id === session.user.id) { showToast("Нельзя удалить свою учётную запись"); return; }
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action: "delete", user: { id: user.id } } });
+    if (error || data?.error) { showToast("Ошибка: " + (data?.error || error?.message || "не удалось удалить")); return; }
+    await logAction("Доступы", `Удалён пользователь: ${user.full_name || user.email || user.id}`);
+    showToast("Учётная запись удалена"); await load(); await refreshAuthUsers();
+  }
 
   async function load() {
     setLoading(true);
@@ -316,7 +347,7 @@ function Dashboard({ session, profile }) {
       supabase.from("chemicals").select("*"),
       supabase.from("audit_log").select("*").order("ts", { ascending: false }),
       supabase.from("trash").select("*").order("deleted_at", { ascending: false }),
-      supabase.from("profiles").select("id, full_name, phone, role, cash_opening_balance, cash_opening_date"),
+      supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at"),
       supabase.from("handouts").select("*"),
       supabase.from("partners").select("*"),
       supabase.from("doc_services").select("*").order("created_at", { ascending: false }),
@@ -348,11 +379,9 @@ function Dashboard({ session, profile }) {
       supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }),
       supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(80),
       supabase.from("job_proofs").select("*").order("updated_at", { ascending: false }),
-      supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
-      supabase.from("cash_adjustments").select("*").order("created_at", { ascending: false }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr, iar, car] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ", "Корректировки препаратов", "Корректировки наличных"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
     const useOfflineSnapshot = !navigator.onLine && !!jr.error && !!offlineSnapshot?.jobs;
@@ -368,8 +397,6 @@ function Dashboard({ session, profile }) {
     setTechs(currentProfiles.filter((p) => p.role === "tech"));
     setAllProfiles(currentProfiles);
     setHandouts(hr.data || []);
-    setInventoryAdjustments(iar.data || []);
-    setCashAdjustments(car.data || []);
     setPartners(ptr.data || []);
     setDocs(dsr.data || []);
     setExpenses(exr.data || []);
@@ -476,7 +503,7 @@ function Dashboard({ session, profile }) {
     const job = item.job_id ? jobs.find((row) => String(row.id) === String(item.job_id)) : null;
     if (item.kind === "client_reminder" && job) { window.open(clientReminderWhatsappUrl(job), "_blank", "noopener,noreferrer"); return; }
     if (item.link_tab) setTab(item.link_tab);
-    if (job && ["assignment", "visit_reminder"].includes(item.kind)) setModal(job.status === "done" ? { kind: "view", job } : isAdmin || isManager ? { kind: "edit", job } : { kind: "details", job });
+    if (job && ["assignment", "visit_reminder"].includes(item.kind)) setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job });
     if (job && item.kind === "unassigned") setModal({ kind: "assign", job });
   }
   const proofByJob = (jobId) => jobProofs.find((proof) => String(proof.job_id) === String(jobId));
@@ -576,28 +603,17 @@ function Dashboard({ session, profile }) {
     await recordClientEvent(job, "stage", WORK_STAGE[stageKey].label, actorName);
     showToast(`Статус: ${WORK_STAGE[stageKey].short}`); load();
   }
-  const chemById = (id) => chemicals.find((x) => String(x.id) === String(id));
+  const chemById = (id) => chemicals.find((x) => x.id === id);
   const lineChem = (l) => (l.chemical_id ? chemById(l.chemical_id) : chemicals.find((x) => norm(x.name) === norm(l.name)));
   const jobChemCost = (job) => (job.chemicals || []).reduce((s, l) => { const c = lineChem(l); return s + lineAmount(l) * pricePerBase(c); }, 0);
   const qrFeeRate = (Number(settings.qr_fee_rate) || 0.95) / 100;
   const defaultGuarantee = Number(settings.default_guarantee_months) || 6;
   function techLedger(techId) {
     const m = {};
-    const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0, adjusted: 0 });
+    const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0 });
     handouts.filter((h) => h.tech_id === techId).forEach((h) => { const g = get(h.chemical_id); if (h.kind === "opening") g.opening += Number(h.amount) || 0; else g.issued += Number(h.amount) || 0; });
     jobs.filter((j) => j.assigned_to === techId).forEach((j) => (j.chemicals || []).forEach((l) => { if (l.chemical_id) get(l.chemical_id).consumed += lineAmount(l); }));
-    inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId)).forEach((a) => { get(a.chemical_id).adjusted += Number(a.amount_delta) || 0; });
-    return Object.entries(m).map(([cid, v]) => {
-      const c = chemById(cid); if (!c) return null;
-      const received = v.issued + v.opening;
-      const revisions = inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.chemical_id) === String(cid) && a.kind === "revision").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-      if (!revisions.length) return { chem: c, ...v, received, balance: received - v.consumed + v.adjusted };
-      const checkpoint = revisions[0];
-      const issuedAfter = handouts.filter((h) => String(h.tech_id) === String(techId) && String(h.chemical_id) === String(cid) && (h.created_at || "").slice(0, 10) > checkpoint.event_date).reduce((s, h) => s + (Number(h.amount) || 0), 0);
-      const consumedAfter = jobs.filter((j) => String(j.assigned_to) === String(techId) && j.scheduled_date > checkpoint.event_date).reduce((sum, j) => sum + (j.chemicals || []).filter((l) => String(l.chemical_id) === String(cid)).reduce((s, l) => s + lineAmount(l), 0), 0);
-      const adjustedAfter = inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.chemical_id) === String(cid) && String(a.created_at) > String(checkpoint.created_at)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
-      return { chem: c, ...v, received, balance: Number(checkpoint.balance_after) + issuedAfter - consumedAfter + adjustedAfter, revision: checkpoint };
-    }).filter(Boolean);
+    return Object.entries(m).map(([cid, v]) => { const c = chemById(cid); const received = v.issued + v.opening; return c ? { chem: c, ...v, received, balance: received - v.consumed } : null; }).filter(Boolean);
   }
 
   const techById = (id) => techs.find((t) => t.id === id);
@@ -659,16 +675,7 @@ function Dashboard({ session, profile }) {
   // Сумма ожидающих подтверждения внесений (деньги «в пути», ещё не подтверждены)
   const techDepositedPending = (techId) => { const op = techOpening(techId); return deposits.filter((d) => d.tech_id === techId && d.status === "pending" && (!op.date || (d.requested_at || "").slice(0, 10) >= op.date)).reduce((s, d) => s + (Number(d.amount) || 0), 0); };
   // Наличные, реально лежащие на руках прямо сейчас = собрано − подтверждено − в ожидании
-  const techCashRevisions = (techId) => cashAdjustments.filter((a) => String(a.tech_id) === String(techId) && a.kind === "revision").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-  const techCashAdjusted = (techId) => cashAdjustments.filter((a) => String(a.tech_id) === String(techId)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
-  const techCashOnHand = (techId) => {
-    const latest = techCashRevisions(techId)[0];
-    if (!latest) return techOpening(techId).bal + techCashCollected(techId) - techDepositedConfirmed(techId) - techDepositedPending(techId);
-    const collectedAfter = jobs.filter((j) => String(j.assigned_to) === String(techId) && j.status === "done" && j.scheduled_date > latest.event_date).reduce((s, j) => s + (Number(j.report_cash) || 0), 0);
-    const depositedAfter = deposits.filter((d) => String(d.tech_id) === String(techId) && ["confirmed", "pending"].includes(d.status) && (d.requested_at || "").slice(0, 10) > latest.event_date).reduce((s, d) => s + (Number(d.amount) || 0), 0);
-    const laterAdjustments = cashAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.created_at) > String(latest.created_at)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
-    return Number(latest.balance_after) + collectedAfter - depositedAfter + laterAdjustments;
-  };
+  const techCashOnHand = (techId) => techOpening(techId).bal + techCashCollected(techId) - techDepositedConfirmed(techId) - techDepositedPending(techId);
 
   async function ensureCatalog(table, list, value) {
     const v = (value || "").trim();
@@ -894,44 +901,6 @@ function Dashboard({ session, profile }) {
     const kindLabel = payload.kind === "opening" ? "стартовый остаток" : "выдача";
     await logAction("Выдача", `${t?.full_name || "?"} · ${c?.name || "?"} +${fmtAmount(payload.amount, c?.unit_kind)} (${kindLabel})`);
     setModal(null); showToast("Записано"); load();
-  }
-  async function saveInventoryMovement(tech, payload) {
-    const current = Number(payload.current_balance) || 0;
-    const quantity = Number(payload.amount) || 0;
-    const common = {
-      chemical_id: String(payload.chemical_id), event_date: payload.event_date,
-      reason: payload.reason, note: payload.note || null, created_by: session.user.id,
-    };
-    let rows;
-    if (payload.kind === "transfer") {
-      const targetBefore = techLedger(payload.to_tech_id).find((r) => String(r.chem.id) === String(payload.chemical_id))?.balance || 0;
-      const transferGroup = crypto.randomUUID();
-      rows = [
-        { ...common, tech_id: String(tech.id), kind: "transfer_out", amount_delta: -quantity, balance_before: current, balance_after: current - quantity, counterparty_tech_id: String(payload.to_tech_id), transfer_group: transferGroup },
-        { ...common, tech_id: String(payload.to_tech_id), kind: "transfer_in", amount_delta: quantity, balance_before: targetBefore, balance_after: targetBefore + quantity, counterparty_tech_id: String(tech.id), transfer_group: transferGroup },
-      ];
-    } else {
-      const delta = payload.kind === "revision" ? quantity - current : payload.kind === "correction_in" ? quantity : -quantity;
-      rows = [{ ...common, tech_id: String(tech.id), kind: payload.kind, amount_delta: delta, balance_before: current, balance_after: current + delta }];
-    }
-    const { error } = await supabase.from("inventory_adjustments").insert(rows);
-    if (error) { showToast("Ошибка: " + error.message); return false; }
-    const chem = chemById(payload.chemical_id);
-    const after = rows[0].balance_after;
-    await logAction("Остатки препаратов", `${tech.full_name || "?"} · ${chem?.name || "?"}: ${fmtAmount(current, chem?.unit_kind)} → ${fmtAmount(after, chem?.unit_kind)} · ${payload.reason}`);
-    setModal(null); showToast("Движение сохранено"); load(); return true;
-  }
-  async function saveCashRevision(tech, payload) {
-    const before = Number(payload.current_balance) || 0;
-    const after = Number(payload.actual_balance) || 0;
-    const { error } = await supabase.from("cash_adjustments").insert({
-      tech_id: String(tech.id), kind: "revision", amount_delta: after - before,
-      balance_before: before, balance_after: after, event_date: payload.event_date,
-      reason: payload.reason, note: payload.note || null, created_by: session.user.id,
-    });
-    if (error) { showToast("Ошибка: " + error.message); return false; }
-    await logAction("Ревизия наличных", `${tech.full_name || "?"}: ${fmt(before)} ₸ → ${fmt(after)} ₸ · ${payload.reason}`);
-    setModal(null); showToast("Фактическая касса сохранена"); load(); return true;
   }
   const partnerById = (id) => partners.find((p) => p.id === id);
   function partnerNameOf(job) {
@@ -1802,7 +1771,7 @@ function Dashboard({ session, profile }) {
     return (a.due_date || "9999").localeCompare(b.due_date || "9999");
   });
   const tomorrow = parseIso(todayIso); tomorrow.setDate(tomorrow.getDate() + 1); const tomorrowIso = isoOf(tomorrow);
-  const visibleForToday = (j) => isAdmin || j.assigned_to === session.user.id;
+  const visibleForToday = (j) => canEditJobs || j.assigned_to === session.user.id;
   const todayJobs = jobs.filter((j) => j.scheduled_date === todayIso && j.status !== "canceled" && visibleForToday(j)).sort((a, b) => jobTime(a) - jobTime(b));
   const todayDone = todayJobs.filter((j) => j.status === "done");
   const todayActive = todayJobs.filter((j) => j.status !== "done");
@@ -1900,7 +1869,7 @@ function Dashboard({ session, profile }) {
     if (result.kind === "chemical") setTab("stock");
     if (result.kind === "profile") setTab("team");
   }
-  const baseTabs = isAdmin ? [
+  const baseTabs = [
     { id: "today", icon: LayoutDashboard, label: `Командный центр${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "schedule", icon: CalendarClock, label: "График" },
@@ -1918,23 +1887,15 @@ function Dashboard({ session, profile }) {
     { id: "opex", icon: Landmark, label: "Финансы" },
     { id: "cash", icon: Banknote, label: `Касса${deposits.filter((d) => d.status === "pending").length ? " · " + deposits.filter((d) => d.status === "pending").length : ""}` },
     { id: "stock", icon: Package, label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
-    { id: "team", icon: Users, label: "Дезинфекторы" },
+    { id: "team", icon: Users, label: "Команда и доступы" },
     { id: "partners", icon: Handshake, label: "Партнёры" },
     { id: "docs", icon: FileText, label: "Документы" },
     { id: "materials", icon: FolderOpen, label: "Материалы" },
     { id: "knowledge", icon: GraduationCap, label: "База знаний" },
     { id: "journal", icon: History, label: "Журнал" },
     { id: "trash", icon: Trash2, label: `Корзина${trash.length ? " · " + trash.length : ""}` },
-  ] : [
-    { id: "today", icon: LayoutDashboard, label: `Мой день${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
-    { id: "jobs", icon: ClipboardList, label: `Мои заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
-    { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
-    { id: "tasks", icon: ListTodo, label: `${canManageTasks ? "Задачи" : "Мои задачи"}${(canManageTasks ? allOpenTasks : myOpenTasks) ? " · " + (canManageTasks ? allOpenTasks : myOpenTasks) : ""}` },
-    { id: "cash", icon: Banknote, label: "Касса" },
-    { id: "materials", icon: FolderOpen, label: "Материалы" },
-    { id: "knowledge", icon: GraduationCap, label: "База знаний" },
     { id: "myequip", icon: Wrench, label: "Моё оборудование" },
-  ];
+  ].filter((item) => isAdmin ? item.id !== "myequip" : canAccess(`tab.${item.id}`));
   // применяем сохранённый общий порядок (админ задаёт в Настройках). Новые вкладки — в конец.
   const savedOrder = Array.isArray(settings.tab_order) ? settings.tab_order : [];
   const tabs = savedOrder.length
@@ -1943,19 +1904,15 @@ function Dashboard({ session, profile }) {
         return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
       })
     : baseTabs;
-  const navGroups = isAdmin ? [
+  const navGroups = [
     { label: "Работа", ids: ["today", "jobs", "schedule", "routes", "tasks"] },
     { label: "Клиенты", ids: ["leads", "retention", "subscriptions", "repeats"] },
     { label: "Результаты", ids: ["done", "canceled", "growth", "finance"] },
-    { label: "Учёт", ids: ["opex", "cash", "stock"] },
+    { label: "Учёт", ids: ["opex", "cash", "stock", "myequip"] },
     { label: "Команда", ids: ["team", "partners"] },
-  ] : [
-    { label: "Работа", ids: ["today", "jobs", "tasks", "done"] },
-    { label: "Учёт", ids: ["cash", "myequip"] },
-    { label: "Помощь", ids: ["materials", "knowledge"] },
   ];
   const moreNavGroup = { label: "Ещё разделы", ids: ["tenders", "docs", "materials", "knowledge", "journal", "trash"] };
-  const mobileTabIds = isAdmin ? ["today", "jobs", "leads", "routes"] : ["today", "jobs", "tasks", "cash"];
+  const mobileTabIds = (isAdmin ? ["today", "jobs", "leads", "routes"] : ["today", "jobs", "tasks", "cash", "tenders", "finance"]).filter((id) => tabs.some((item) => item.id === id)).slice(0, 4);
   const mobileTabs = mobileTabIds.map((id) => tabs.find((item) => item.id === id)).filter(Boolean);
 
   return (
@@ -1965,7 +1922,7 @@ function Dashboard({ session, profile }) {
         <div className="kd-hazard" />
         <div className="kd-brand">
           <div className="kd-logo"><Bug size={19} strokeWidth={2.4} /></div>
-          <div><div className="kd-brand-name">KazDez</div><div className="kd-brand-sub">{isAdmin ? "Админ" : "Дезинфектор"} · {actorName}</div></div>
+          <div><div className="kd-brand-name">KazDez</div><div className="kd-brand-sub">{ROLE_DEFINITIONS[profile?.role]?.label || "Сотрудник"} · {actorName}</div></div>
         </div>
         <nav className="kd-tabs">
           {navGroups.map((group) => {
@@ -1976,7 +1933,7 @@ function Dashboard({ session, profile }) {
               {groupTabs.map((t) => (<button key={t.id} className={`kd-tab ${tab === t.id ? "on" : ""}`} onClick={() => { setTab(t.id); setSideOpen(false); }}>{t.icon ? <t.icon size={17} /> : null}<span className="kd-tab-lbl">{t.label}</span></button>))}
             </div>;
           })}
-          {isAdmin && <div className="kd-navgroup kd-navgroup-more">
+          {tabs.some((item) => moreNavGroup.ids.includes(item.id)) && <div className="kd-navgroup kd-navgroup-more">
             <button className={`kd-navmore ${moreNavOpen ? "on" : ""}`} onClick={() => { const next = !moreNavOpen; setMoreNavOpen(next); localStorage.setItem("kd-more-nav", next ? "1" : "0"); }}>
               <Menu size={16} /><span>Ещё разделы</span><ChevronRight size={15} />
             </button>
@@ -1987,7 +1944,7 @@ function Dashboard({ session, profile }) {
         </nav>
         <div className="kd-navfoot">
           <div className={`kd-connection ${online ? "online" : "offline"}`}>{online ? <Wifi size={14} /> : <WifiOff size={14} />}<span>{online ? `На связи${lastLoadedAt ? ` · ${lastLoadedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Нет подключения"}</span></div>
-          {isAdmin && <button className="kd-tab" onClick={() => { setModal({ kind: "settings" }); setSideOpen(false); }}><Settings size={17} /><span className="kd-tab-lbl">Настройки</span></button>}
+          {canAccess("action.settings") && <button className="kd-tab" onClick={() => { setModal({ kind: "settings" }); setSideOpen(false); }}><Settings size={17} /><span className="kd-tab-lbl">Настройки</span></button>}
           <button className="kd-tab" onClick={() => supabase.auth.signOut()}><LogOut size={17} /><span className="kd-tab-lbl">Выйти</span></button>
         </div>
       </aside>
@@ -1996,7 +1953,7 @@ function Dashboard({ session, profile }) {
         <header className="kd-topbar">
           <div className="kd-topleft">
             <button className="kd-burger" onClick={() => setSideOpen((v) => !v)} aria-label="Меню"><ClipboardList size={18} /></button>
-            <h1 className="kd-pagetitle">{tab === "today" ? (isAdmin ? "Командный центр" : "Мой день") : TAB_LABELS[tab] || (tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
+            <h1 className="kd-pagetitle">{tab === "today" ? (isAdmin ? "Командный центр" : "Мой день") : (tabs.find((t) => t.id === tab) || {}).label || TAB_LABELS[tab] || ""}</h1>
           </div>
           <div className="kd-globalsearch" onBlur={() => setTimeout(() => setGlobalSearchOpen(false), 120)}>
             <Search size={16} />
@@ -2019,14 +1976,14 @@ function Dashboard({ session, profile }) {
                 <div className="kd-notification-list">{notifications.length === 0 ? <div className="kd-globalempty">Новых уведомлений нет</div> : notifications.slice(0, 30).map((item) => <button key={item.id} className={`${item.read_at ? "read" : ""} ${item.priority || "normal"}`} onClick={() => openNotification(item)}><span className="kd-notification-dot" /><span><strong>{item.title}</strong><small>{item.body}</small><time>{fmtTs(item.created_at)}</time></span><ChevronRight size={15} /></button>)}</div>
               </div>}
             </div>
-            {(tab === "jobs" || tab === "today") && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
-            {tab === "subscriptions" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "contract" })}><Plus size={15} />Абонент</button>}
-            {tab === "retention" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "followup" })}><Plus size={15} />Касание</button>}
-            {tab === "stock" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}><Plus size={15} />Препарат</button>}
-            {tab === "partners" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}><Plus size={15} />Партнёр</button>}
-            {tab === "docs" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}><Plus size={15} />Документ</button>}
-            {tab === "opex" && isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "opex" })}><Plus size={15} />Расход</button>}
-            {isAdmin && ["growth", "finance", "journal"].includes(tab) && <button className="kd-btn ghost" onClick={exportExcel}><Download size={15} />Excel</button>}
+            {(tab === "jobs" || tab === "today") && canEditJobs && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
+            {tab === "subscriptions" && canEditJobs && <button className="kd-btn primary" onClick={() => setModal({ kind: "contract" })}><Plus size={15} />Абонент</button>}
+            {tab === "retention" && canEditJobs && <button className="kd-btn primary" onClick={() => setModal({ kind: "followup" })}><Plus size={15} />Касание</button>}
+            {tab === "stock" && canAccess("action.stock_edit") && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}><Plus size={15} />Препарат</button>}
+            {tab === "partners" && canEditPartners && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}><Plus size={15} />Партнёр</button>}
+            {tab === "docs" && canEditDocs && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}><Plus size={15} />Документ</button>}
+            {tab === "opex" && canManageCash && <button className="kd-btn primary" onClick={() => setModal({ kind: "opex" })}><Plus size={15} />Расход</button>}
+            {canAccess(`tab.${tab}`) && ["growth", "finance", "journal"].includes(tab) && <button className="kd-btn ghost" onClick={exportExcel}><Download size={15} />Excel</button>}
             <button className="kd-iconbtn" disabled={loading} onClick={load} title="Обновить данные" aria-label="Обновить данные"><RefreshCw size={16} /></button>
           </div>
         </header>
@@ -2050,9 +2007,9 @@ function Dashboard({ session, profile }) {
                 <p>{todayJobs.length ? `Всего ${todayJobs.length}, выполнено ${todayDone.length}. ${isAdmin ? `План дня — ${fmt(todayPlan)} ₸.` : "Следующий шаг виден в каждой заявке."}` : "Можно заняться задачами и подготовкой следующих выездов."}</p>
               </div>
               <div className="kd-todayhero-actions">
-                {isAdmin && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
-                {isAdmin && <button className="kd-btn ghost" onClick={() => setTab("schedule")}><CalendarClock size={15} />Открыть график</button>}
-                {isAdmin && todayJobs.length > 0 && <button className="kd-btn ghost" onClick={() => setTab("routes")}><Route size={15} />Маршруты дня</button>}
+                {canEditJobs && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
+                {canAccess("tab.schedule") && <button className="kd-btn ghost" onClick={() => setTab("schedule")}><CalendarClock size={15} />Открыть график</button>}
+                {canAccess("tab.routes") && todayJobs.length > 0 && <button className="kd-btn ghost" onClick={() => setTab("routes")}><Route size={15} />Маршруты дня</button>}
               </div>
             </section>
 
@@ -2093,10 +2050,10 @@ function Dashboard({ session, profile }) {
                       {phone && <a className="wa" href={roleWhatsappUrl(j, isAdmin)} target="_blank" rel="noreferrer" title="WhatsApp"><MessageCircle size={16} /></a>}
                       {j.address && <a href={directMap} target="_blank" rel="noreferrer" title="Открыть в Яндекс Картах"><MapPin size={16} /></a>}
                       <button onClick={() => openJobProof(j)} title="Фото, геолокация и подпись"><Camera size={16} />{proofIsComplete(j.id) ? "✓" : ""}</button>
-                      {!isAdmin && j.status !== "done" && j.status !== "canceled" && ["new", "confirmed", "assigned"].includes(stageKey) && <button className="primary" onClick={() => setJobWorkStage(j, "en_route")}>В путь</button>}
-                      {!isAdmin && stageKey === "en_route" && <button className="primary" onClick={() => setJobWorkStage(j, "on_site")}>На объекте</button>}
-                      {!isAdmin && stageKey === "on_site" && <button className="primary" onClick={() => setModal({ kind: "report", job: j })}>Отчёт</button>}
-                      <button onClick={() => setModal(j.status === "done" ? { kind: "view", job: j } : isAdmin ? { kind: "edit", job: j } : { kind: "details", job: j })}>{j.status === "done" ? "Отчёт" : "Открыть"}</button>
+                      {isFieldTech && j.status !== "done" && j.status !== "canceled" && ["new", "confirmed", "assigned"].includes(stageKey) && <button className="primary" onClick={() => setJobWorkStage(j, "en_route")}>В путь</button>}
+                      {isFieldTech && stageKey === "en_route" && <button className="primary" onClick={() => setJobWorkStage(j, "on_site")}>На объекте</button>}
+                      {isFieldTech && stageKey === "on_site" && <button className="primary" onClick={() => setModal({ kind: "report", job: j })}>Отчёт</button>}
+                      <button onClick={() => setModal(j.status === "done" ? { kind: "view", job: j } : canEditJobs ? { kind: "edit", job: j } : { kind: "details", job: j })}>{j.status === "done" ? "Отчёт" : "Открыть"}</button>
                     </div>
                   </div>;
                 })}
@@ -2119,7 +2076,7 @@ function Dashboard({ session, profile }) {
               <input className="kd-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по телефону, адресу или виду вредителя…" />
               {search && <button className="kd-x" onClick={() => setSearch("")}><X size={15} /></button>}
             </div>
-            {isAdmin && techs.length > 0 && (
+            {canEditJobs && techs.length > 0 && (
               <select className="kd-techselect" value={techFilter} onChange={(e) => setTechFilter(e.target.value)}>
                 <option value="">Все дезинфекторы</option>
                 {techs.map((t) => <option key={t.id} value={t.id}>{t.full_name || t.id.slice(0, 6)}</option>)}
@@ -2130,7 +2087,7 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "jobs" && (
           <>
-            {isAdmin && (
+            {canEditJobs && (
               <div className="kd-seg" style={{ marginBottom: 14 }}>
                 {[{ id: "all", label: "Все" }, { id: "new", label: "Новые" }, { id: "assigned", label: "Назначены" }].map((s) => (
                   <button key={s.id} className={`kd-segbtn ${statusFilter === s.id ? "on" : ""}`} onClick={() => setStatusFilter(s.id)}>{s.label}</button>
@@ -2144,7 +2101,7 @@ function Dashboard({ session, profile }) {
                   <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                         onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                         onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                         onCopyPublicLink={() => copyPublicJobLink(j)}
@@ -2265,7 +2222,7 @@ function Dashboard({ session, profile }) {
                   <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                       onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                       onCopyPublicLink={() => copyPublicJobLink(j)}
@@ -2297,7 +2254,7 @@ function Dashboard({ session, profile }) {
           </>
         )}
 
-        {!loading && tab === "cash" && !isAdmin && (
+        {!loading && tab === "cash" && !canManageCash && (
           <div className="kd-list">
             <div className="kd-card">
               <div className="kd-section">Наличные на руках</div>
@@ -2336,7 +2293,7 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
-        {!loading && tab === "cash" && isAdmin && (
+        {!loading && tab === "cash" && canManageCash && (
           <div className="kd-list">
             {deposits.filter((d) => d.status === "pending").length > 0 && (
               <>
@@ -2370,16 +2327,11 @@ function Dashboard({ session, profile }) {
                   <div className="kd-meta">
                     <span>Собрано: {fmt(techCashCollected(t.id))} ₸</span><span>·</span>
                     <span>Внесено: {fmt(techDepositedConfirmed(t.id))} ₸</span>
-                    {techCashRevisions(t.id)[0] && <><span>·</span><span style={{ color: "#0E7C66" }}>сверено: {isoToRu(techCashRevisions(t.id)[0].event_date)}</span></>}
                     {pending > 0 && <><span>·</span><span style={{ color: "#B4650B" }}>в ожидании: {fmt(pending)} ₸</span></>}
                   </div>
-                  <div className="kd-actions"><button className="kd-btn primary sm" onClick={() => setModal({ kind: "cashRevision", tech: t })}><ClipboardCheck size={13} />Ревизия кассы</button></div>
                 </div>
               );
             })}
-            <div className="kd-section" style={{ marginTop: 8 }}>История корректировок кассы</div>
-            {cashAdjustments.length === 0 && <div className="kd-muted">Корректировок пока нет.</div>}
-            {cashAdjustments.map((a) => <div className="kd-histrow" key={a.id} style={{ cursor: "default" }}><div><div className="kd-histmain">{techById(a.tech_id)?.full_name || "?"} · {fmt(a.balance_before)} → {fmt(a.balance_after)} ₸</div><div className="kd-muted">{isoToRu(a.event_date)} · {a.reason}{a.note ? " · " + a.note : ""}</div></div><strong style={{ color: Number(a.amount_delta) < 0 ? "#B42318" : "#0E7C66" }}>{Number(a.amount_delta) > 0 ? "+" : ""}{fmt(a.amount_delta)} ₸</strong></div>)}
             <div className="kd-section" style={{ marginTop: 8 }}>История внесений</div>
             {deposits.filter((d) => d.status !== "pending").length === 0 && <div className="kd-muted">Подтверждённых или отклонённых внесений пока нет.</div>}
             {deposits.filter((d) => d.status !== "pending").map((d) => {
@@ -2499,7 +2451,7 @@ function Dashboard({ session, profile }) {
               <div className="kd-title" style={{ fontSize: 18 }}>Тендеры</div>
               <div className="kd-tabactions">
                 {settings.drive_tenders && <a className="kd-btn ghost" href={settings.drive_tenders} target="_blank" rel="noopener noreferrer"><FolderOpen size={15} />Папка на Диске</a>}
-                <button className="kd-btn primary" onClick={() => setModal({ kind: "tender" })}><Plus size={15} />Новый тендер</button>
+                {canEditTenders && <button className="kd-btn primary" onClick={() => setModal({ kind: "tender" })}><Plus size={15} />Новый тендер</button>}
               </div>
             </div>
             {tenderOverdue > 0 && <div className="kd-hint" style={{ background: "#FBE7E5", borderColor: "#F1C4BF", color: "#B3261E" }}>⚠ Есть просроченные обработки ({tenderOverdue}). Просрочка грозит штрафом и блокировкой участия — проверь график ниже.</div>}
@@ -2601,10 +2553,10 @@ function Dashboard({ session, profile }) {
                   </div>
 
                   {t.note && <div className="kd-notebox" style={{ marginTop: 10 }}>📝 {t.note}</div>}
-                  <div className="kd-actions">
+                  {canEditTenders && <div className="kd-actions">
                     <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "tender", tender: t })}><Pencil size={13} />Изменить</button>
                     <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить тендер «${t.contract_no || t.title || ""}»? Вместе с обеспечениями и графиком.`, () => removeTender(t))}><Trash2 size={13} />Удалить</button>
-                  </div>
+                  </div>}
                 </div>
               );
             })}
@@ -2666,7 +2618,7 @@ function Dashboard({ session, profile }) {
             {canceledJobs.length === 0 ? <div className="kd-empty">Отменённых заявок нет.</div> :
               canceledFiltered.length === 0 ? <div className="kd-empty">По этому фильтру ничего не найдено.</div> :
               [...canceledFiltered].sort((a, b) => new Date(b.canceled_at || 0) - new Date(a.canceled_at || 0)).map((j) => (
-                <JobCard key={j.id} job={j} isAdmin={isAdmin} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat="" share={partnerShareAmt(j)}
+                <JobCard key={j.id} job={j} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat="" share={partnerShareAmt(j)}
                   onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                   onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                   onCopyPublicLink={() => copyPublicJobLink(j)}
@@ -3160,7 +3112,7 @@ function Dashboard({ session, profile }) {
                     <div><span>Выдано (на руках)</span><strong>{issuedQty} {e.unit}</strong></div>
                     <div><span>Стоимость на руках</span><strong>{fmt(issuedQty * (Number(e.price) || 0))} ₸</strong></div>
                   </div>
-                  {isAdmin && (
+                  {canAccess("action.team_manage") && (
                     <div className="kd-actions">
                       <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "equip", item: e })}><Pencil size={13} />Изменить</button>
                       <button className="kd-btn ghost danger sm" onClick={() => removeEquipment(e)}>Удалить</button>
@@ -3174,6 +3126,29 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "team" && (
           <div className="kd-list">
+            {canAccess("action.team_manage") && <div className="kd-card kd-access-card">
+              <div className="kd-tabbar" style={{ marginBottom: 12 }}>
+                <div><div className="kd-section" style={{ margin: 0 }}>Сотрудники и права доступа</div><div className="kd-muted">Добавление, блокировка, роли и персональные разрешения</div></div>
+                <button className="kd-btn primary" onClick={() => setModal({ kind: "userAccess", user: null })}><UserPlus size={15} />Добавить сотрудника</button>
+              </div>
+              <div className="kd-user-list">
+                {allProfiles.map((p) => {
+                  const authUser = authUsers.find((item) => item.id === p.id) || {};
+                  const roleInfo = ROLE_DEFINITIONS[p.role] || { label: p.role || "Без роли", color: "#6E7871" };
+                  const isSelf = p.id === session.user.id;
+                  return <div className={`kd-user-row ${p.is_active === false ? "inactive" : ""}`} key={p.id}>
+                    <div className="kd-tech-avatar">{(p.full_name || authUser.email || "?").slice(0, 1).toUpperCase()}</div>
+                    <div className="kd-user-main"><strong>{p.full_name || "Без имени"}</strong><span>{authUser.email || "Почта загружается…"}{p.phone ? ` · ${p.phone}` : ""}</span></div>
+                    <span className="kd-role-badge" style={{ color: roleInfo.color, borderColor: `${roleInfo.color}55`, background: `${roleInfo.color}12` }}>{roleInfo.label}</span>
+                    <span className={`kd-access-status ${p.is_active === false ? "off" : "on"}`}>{p.is_active === false ? "Отключён" : "Активен"}</span>
+                    <div className="kd-actions">
+                      {p.role !== "admin" && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "userAccess", user: { ...p, email: authUser.email || "" } })}><ShieldCheck size={13} />Права</button>}
+                      {!isSelf && p.role !== "admin" && <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить учётную запись «${p.full_name || authUser.email}» навсегда? История действий в журнале сохранится.`, () => deleteAdminUser({ ...p, email: authUser.email }), { confirmLabel: "Удалить навсегда" })}><Trash2 size={13} /></button>}
+                    </div>
+                  </div>;
+                })}
+              </div>
+            </div>}
             <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>Отчёты за период</div>
               <DateFilterBar filter={teamRepFilter} onChange={setTeamRepFilter} hide={["tomorrow"]} />
@@ -3200,10 +3175,7 @@ function Dashboard({ session, profile }) {
                 );
               })()}
             </div>
-            <div className="kd-empty" style={{ textAlign: "left" }}>
-              Чтобы добавить дезинфектора: в Supabase → Authentication → Add user (как создавал свой аккаунт, с галочкой Auto Confirm).
-              Новый пользователь сам появится здесь как дезинфектор.
-            </div>
+            <div className="kd-section">Остатки, выплаты и имущество дезинфекторов</div>
             {techs.map((t) => {
               const cnt = jobs.filter((j) => j.assigned_to === t.id).length;
               const ledger = techLedger(t.id);
@@ -3219,10 +3191,9 @@ function Dashboard({ session, profile }) {
                       </div>
                     </div>
                     <div className="kd-actions" style={{ marginBottom: 0 }}>
-                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "techedit", tech: t })}><Pencil size={13} />Имя</button>
-                      <button className="kd-btn primary sm" onClick={() => setModal({ kind: "handout", tech: t })}>Выдать / остаток</button>
-                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "inventoryMovement", tech: t })}><ClipboardCheck size={13} />Ревизия / движение</button>
-                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "expense", tech: t })}><Plus size={13} />Выплата</button>
+                      {canAccess("action.team_manage") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "techedit", tech: t })}><Pencil size={13} />Данные</button>}
+                      {canAccess("action.stock_edit") && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "handout", tech: t })}>Выдать / остаток</button>}
+                      {canAccess("action.finance_edit") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "expense", tech: t })}><Plus size={13} />Выплата</button>}
                     </div>
                   </div>
                   {ledger.length === 0
@@ -3240,13 +3211,6 @@ function Dashboard({ session, profile }) {
                         ))}
                       </div>
                     )}
-                  {inventoryAdjustments.filter((a) => String(a.tech_id) === String(t.id)).length > 0 && <div className="kd-change-list">
-                    <div className="kd-section" style={{ margin: 0 }}>Последние изменения остатков</div>
-                    {inventoryAdjustments.filter((a) => String(a.tech_id) === String(t.id)).slice(0, 5).map((a) => {
-                      const chem = chemById(a.chemical_id); const other = a.counterparty_tech_id ? techById(a.counterparty_tech_id)?.full_name : "";
-                      return <div className="kd-change-row" key={a.id}><span>{isoToRu(a.event_date)}</span><span>{chem?.name || "Препарат"} · {a.reason}{other ? ` · ${a.kind === "transfer_in" ? "от" : "кому"}: ${other}` : ""}{a.note ? ` · ${a.note}` : ""}</span><strong>{fmtAmount(a.balance_before, chem?.unit_kind)} → {fmtAmount(a.balance_after, chem?.unit_kind)}</strong></div>;
-                    })}
-                  </div>}
                   {(() => {
                     const techExp = expenses.filter((e) => e.tech_id === t.id);
                     if (techExp.length === 0) return null;
@@ -3260,8 +3224,8 @@ function Dashboard({ session, profile }) {
                             <span>{fmt(e.amount)} ₸</span>
                             <span style={{ color: e.status === "paid" ? "#0E7C66" : "#B42318", fontWeight: 700 }}>{e.status === "paid" ? "выплачено" : "к выплате"}</span>
                             <span style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                              <button className="kd-btn ghost sm" onClick={() => setExpenseStatus(e, e.status === "paid" ? "unpaid" : "paid")}>{e.status === "paid" ? "Отменить" : "Выплатить"}</button>
-                              <button className="kd-btn ghost danger sm" onClick={() => removeExpense(e)}><Trash2 size={13} /></button>
+                              {canAccess("action.finance_edit") && <button className="kd-btn ghost sm" onClick={() => setExpenseStatus(e, e.status === "paid" ? "unpaid" : "paid")}>{e.status === "paid" ? "Отменить" : "Выплатить"}</button>}
+                              {canAccess("action.finance_edit") && <button className="kd-btn ghost danger sm" onClick={() => removeExpense(e)}><Trash2 size={13} /></button>}
                             </span>
                           </div>
                         ))}
@@ -3272,7 +3236,7 @@ function Dashboard({ session, profile }) {
                   <div className="kd-ledger">
                     <div className="kd-tabbar" style={{ marginBottom: 8 }}>
                       <span className="kd-section" style={{ margin: 0 }}>Оборудование</span>
-                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "issueEquip", tech: t })}><Plus size={13} />Выдать</button>
+                      {canAccess("action.team_manage") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "issueEquip", tech: t })}><Plus size={13} />Выдать</button>}
                     </div>
                     {techEquipment(t.id).length === 0
                       ? <div className="kd-muted">На руках оборудования нет.</div>
@@ -3285,9 +3249,7 @@ function Dashboard({ session, profile }) {
                             <span>{isoToRu(r.handout.handout_date) || "—"}</span>
                             <strong>{fmt((Number(r.handout.qty) || 0) * (Number(r.equip.price) || 0))} ₸</strong>
                             <span style={{ display: "flex", gap: 5, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                              <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "transferEquip", handout: r.handout })}>Передать</button>
-                              <button className="kd-btn ghost sm" onClick={() => setEquipStatus(r.handout, "returned")}>Возврат</button>
-                              <button className="kd-btn ghost danger sm" onClick={() => setEquipStatus(r.handout, "broken")}>Сломано</button>
+                              {canAccess("action.team_manage") && <><button className="kd-btn ghost sm" onClick={() => setModal({ kind: "transferEquip", handout: r.handout })}>Передать</button><button className="kd-btn ghost sm" onClick={() => setEquipStatus(r.handout, "returned")}>Возврат</button><button className="kd-btn ghost danger sm" onClick={() => setEquipStatus(r.handout, "broken")}>Сломано</button></>}
                             </span>
                           </div>
                         ))}
@@ -3327,7 +3289,7 @@ function Dashboard({ session, profile }) {
                     <span className="kd-muted" style={{ color: owed > 0 ? "#B42318" : undefined, fontWeight: owed > 0 ? 700 : 400 }}>К выплате: {fmt(owed)} ₸</span>
                     <span className="kd-muted paid">Выплачено: {fmt(paidOut)} ₸</span>
                   </div>
-                  {isAdmin && (
+                  {canEditPartners && (
                     <div className="kd-actions">
                       <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "partnerJobs", partner: p })}>Заявки</button>
                       <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "partner", partner: p })}>Изменить</button>
@@ -3391,13 +3353,13 @@ function Dashboard({ session, profile }) {
                       {d.amount_mode === "percent" && <><span>·</span><span>{d.percent}% от {fmt(d.base_sum)} ₸</span></>}
                     </div>
                     <div className="kd-card-foot"><strong>{fmt(d.amount)} ₸</strong>{d.note && <span className="kd-muted">{d.note}</span>}</div>
-                    <div className="kd-actions">
+                    {canEditDocs && <div className="kd-actions">
                       {d.status !== "done" && <button className="kd-btn ghost sm" onClick={() => setDocStatus(d, "done")}>Сделано</button>}
                       {d.status !== "paid" && <button className="kd-btn primary sm" onClick={() => setDocStatus(d, "paid")}>Оплачено</button>}
                       {d.status === "paid" && <button className="kd-btn ghost sm" onClick={() => setDocStatus(d, "done")}>Снять оплату</button>}
                       <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "doc", doc: d })}>Изменить</button>
                       <button className="kd-btn ghost danger sm" onClick={() => removeDoc(d)}>Удалить</button>
-                    </div>
+                    </div>}
                   </div>
                 );
               })}
@@ -3483,16 +3445,17 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "proof" && <ProofModal job={modal.job} proof={proofByJob(modal.job.id)} media={proofMedia} onClose={() => setModal(null)} onSave={saveJobProof} />}
       {modal?.kind === "history" && <HistoryModal
         job={modal.job} jobs={jobs} followups={followups} qualityChecks={qualityChecks} contracts={contracts}
-        events={clientEvents} feedback={publicFeedback} profiles={allProfiles} canPlanFollowup={isAdmin || isManager} partnerNameOf={partnerNameOf}
+        events={clientEvents} feedback={publicFeedback} profiles={allProfiles} canPlanFollowup={canEditJobs} partnerNameOf={partnerNameOf}
         onAddNote={addClientNote} onCopyPublicLink={copyPublicJobLink}
         onPlanFollowup={(j) => setModal({ kind: "followup", job: j, defaultKind: "lost" })}
         onClose={() => setModal(null)}
-        onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : isAdmin || isManager ? { kind: "edit", job: j } : { kind: "details", job: j })} />}
+        onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : canEditJobs ? { kind: "edit", job: j } : { kind: "details", job: j })} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
       {modal?.kind === "expense" && <ExpenseModal tech={modal.tech} onClose={() => setModal(null)} onSave={saveExpense} />}
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
+      {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
       {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
       {modal?.kind === "transferEquip" && <TransferEquipModal handout={modal.handout} techs={techs.filter((t) => t.id !== modal.handout.tech_id)} onClose={() => setModal(null)} onSave={(newTechId, note) => transferEquipment(modal.handout, newTechId, note)} />}
@@ -3518,8 +3481,6 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "account" && <AccountModal item={modal.item} onClose={() => setModal(null)} onSave={saveAccount} onRemove={removeAccount} />}
       {modal?.kind === "confirmDeposit" && <ConfirmDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} accounts={accounts} defaultAccountId={cashDepositAccountId} onClose={() => setModal(null)} onConfirm={(accId) => { decideDeposit(modal.dep, "confirmed", null, accId); setModal(null); }} />}
       {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}
-      {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
-      {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
