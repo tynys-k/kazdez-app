@@ -44,8 +44,14 @@ const DRIVE_LINKS = [
   { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓", place: "knowledge" },
   { key: "drive_kp", label: "КП клиентов", desc: "Папка со всеми коммерческими предложениями", emoji: "📑", place: "leads" },
 ];
-const TAB_LABELS = { today: "Командный центр", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторы", growth: "Прибыль и KPI", retention: "Касания", subscriptions: "Абоненты", routes: "Маршруты", finance: "Аналитика", opex: "Финансы", cash: "Касса", stock: "Склад", team: "Дезинфекторы", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина" };
-const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "done", "canceled", "tasks", "repeats", "leads", "retention", "subscriptions", "routes", "growth", "finance", "opex", "cash", "stock", "team", "partners", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
+// Короткое честное имя раздела: используется в заголовке страницы и мобильной навигации.
+// Счётчики сюда НЕ добавляем — они живут только в боковом меню и только там, где требуют действия.
+const TAB_LABELS = { today: "Сегодня", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Лиды", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторные выезды", growth: "Прибыль по заявкам", retention: "Обзвон и качество", subscriptions: "Абоненты", routes: "Маршруты", finance: "Выручка и чек", opex: "Счета и расходы", cash: "Наличные от бригад", stock: "Склад", team: "Сотрудники", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина", myequip: "Моё оборудование" };
+// Нижняя панель на телефоне даёт ~9 символов на подпись — длинные имена там режутся многоточием.
+// Здесь только те разделы, чьё полное имя не влезает; остальные берутся из TAB_LABELS.
+const TAB_LABELS_SHORT = { cash: "Касса", finance: "Выручка", growth: "Прибыль", opex: "Расходы", retention: "Обзвон", repeats: "Повторы", subscriptions: "Абоненты", team: "Люди", myequip: "Инвентарь" };
+// Порядок по частоте использования: сначала ежедневная работа, потом клиенты, деньги, архив, команда.
+const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "routes", "tasks", "leads", "retention", "subscriptions", "repeats", "finance", "growth", "opex", "cash", "done", "canceled", "team", "partners", "stock", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
 
 // Единый справочник ролей для экрана «Команда и доступы».
 // Поля permissions и defaultPermissions намеренно содержат один набор:
@@ -319,4 +325,4 @@ function copyText(text, onDone) {
 
 // ----------------------------- root -----------------------------
 
-export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+export { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
