@@ -92,18 +92,22 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         ))}
         {isAdmin && job.partner_id && <span className="kd-muted">Партнёр: {partnerName || "?"}{job.joint_work ? ` · совместная работа · доля в прибыли ${job.partner_share ?? 0}%${job.joint_supplier === "us" ? ` · его расходы ${job.joint_cost_share ?? 0}%` : " · препараты партнёра"}` : ` · доля ${job.partner_share ?? 0}%`}</span>}
         {isAdmin && job.brand === "partner" && partnerRepeat && <span className="kd-muted">Повтор: {partnerRepeat}</span>}
-        {isAdmin && share > 0 && <span className={job.partner_paid ? "kd-muted paid" : "kd-muted"}>Доля партнёру: {fmt(share)} ₸ · {job.partner_paid ? "выплачено" : "к выплате"}</span>}
-        {isAdmin && job.partner_comp > 0 && <span className={job.partner_comp_paid ? "kd-muted paid" : "kd-muted"} style={{ color: job.partner_comp_paid ? undefined : "#B4650B", fontWeight: 700 }}>💳 Компенсация от партнёра нам: {fmt(job.partner_comp)} ₸ · {job.partner_comp_paid ? "получено" : "ожидаем на Kaspi"}</span>}
-        {isAdmin && !job.executor_partner_id && <span className="kd-muted">{assignedName ? "Дезинфектор: " + assignedName : "Не назначен"}</span>}
+        {/* Строки-флаги: warn = требует действия, ok = закрыто, danger = проблема.
+            Раньше всё было одинаково-серым, и «ждём оплату» терялось среди рутины. */}
+        {isAdmin && share > 0 && <span className={`kd-flag ${job.partner_paid ? "ok" : "warn"}`}>Доля партнёру: {fmt(share)} ₸ · {job.partner_paid ? "выплачено" : "к выплате"}</span>}
+        {isAdmin && job.partner_comp > 0 && <span className={`kd-flag ${job.partner_comp_paid ? "ok" : "warn"}`}>💳 Компенсация от партнёра нам: {fmt(job.partner_comp)} ₸ · {job.partner_comp_paid ? "получено" : "ожидаем на Kaspi"}</span>}
+        {isAdmin && !job.executor_partner_id && (assignedName
+          ? <span className="kd-muted">Дезинфектор: {assignedName}</span>
+          : job.status !== "done" && job.status !== "canceled" ? <span className="kd-flag warn">Исполнитель не назначен</span> : <span className="kd-muted">Не назначен</span>)}
         {job.executor_partner_id && <span className="kd-muted" style={{ fontWeight: 700 }}>🤝 Исполнитель: {executorName || "партнёр"} · его доля {job.executor_share_pct || 0}%</span>}
         {isAdmin && job.executor_partner_id && job.status === "done" && job.executor_settlement === "qr_full" && (
-          <span className="kd-muted" style={{ color: job.executor_paid ? undefined : "#B42318", fontWeight: 700 }}>
+          <span className={`kd-flag ${job.executor_paid ? "ok" : "warn"}`}>
             Доля исполнителю: {fmt(Math.round((Number(job.report_paid) || 0) * (Number(job.executor_share_pct) || 0) / 100))} ₸ · {job.executor_paid ? "выплачена" : "к выплате"}
           </span>
         )}
         {job.report_paid != null && <span className="kd-muted paid">Оплачено: {fmt(job.report_paid)} ₸</span>}
         {Number(job.report_transfer) > 0 && (
-          <span className="kd-muted" style={{ color: job.transfer_paid ? "#0E7C66" : "#B4650B", fontWeight: 700 }}>
+          <span className={`kd-flag ${job.transfer_paid ? "ok" : "warn"}`}>
             💳 Перечисление {fmt(job.report_transfer)} ₸ — {job.transfer_paid ? `оплачено ${isoToRu(job.transfer_paid_date) || ""}` : "ждём оплату"}
           </span>
         )}
@@ -112,9 +116,9 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
             🎁 {Number(job.tech_bonus) > 0 ? `бонус ${fmt(job.tech_bonus)} ₸` : ""}{Number(job.tech_bonus) > 0 && Number(job.tech_travel) > 0 ? " · " : ""}{Number(job.tech_travel) > 0 ? `дорожные ${fmt(job.tech_travel)} ₸` : ""}
           </span>
         )}
-        {job.status === "canceled" && <span className="kd-muted" style={{ color: "#B3261E", fontWeight: 700 }}>Отменена{job.cancel_reason ? ": " + job.cancel_reason : ""}</span>}
-        {job.edit_request_status === "requested" && <span className="kd-muted" style={{ color: "#B4650B", fontWeight: 700 }}>⏳ Запрос на изменение отчёта{job.edit_request_reason ? ": " + job.edit_request_reason : ""}{isAdmin ? " — нужно решение" : " — ждём ответа админа"}</span>}
-        {job.edit_request_status === "approved" && <span className="kd-muted" style={{ color: "#0E7C66", fontWeight: 700 }}>✅ Изменение отчёта разрешено{!isAdmin ? " — можешь переоткрыть отчёт" : ""}</span>}
+        {job.status === "canceled" && <span className="kd-flag danger">Отменена{job.cancel_reason ? ": " + job.cancel_reason : ""}</span>}
+        {job.edit_request_status === "requested" && <span className="kd-flag warn">⏳ Запрос на изменение отчёта{job.edit_request_reason ? ": " + job.edit_request_reason : ""}{isAdmin ? " — нужно решение" : " — ждём ответа админа"}</span>}
+        {job.edit_request_status === "approved" && <span className="kd-flag ok">✅ Изменение отчёта разрешено{!isAdmin ? " — можешь переоткрыть отчёт" : ""}</span>}
       </div>
       <div className="kd-quickactions" aria-label="Быстрые действия">
         {phoneDigits && <a className="kd-quickbtn" href={`tel:+${phoneDigits}`}><Phone size={15} />Позвонить</a>}
@@ -134,21 +138,36 @@ function JobCard({ job, isAdmin, assignedName, partnerName, partnerRepeat, share
         {isAdmin && !job.executor_partner_id && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onAssign}><UserPlus size={14} />{assignedName ? "Переназначить" : "Назначить"}</button>}
         {isAdmin && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onEdit}><Pencil size={14} />Изменить</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
-        {isAdmin && job.status === "done" && job.type === "Первичная" && onAct && <button className="kd-btn ghost" onClick={onAct}>Акт</button>}
-        {isAdmin && job.status === "done" && job.type !== "Первичная" && onCert && <button className="kd-btn ghost" onClick={onCert}>Сертификат</button>}
-        {isAdmin && job.status === "done" && !job.repeat_state && <button className="kd-btn ghost" onClick={onRepeat}>На повтор</button>}
         {isAdmin && job.status === "canceled" && <button className="kd-btn primary" onClick={() => onRestore()}>Вернуть в работу</button>}
-        {isAdmin && share > 0 && <button className="kd-btn ghost" onClick={() => onPayPartner(!job.partner_paid)}>{job.partner_paid ? "Отменить выплату" : "Выплатить долю"}</button>}
-        {isAdmin && job.partner_comp > 0 && <button className="kd-btn ghost" onClick={() => onCompPaid(!job.partner_comp_paid)}>{job.partner_comp_paid ? "Компенсация не получена" : "Компенсация получена"}</button>}
+        {/* Деньги и решения, которые ждут ответа прямо сейчас, — всегда на виду */}
         {isAdmin && job.status === "done" && Number(job.report_transfer) > 0 && !job.transfer_paid && <button className="kd-btn primary sm" onClick={() => onTransferPaid()}>💳 Зачесть оплату ({fmt(job.report_transfer)})</button>}
-        {isAdmin && job.executor_partner_id && job.status === "done" && job.executor_settlement === "qr_full" && <button className="kd-btn ghost" onClick={() => onExecutorPaid(!job.executor_paid)}>{job.executor_paid ? "Доля не выплачена" : "Выплатить долю исполнителю"}</button>}
-        {isAdmin && job.status === "done" && <button className="kd-btn ghost sm" onClick={() => onTechExtras()}>Бонус / дорожные</button>}
-        {!isAdmin && job.status === "done" && !job.edit_request_status && <button className="kd-btn ghost sm" onClick={() => onRequestEdit()}>Запросить изменение</button>}
-        {!isAdmin && job.status === "done" && job.edit_request_status === "approved" && <button className="kd-btn primary sm" onClick={onReport}>Изменить отчёт</button>}
         {isAdmin && job.edit_request_status === "requested" && <button className="kd-btn primary sm" onClick={() => onApproveEdit()}>Разрешить изменение</button>}
         {isAdmin && job.edit_request_status === "requested" && <button className="kd-btn ghost danger sm" onClick={() => onRejectEdit()}>Отклонить</button>}
-        {isAdmin && <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить"><Trash2 size={14} /></button>}
+        {!isAdmin && job.status === "done" && !job.edit_request_status && <button className="kd-btn ghost sm" onClick={() => onRequestEdit()}>Запросить изменение</button>}
+        {!isAdmin && job.status === "done" && job.edit_request_status === "approved" && <button className="kd-btn primary sm" onClick={onReport}>Изменить отчёт</button>}
       </div>
+      {/* Редкие административные действия — под «Ещё», чтобы не спорили за внимание
+          с главной кнопкой. Полевой поток дезинфектора сюда не попадает никогда. */}
+      {isAdmin && (job.status === "done" || share > 0 || job.partner_comp > 0) && (
+        <details className="kd-more">
+          <summary>Ещё</summary>
+          <div className="kd-actions">
+            {job.status === "done" && job.type === "Первичная" && onAct && <button className="kd-btn ghost sm" onClick={onAct}>Акт</button>}
+            {job.status === "done" && job.type !== "Первичная" && onCert && <button className="kd-btn ghost sm" onClick={onCert}>Сертификат</button>}
+            {job.status === "done" && !job.repeat_state && <button className="kd-btn ghost sm" onClick={onRepeat}>На повтор</button>}
+            {share > 0 && <button className="kd-btn ghost sm" onClick={() => onPayPartner(!job.partner_paid)}>{job.partner_paid ? "Отменить выплату" : "Выплатить долю"}</button>}
+            {job.partner_comp > 0 && <button className="kd-btn ghost sm" onClick={() => onCompPaid(!job.partner_comp_paid)}>{job.partner_comp_paid ? "Компенсация не получена" : "Компенсация получена"}</button>}
+            {job.executor_partner_id && job.status === "done" && job.executor_settlement === "qr_full" && <button className="kd-btn ghost sm" onClick={() => onExecutorPaid(!job.executor_paid)}>{job.executor_paid ? "Доля не выплачена" : "Выплатить долю исполнителю"}</button>}
+            {job.status === "done" && <button className="kd-btn ghost sm" onClick={() => onTechExtras()}>Бонус / дорожные</button>}
+            <button className="kd-btn ghost danger sm" onClick={onDelete}><Trash2 size={14} />Удалить</button>
+          </div>
+        </details>
+      )}
+      {isAdmin && !(job.status === "done" || share > 0 || job.partner_comp > 0) && (
+        <div className="kd-actions" style={{ marginTop: 8 }}>
+          <button className="kd-btn ghost danger sm" onClick={onDelete} title="Удалить"><Trash2 size={14} /></button>
+        </div>
+      )}
     </div>
   );
 }
