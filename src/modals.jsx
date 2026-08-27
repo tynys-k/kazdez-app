@@ -2125,6 +2125,7 @@ function RejectDepositModal({ dep, techName, onClose, onSave }) {
 function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, onPickDay }) {
   const start = defaultDate ? new Date(defaultDate) : new Date();
   const [ym, setYm] = useState({ y: start.getFullYear(), m: start.getMonth() });
+  const [view, setView] = useState("calendar"); // calendar | table
 
   const COLORS = ["#34D399", "#F5B454", "#7CB2F5", "#B79BF0", "#F2726A", "#25D366", "#E9A23B", "#5FD0C4", "#EF8FBE", "#9DD35F"];
   const techColor = (id) => {
@@ -2171,7 +2172,7 @@ function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, on
 
   return (
     <div className="kd-overlay" onClick={onClose}>
-      <div className="kd-modal" style={{ maxWidth: 760, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+      <div className="kd-modal" style={{ maxWidth: view === "table" ? 900 : 760, width: "100%" }} onClick={(e) => e.stopPropagation()}>
         <div className="kd-modal-head">
           <h3>🌴 Выходные сотрудников</h3>
           <button className="kd-x" onClick={onClose}><X size={16} /></button>
@@ -2183,9 +2184,16 @@ function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, on
               <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 17, minWidth: 150, textAlign: "center" }}>{MONTHS[ym.m]} {ym.y}</div>
               <button className="kd-arrow" onClick={next}><ChevronRight size={18} /></button>
             </div>
-            <button className="kd-btn ghost sm" onClick={today}>Сегодня</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div className="kd-seg">
+                <button type="button" className={`kd-segbtn ${view === "calendar" ? "on" : ""}`} onClick={() => setView("calendar")}>Календарь</button>
+                <button type="button" className={`kd-segbtn ${view === "table" ? "on" : ""}`} onClick={() => setView("table")}>Таблица</button>
+              </div>
+              <button className="kd-btn ghost sm" onClick={today}>Сегодня</button>
+            </div>
           </div>
 
+          {view === "calendar" && <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 6 }}>
             {WD.map((w, i) => (
               <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, letterSpacing: ".4px", color: i >= 5 ? "var(--rust)" : "var(--muted)", textTransform: "uppercase" }}>{w}</div>
@@ -2229,6 +2237,70 @@ function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, on
             </div>
           )}
           {onPickDay && <div className="kd-muted" style={{ marginTop: 10 }}>Нажми на день, чтобы отметить или снять выходной.</div>}
+          </>}
+
+          {view === "table" && (() => {
+            const dayList = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+            const isoFor = (day) => `${ym.y}-${String(ym.m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            const dowOf = (day) => (new Date(ym.y, ym.m, day).getDay() + 6) % 7; // Пн = 0
+            const rows = (techs || []).map((t) => {
+              const offs = (daysOff || []).filter((d) => d.tech_id === t.id && String(d.off_date).startsWith(monthPrefix));
+              const byDay = {};
+              offs.forEach((d) => { byDay[Number(String(d.off_date).slice(8, 10))] = d; });
+              return { t, byDay, total: offs.length };
+            });
+            const perDay = (day) => rows.reduce((s, r) => s + (r.byDay[day] ? 1 : 0), 0);
+            const monthTotal = rows.reduce((s, r) => s + r.total, 0);
+            const c = { width: 24, minWidth: 24, textAlign: "center", fontSize: 11, padding: "5px 0", borderLeft: "1px solid var(--line-soft)" };
+            const nameC = { position: "sticky", left: 0, background: "var(--surface)", textAlign: "left", padding: "5px 10px 5px 0", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", zIndex: 1 };
+            const sumC = { ...c, borderLeft: "2px solid var(--line)", fontWeight: 800 };
+            return (
+              <>
+                <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+                  <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...nameC, color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px" }}>Сотрудник</th>
+                        {dayList.map((day) => (
+                          <th key={day} style={{ ...c, fontWeight: 700, color: dowOf(day) >= 5 ? "var(--rust)" : "var(--muted)" }}>{day}</th>
+                        ))}
+                        <th style={{ ...sumC, color: "var(--muted)" }}>Σ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(({ t, byDay, total }) => (
+                        <tr key={t.id} style={{ borderTop: "1px solid var(--line-soft)" }}>
+                          <td style={nameC}>{personName(t.id)}</td>
+                          {dayList.map((day) => {
+                            const d = byDay[day];
+                            const weekendBg = dowOf(day) >= 5 ? "var(--surface-sunk)" : "transparent";
+                            return (
+                              <td
+                                key={day}
+                                onClick={onPickDay ? () => onPickDay(isoFor(day)) : undefined}
+                                title={d ? (personName(t.id) + (d.note ? " · " + d.note : "")) : ""}
+                                style={{ ...c, cursor: onPickDay ? "pointer" : "default", background: weekendBg }}
+                              >
+                                {d ? <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: techColor(t.id) }} /> : ""}
+                              </td>
+                            );
+                          })}
+                          <td style={{ ...sumC, color: total ? "var(--ink)" : "var(--muted)" }}>{total}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: "2px solid var(--line)" }}>
+                        <td style={{ ...nameC, color: "var(--muted)", fontWeight: 700 }}>Всего в день</td>
+                        {dayList.map((day) => { const n = perDay(day); return <td key={day} style={{ ...c, fontWeight: 700, color: n ? "var(--ink)" : "var(--line)" }}>{n || ""}</td>; })}
+                        <td style={{ ...sumC }}>{monthTotal}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                {rows.length === 0 && <div className="kd-muted" style={{ marginTop: 10 }}>Сотрудников пока нет.</div>}
+                {onPickDay && <div className="kd-muted" style={{ marginTop: 10 }}>Нажми на клетку дня, чтобы отметить или снять выходной.</div>}
+              </>
+            );
+          })()}
         </div>
       </div>
     </div>
