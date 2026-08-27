@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -1940,31 +1940,34 @@ function Dashboard({ session, profile }) {
     if (result.kind === "chemical") setTab("stock");
     if (result.kind === "profile") setTab("team");
   }
+  // Счётчик в меню ставим ТОЛЬКО там, где число требует действия.
+  // «Выполненные · 482» или «Корзина · 60» — это объём архива, реагировать на него нельзя,
+  // и такой шум топит те счётчики, ради которых в раздел действительно надо зайти.
   const baseTabs = [
-    { id: "today", icon: LayoutDashboard, label: `Командный центр${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
+    { id: "today", icon: LayoutDashboard, label: `Сегодня${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "schedule", icon: CalendarClock, label: "График" },
-    { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
-    { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
+    { id: "done", icon: CheckCircle2, label: "Выполненные" },
+    { id: "canceled", icon: XCircle, label: "Отменённые" },
     { id: "tasks", icon: ListTodo, label: `Задачи${allOpenTasks ? " · " + allOpenTasks : ""}` },
-    { id: "leads", icon: Contact, label: `Клиенты${activeLeads ? " · " + activeLeads : ""}` },
-    { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : (activeTenders ? " · " + activeTenders : "")}` },
-    { id: "repeats", icon: RefreshCw, label: `Повторы${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
-    { id: "retention", icon: ClipboardCheck, label: `Касания${dueFollowups.length || qualityPending.length ? " · " + (dueFollowups.length + qualityPending.length) : ""}` },
+    { id: "leads", icon: Contact, label: `Лиды${activeLeads ? " · " + activeLeads : ""}` },
+    { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : ""}` },
+    { id: "repeats", icon: RefreshCw, label: `Повторные выезды${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
+    { id: "retention", icon: ClipboardCheck, label: `Обзвон и качество${dueFollowups.length || qualityPending.length ? " · " + (dueFollowups.length + qualityPending.length) : ""}` },
     { id: "subscriptions", icon: Repeat2, label: `Абоненты${dueContracts.length ? " · " + dueContracts.length : ""}` },
     { id: "routes", icon: Route, label: "Маршруты" },
-    { id: "growth", icon: TrendingUp, label: `Прибыль и KPI${lossJobs.length ? " · ⚠ " + lossJobs.length : ""}` },
-    { id: "finance", icon: Wallet, label: "Аналитика" },
-    { id: "opex", icon: Landmark, label: "Финансы" },
-    { id: "cash", icon: Banknote, label: `Касса${deposits.filter((d) => d.status === "pending").length ? " · " + deposits.filter((d) => d.status === "pending").length : ""}` },
+    { id: "growth", icon: TrendingUp, label: `Прибыль по заявкам${lossJobs.length ? " · ⚠ " + lossJobs.length : ""}` },
+    { id: "finance", icon: Wallet, label: "Выручка и чек" },
+    { id: "opex", icon: Landmark, label: "Счета и расходы" },
+    { id: "cash", icon: Banknote, label: `Наличные от бригад${deposits.filter((d) => d.status === "pending").length ? " · " + deposits.filter((d) => d.status === "pending").length : ""}` },
     { id: "stock", icon: Package, label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
-    { id: "team", icon: Users, label: "Команда и доступы" },
+    { id: "team", icon: Users, label: "Сотрудники и доступы" },
     { id: "partners", icon: Handshake, label: "Партнёры" },
     { id: "docs", icon: FileText, label: "Документы" },
     { id: "materials", icon: FolderOpen, label: "Материалы" },
     { id: "knowledge", icon: GraduationCap, label: "База знаний" },
     { id: "journal", icon: History, label: "Журнал" },
-    { id: "trash", icon: Trash2, label: `Корзина${trash.length ? " · " + trash.length : ""}` },
+    { id: "trash", icon: Trash2, label: "Корзина" },
     { id: "myequip", icon: Wrench, label: "Моё оборудование" },
   ].filter((item) => isAdmin ? item.id !== "myequip" : canAccess(`tab.${item.id}`));
   // применяем сохранённый общий порядок (админ задаёт в Настройках). Новые вкладки — в конец.
@@ -1975,12 +1978,15 @@ function Dashboard({ session, profile }) {
         return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
       })
     : baseTabs;
+  // Группы названы по вопросу, на который отвечают, а не по внутренней терминологии.
+  // Все четыре «денежных» раздела собраны в одну группу — раньше они были раскиданы
+  // между «Результатами» и «Учётом», и приходилось вспоминать, в каком из них что лежит.
   const navGroups = [
-    { label: "Работа", ids: ["today", "jobs", "schedule", "routes", "tasks"] },
-    { label: "Клиенты", ids: ["leads", "retention", "subscriptions", "repeats"] },
-    { label: "Результаты", ids: ["done", "canceled", "growth", "finance"] },
-    { label: "Учёт", ids: ["opex", "cash", "stock", "myequip"] },
-    { label: "Команда", ids: ["team", "partners"] },
+    { label: "Ежедневная работа", ids: ["today", "jobs", "schedule", "routes", "tasks"] },
+    { label: "Клиенты и возвраты", ids: ["leads", "retention", "subscriptions", "repeats"] },
+    { label: "Деньги", ids: ["finance", "growth", "opex", "cash"] },
+    { label: "Архив заявок", ids: ["done", "canceled"] },
+    { label: "Команда и склад", ids: ["team", "partners", "stock", "myequip"] },
   ];
   const moreNavGroup = { label: "Ещё разделы", ids: ["tenders", "docs", "materials", "knowledge", "journal", "trash"] };
   const mobileTabIds = (isAdmin ? ["today", "jobs", "leads", "routes"] : ["today", "jobs", "tasks", "cash", "tenders", "finance"]).filter((id) => tabs.some((item) => item.id === id)).slice(0, 4);
@@ -2024,7 +2030,8 @@ function Dashboard({ session, profile }) {
         <header className="kd-topbar">
           <div className="kd-topleft">
             <button className="kd-burger" onClick={() => setSideOpen((v) => !v)} aria-label="Меню"><ClipboardList size={18} /></button>
-            <h1 className="kd-pagetitle">{tab === "today" ? (isAdmin ? "Командный центр" : "Мой день") : (tabs.find((t) => t.id === tab) || {}).label || TAB_LABELS[tab] || ""}</h1>
+            {/* Заголовок — чистое имя раздела без счётчика: цифра уже стоит в меню, дублировать её в h1 незачем. */}
+            <h1 className="kd-pagetitle">{tab === "today" ? (isAdmin ? "Сегодня" : "Мой день") : TAB_LABELS[tab] || (tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
           </div>
           <div className="kd-globalsearch" onBlur={() => setTimeout(() => setGlobalSearchOpen(false), 120)}>
             <Search size={16} />
@@ -2060,7 +2067,7 @@ function Dashboard({ session, profile }) {
         </header>
 
         <nav className="kd-mobile-nav" aria-label="Основная навигация">
-          {mobileTabs.map((item) => <button key={item.id} className={tab === item.id ? "on" : ""} onClick={() => setTab(item.id)}>{item.icon ? <item.icon size={19} /> : null}<span>{item.id === "today" ? (isAdmin ? "Центр" : "Мой день") : TAB_LABELS[item.id] || item.id}</span></button>)}
+          {mobileTabs.map((item) => <button key={item.id} className={tab === item.id ? "on" : ""} onClick={() => setTab(item.id)}>{item.icon ? <item.icon size={19} /> : null}<span>{item.id === "today" && !isAdmin ? "Мой день" : TAB_LABELS_SHORT[item.id] || TAB_LABELS[item.id] || item.id}</span></button>)}
           <button onClick={() => setSideOpen(true)}><Menu size={19} /><span>Ещё</span></button>
         </nav>
 
@@ -2091,9 +2098,14 @@ function Dashboard({ session, profile }) {
               <button onClick={() => dashboardAlerts[0] && setTab(dashboardAlerts[0].tab)}><span>Требуют внимания</span><strong className={dashboardAlerts.length ? "danger" : "ok"}>{dashboardAlerts.length}</strong><small>{dashboardAlerts.length ? "открой список ниже" : "всё под контролем"}</small></button>
             </section>
 
-            {isAdmin && <section className="kd-ownerpulse">
-              <div className="kd-ownerpulse-head"><div><div className="kd-eyebrow">Пульс компании</div><div className="kd-title">Сводка владельца</div><p>Деньги, поле и контроль — без переходов между разделами.</p></div><button className="kd-btn ghost sm" onClick={() => copyText(ownerSummaryText, () => showToast("Сводка скопирована"))}>Скопировать сводку</button></div>
-              <div className="kd-ownerpulse-grid"><button onClick={() => setTab("finance")}><span>Прибыль сегодня</span><strong className={todayProfit < 0 ? "danger" : ""}>{fmt(todayProfit)} ₸</strong><small>выручка {fmt(todayRevenue)} ₸</small></button><button onClick={() => setTab("done")}><span>Ожидаем оплату</span><strong>{fmt(totalReceivables)} ₸</strong><small>{overdueTransfers.length} просрочено</small></button><button onClick={() => setTab("routes")}><span>Сейчас в поле</span><strong>{enRouteNow + onSiteNow}</strong><small>{enRouteNow} в пути · {onSiteNow} на объекте</small></button><button onClick={() => setTab("done")}><span>Подтверждение работ</span><strong className={proofMissingToday ? "danger" : "ok"}>{proofMissingToday}</strong><small>{proofMissingToday ? "не заполнено сегодня" : "всё заполнено"}</small></button></div>
+            {/* Вторые четыре показателя владельца — компактной строкой, а не вторым рядом крупных плиток:
+                восемь одинаковых KPI-карточек подряд перестают читать целиком. */}
+            {isAdmin && <section className="kd-pulsestrip">
+              <button onClick={() => setTab("finance")}><span>Прибыль сегодня</span><strong className={todayProfit < 0 ? "danger" : ""}>{fmt(todayProfit)} ₸</strong></button>
+              <button onClick={() => setTab("done")}><span>Ждём оплату</span><strong>{fmt(totalReceivables)} ₸</strong>{overdueTransfers.length > 0 && <em>{overdueTransfers.length} просроч.</em>}</button>
+              <button onClick={() => setTab("routes")}><span>Сейчас в поле</span><strong>{enRouteNow + onSiteNow}</strong><em>{enRouteNow} в пути · {onSiteNow} на объекте</em></button>
+              <button onClick={() => setTab("done")}><span>Без фото-отчёта</span><strong className={proofMissingToday ? "danger" : "ok"}>{proofMissingToday}</strong></button>
+              <button className="copy" onClick={() => copyText(ownerSummaryText, () => showToast("Сводка скопирована"))} title="Скопировать сводку за день">Сводка</button>
             </section>}
 
             <section className="kd-todaysection">
