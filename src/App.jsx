@@ -6,7 +6,7 @@ import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -211,6 +211,16 @@ function PublicJobPage({ token }) {
 }
 
 // ----------------------------- dashboard -----------------------------
+function SortBar({ value, onChange, options }) {
+  return (
+    <div className="kd-seg kd-sortbar">
+      {options.map(([id, label]) => (
+        <button key={id} type="button" className={`kd-segbtn ${value === id ? "on" : ""}`} onClick={() => onChange(id)}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
 function Dashboard({ session, profile }) {
   const [jobs, setJobs] = useState([]);
   const [chemicals, setChemicals] = useState([]);
@@ -279,6 +289,10 @@ function Dashboard({ session, profile }) {
   const [pMode, setPMode] = useState("all");
   const [brandFilter, setBrandFilter] = useState("all");
   const [pOff, setPOff] = useState(0);
+  const [daySort, setDaySort] = useState("order");     // order | revenue | count
+  const [techSort, setTechSort] = useState("revenue"); // revenue | count | avg | markup
+  const [pestSort, setPestSort] = useState("revenue"); // revenue | count | avg
+  const [openWeeks, setOpenWeeks] = useState({});      // { [weekIdx]: true }
   const [moreNavOpen, setMoreNavOpen] = useState(() => localStorage.getItem("kd-more-nav") === "1");
   const [online, setOnline] = useState(() => navigator.onLine);
   const [dataWarnings, setDataWarnings] = useState([]);
@@ -1614,7 +1628,9 @@ function Dashboard({ session, profile }) {
   const fin = (() => {
     const weekIdx = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
     const week = [1, 2, 3, 4, 5, 6, 0].map((dow) => ({ dow, label: WEEKDAYS[dow].slice(0, 2), count: 0, revenue: 0 }));
-    let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, executorShares = 0, qrFees = 0, partnerComp = 0; const bySource = {}; const byTech = {};
+    const maxPriceOption = (j) => Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0));
+    const monthMode = pMode === "month";
+    let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, executorShares = 0, qrFees = 0, partnerComp = 0; const bySource = {}; const byTech = {}; const byPest = {}; const monthWeeksMap = {};
     jobs.forEach((j) => {
       if (j.status === "canceled") return;
       const isPartnerJob = j.brand === "partner";
@@ -1638,16 +1654,39 @@ function Dashboard({ session, profile }) {
         if (j.executor_partner_id && j.executor_settlement === "qr_full") executorShares += Math.round(paid * (Number(j.executor_share_pct) || 0) / 100);
         bySource[srcKey].revenue += paid;
         if (dt) { const wi = weekIdx[dt.getDay()]; week[wi].count++; week[wi].revenue += paid; }
+        const pestKey = (j.pest || "—").trim() || "—";
+        if (!byPest[pestKey]) byPest[pestKey] = { pest: pestKey, count: 0, revenue: 0, cost: 0 };
+        byPest[pestKey].count++; byPest[pestKey].revenue += paid; byPest[pestKey].cost += jcost;
         if (j.assigned_to) {
-          if (!byTech[j.assigned_to]) byTech[j.assigned_to] = { count: 0, revenue: 0, cost: 0 };
-          byTech[j.assigned_to].count++; byTech[j.assigned_to].revenue += paid; byTech[j.assigned_to].cost += jcost;
+          if (!byTech[j.assigned_to]) byTech[j.assigned_to] = { count: 0, revenue: 0, cost: 0, quoteSum: 0, paidOnQuote: 0, quoteN: 0 };
+          const bt = byTech[j.assigned_to];
+          bt.count++; bt.revenue += paid; bt.cost += jcost;
+          const quote = maxPriceOption(j);
+          if (quote > 0) { bt.quoteSum += quote; bt.paidOnQuote += paid; bt.quoteN++; }
+        }
+        if (monthMode && dt) {
+          const dom = dt.getDate();
+          const wkIdx = Math.min(4, Math.floor((dom - 1) / 7));
+          if (!monthWeeksMap[wkIdx]) monthWeeksMap[wkIdx] = { idx: wkIdx, label: `Неделя ${wkIdx + 1}`, count: 0, revenue: 0, days: {} };
+          const mw = monthWeeksMap[wkIdx];
+          mw.count++; mw.revenue += paid;
+          const iso = j.scheduled_date;
+          if (!mw.days[iso]) mw.days[iso] = { date: iso, dom, dow: dt.getDay(), count: 0, revenue: 0 };
+          mw.days[iso].count++; mw.days[iso].revenue += paid;
         }
       }
       if (j.partner_comp > 0) partnerComp += Number(j.partner_comp) || 0;
     });
     const weekMax = Math.max(1, ...week.map((w) => w.revenue));
-    // средний чек по трём срезам (в том же периоде, независимо от фильтра бренда)
+    const monthWeeks = Object.values(monthWeeksMap).sort((a, b) => a.idx - b.idx).map((mw) => ({
+      idx: mw.idx, label: mw.label, count: mw.count, revenue: mw.revenue,
+      days: Object.values(mw.days).sort((a, b) => a.date.localeCompare(b.date)),
+      dayMax: Math.max(1, ...Object.values(mw.days).map((d) => d.revenue)),
+    }));
+    const monthWeekMax = Math.max(1, ...monthWeeks.map((w) => w.revenue));
+    // средний чек по срезам (в том же периоде, независимо от фильтра бренда)
     const avg = { ours: { sum: 0, n: 0 }, partner: { sum: 0, n: 0 } };
+    const avgType = { "Первичная": { sum: 0, n: 0 }, "Вторичная": { sum: 0, n: 0 }, "Осмотр": { sum: 0, n: 0 } };
     jobs.forEach((j) => {
       if (j.status !== "done") return;
       const dt = parseIso(j.scheduled_date);
@@ -1657,13 +1696,15 @@ function Dashboard({ session, profile }) {
       if (paid <= 0) return;
       const k = j.brand === "partner" ? "partner" : "ours";
       avg[k].sum += paid; avg[k].n++;
+      if (avgType[j.type]) { avgType[j.type].sum += paid; avgType[j.type].n++; }
     });
     const avgCheck = {
       ours: avg.ours.n ? Math.round(avg.ours.sum / avg.ours.n) : 0, oursN: avg.ours.n,
       partner: avg.partner.n ? Math.round(avg.partner.sum / avg.partner.n) : 0, partnerN: avg.partner.n,
       all: (avg.ours.n + avg.partner.n) ? Math.round((avg.ours.sum + avg.partner.sum) / (avg.ours.n + avg.partner.n)) : 0, allN: avg.ours.n + avg.partner.n,
     };
-    return { revenue, cost, partnerShares, executorShares, qrFees, partnerComp, profit: revenue - cost - partnerShares - executorShares - qrFees + partnerComp, cash, qr, bySource, byTech, week, weekMax, avgCheck };
+    const avgByType = Object.entries(avgType).map(([type, v]) => ({ type, n: v.n, avg: v.n ? Math.round(v.sum / v.n) : 0 }));
+    return { revenue, cost, partnerShares, executorShares, qrFees, partnerComp, profit: revenue - cost - partnerShares - executorShares - qrFees + partnerComp, cash, qr, bySource, byTech, byPest, week, weekMax, monthWeeks, monthWeekMax, avgCheck, avgByType };
   })();
 
   const expensesInRange = expenses.filter((e) => {
@@ -1711,6 +1752,36 @@ function Dashboard({ session, profile }) {
   });
   const opexInRange = opexInRangeList.reduce((s, o) => s + (Number(o.amount) || 0), 0);
   const netProfit = fin.profit - expensesInRange - opexInRange;
+
+  // --- производные для вкладки «Аналитика» ---
+  const sortByMetric = (arr) => {
+    const a = arr.slice();
+    if (daySort === "revenue") a.sort((x, y) => y.revenue - x.revenue);
+    else if (daySort === "count") a.sort((x, y) => y.count - x.count);
+    return a;
+  };
+  const finWeekSorted = sortByMetric(fin.week);
+  const finMonthWeeksSorted = daySort === "order" ? fin.monthWeeks : sortByMetric(fin.monthWeeks);
+  const pestRows = Object.values(fin.byPest)
+    .map((p) => ({ ...p, avg: p.count ? Math.round(p.revenue / p.count) : 0 }))
+    .sort((a, b) => (pestSort === "count" ? b.count - a.count : pestSort === "avg" ? b.avg - a.avg : b.revenue - a.revenue));
+  const techRows = techs
+    .filter((t) => fin.byTech[t.id])
+    .map((t) => {
+      const v = fin.byTech[t.id];
+      const avg = v.count ? Math.round(v.revenue / v.count) : 0;
+      const markup = v.quoteN && v.quoteSum > 0 ? Math.round((v.paidOnQuote - v.quoteSum) / v.quoteSum * 100) : null;
+      return { t, v, avg, markup, profit: v.revenue - v.cost };
+    })
+    .sort((a, b) => {
+      if (techSort === "count") return b.v.count - a.v.count;
+      if (techSort === "avg") return b.avg - a.avg;
+      if (techSort === "markup") return (b.markup ?? -Infinity) - (a.markup ?? -Infinity);
+      return b.v.revenue - a.v.revenue;
+    });
+  const upliftRows = techRows.filter((r) => r.markup !== null).sort((a, b) => b.markup - a.markup);
+  const upliftTotals = techRows.reduce((s, r) => ({ quote: s.quote + r.v.quoteSum, paid: s.paid + r.v.paidOnQuote }), { quote: 0, paid: 0 });
+  const upliftPct = upliftTotals.quote > 0 ? Math.round((upliftTotals.paid - upliftTotals.quote) / upliftTotals.quote * 100) : 0;
 
   // ---- склад ----
   const inventory = chemicals.map((c) => {
@@ -2825,6 +2896,11 @@ function Dashboard({ session, profile }) {
                 <div className="kd-row"><span>Наши заявки</span><span className="kd-twoval"><em>{fin.avgCheck.oursN} заявок</em><strong>{fmt(fin.avgCheck.ours)} ₸</strong></span></div>
                 <div className="kd-row"><span>Партнёрские</span><span className="kd-twoval"><em>{fin.avgCheck.partnerN} заявок</em><strong>{fmt(fin.avgCheck.partner)} ₸</strong></span></div>
                 <div className="kd-row total"><span>Общий (все заявки)</span><span className="kd-twoval"><em>{fin.avgCheck.allN} заявок</em><strong style={{ color: "var(--primary-d)" }}>{fmt(fin.avgCheck.all)} ₸</strong></span></div>
+                <div className="kd-section" style={{ marginTop: 12 }}>По типу обработки</div>
+                {fin.avgByType.filter((r) => r.n > 0).map((r) => (
+                  <div className="kd-row" key={r.type}><span>{r.type}</span><span className="kd-twoval"><em>{r.n} заявок</em><strong>{fmt(r.avg)} ₸</strong></span></div>
+                ))}
+                {fin.avgByType.every((r) => r.n === 0) && <div className="kd-muted">За период оплаченных заявок нет.</div>}
                 <div className="kd-muted" style={{ marginTop: 8 }}>Чек = выручка ÷ число выполненных оплаченных заявок за период. Считается по всем заявкам, независимо от фильтра выше.</div>
               </div>
               <div className="kd-card">
@@ -2837,7 +2913,8 @@ function Dashboard({ session, profile }) {
             </div>
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">По дням недели · {range.label}</div>
-              {fin.week.map((w) => (
+              <SortBar value={daySort} onChange={setDaySort} options={[["order", "По порядку"], ["revenue", "По выручке"], ["count", "По заявкам"]]} />
+              {finWeekSorted.map((w) => (
                 <div className="kd-weekrow" key={w.dow}>
                   <span className="kd-weekday">{w.label}</span>
                   <div className="kd-weekbar"><div className="kd-weekfill" style={{ width: `${Math.round((w.revenue / fin.weekMax) * 100)}%` }} /></div>
@@ -2846,26 +2923,92 @@ function Dashboard({ session, profile }) {
                 </div>
               ))}
             </div>
+
+            {pMode === "month" && (
+              <div className="kd-card kd-mweeks" style={{ marginTop: 14 }}>
+                <div className="kd-section">По неделям месяца · {range.label}</div>
+                <SortBar value={daySort} onChange={setDaySort} options={[["order", "По порядку"], ["revenue", "По выручке"], ["count", "По заявкам"]]} />
+                {fin.monthWeeks.length === 0 && <div className="kd-muted">За месяц выполненных заявок нет.</div>}
+                {finMonthWeeksSorted.map((w) => {
+                  const open = !!openWeeks[w.idx];
+                  const days = daySort === "order" ? w.days : sortByMetric(w.days);
+                  return (
+                    <div key={w.idx}>
+                      <div className="kd-weekrow head" onClick={() => setOpenWeeks((s) => ({ ...s, [w.idx]: !s[w.idx] }))}>
+                        <span className="kd-weekday">{w.label}</span>
+                        <div className="kd-weekbar"><div className="kd-weekfill" style={{ width: `${Math.round((w.revenue / fin.monthWeekMax) * 100)}%` }} /></div>
+                        <span className="kd-weekcount">{w.count} зав.</span>
+                        <strong className="kd-weeksum">{fmt(w.revenue)} ₸</strong>
+                        <ChevronDown size={15} className={`kd-weekchev ${open ? "open" : ""}`} />
+                      </div>
+                      {open && days.map((d) => (
+                        <div className="kd-weekrow sub" key={d.date}>
+                          <span className="kd-weekday">{d.dom} · {WEEKDAYS[d.dow].slice(0, 2)}</span>
+                          <div className="kd-weekbar"><div className="kd-weekfill" style={{ width: `${Math.round((d.revenue / w.dayMax) * 100)}%` }} /></div>
+                          <span className="kd-weekcount">{d.count} зав.</span>
+                          <strong className="kd-weeksum">{fmt(d.revenue)} ₸</strong>
+                          <span />
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">По видам вредителей · {range.label}</div>
+              <SortBar value={pestSort} onChange={setPestSort} options={[["revenue", "По выручке"], ["count", "По заявкам"], ["avg", "По чеку"]]} />
+              {pestRows.length === 0 && <div className="kd-muted">За период выполненных заявок нет.</div>}
+              {pestRows.length > 0 && (
+                <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr .9fr 1fr 1fr" }}><span>Вид</span><span>Заявок</span><span>Выручка</span><span>Средний чек</span></div>
+              )}
+              {pestRows.map((p) => (
+                <div className="kd-ledgerrow" key={p.pest} style={{ gridTemplateColumns: "1.6fr .9fr 1fr 1fr" }}>
+                  <span className="kd-ledgername">{p.pest}</span>
+                  <span>{p.count} зав.</span>
+                  <span>{fmt(p.revenue)} ₸</span>
+                  <strong>{fmt(p.avg)} ₸</strong>
+                </div>
+              ))}
+            </div>
+
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">По дезинфекторам · {range.label}</div>
+              <SortBar value={techSort} onChange={setTechSort} options={[["revenue", "По выручке"], ["count", "По заявкам"], ["avg", "По чеку"], ["markup", "По % поднятия"]]} />
               {techs.length === 0 && <div className="kd-muted">Дезинфекторов пока нет.</div>}
-              {techs.length > 0 && Object.keys(fin.byTech).length === 0 && <div className="kd-muted">За период выполненных заявок нет.</div>}
-              {techs.length > 0 && Object.keys(fin.byTech).length > 0 && (
-                <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1fr" }}><span>Сотрудник</span><span>Заявок</span><span>Выручка</span><span>Прибыль</span></div>
+              {techs.length > 0 && techRows.length === 0 && <div className="kd-muted">За период выполненных заявок нет.</div>}
+              {techRows.length > 0 && (
+                <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.4fr .8fr 1fr 1fr 1fr" }}><span>Сотрудник</span><span>Заявок</span><span>Выручка</span><span>Ср. чек</span><span>Прибыль</span></div>
               )}
-              {techs.map((t) => {
-                const v = fin.byTech[t.id];
-                if (!v) return null;
-                const techProfit = v.revenue - v.cost;
-                return (
-                  <div className="kd-ledgerrow" key={t.id} style={{ gridTemplateColumns: "1.4fr 1fr 1fr 1fr" }}>
-                    <span className="kd-ledgername">{t.full_name || "?"}</span>
-                    <span>{v.count} зав.</span>
-                    <span>{fmt(v.revenue)} ₸</span>
-                    <strong style={{ color: "#0E7C66" }}>{fmt(techProfit)} ₸</strong>
-                  </div>
-                );
-              })}
+              {techRows.map(({ t, v, avg, profit }) => (
+                <div className="kd-ledgerrow" key={t.id} style={{ gridTemplateColumns: "1.4fr .8fr 1fr 1fr 1fr" }}>
+                  <span className="kd-ledgername">{t.full_name || "?"}</span>
+                  <span>{v.count} зав.</span>
+                  <span>{fmt(v.revenue)} ₸</span>
+                  <span>{fmt(avg)} ₸</span>
+                  <strong style={{ color: "#0E7C66" }}>{fmt(profit)} ₸</strong>
+                </div>
+              ))}
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Поднятие цены · {range.label}</div>
+              <div className="kd-row"><span>Изначально (сумма макс. цен)</span><strong>{fmt(upliftTotals.quote)} ₸</strong></div>
+              <div className="kd-row"><span>Итого получено</span><strong>{fmt(upliftTotals.paid)} ₸</strong></div>
+              <div className="kd-row total"><span>Поднятие</span><strong style={{ color: upliftPct >= 0 ? "#0E7C66" : "#B42318" }}>{upliftTotals.paid - upliftTotals.quote >= 0 ? "+" : ""}{fmt(upliftTotals.paid - upliftTotals.quote)} ₸ · {upliftPct} %</strong></div>
+              {upliftRows.length > 0 && (
+                <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr 1fr 1fr .8fr", marginTop: 10 }}><span>Сотрудник</span><span>Изначально</span><span>Итого</span><span>%</span></div>
+              )}
+              {upliftRows.map(({ t, v, markup }) => (
+                <div className="kd-ledgerrow" key={t.id} style={{ gridTemplateColumns: "1.6fr 1fr 1fr .8fr" }}>
+                  <span className="kd-ledgername">{t.full_name || "?"}</span>
+                  <span>{fmt(v.quoteSum)} ₸</span>
+                  <span>{fmt(v.paidOnQuote)} ₸</span>
+                  <strong style={{ color: markup >= 0 ? "#0E7C66" : "#B42318" }}>{markup >= 0 ? "+" : ""}{markup} %</strong>
+                </div>
+              ))}
+              <div className="kd-muted" style={{ marginTop: 8 }}>Изначальная цена = самый дорогой из озвученных в заявке вариантов. Учитываются только заявки с указанной ценой.</div>
             </div>
           </>
         )}
