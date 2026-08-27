@@ -361,7 +361,9 @@ function Dashboard({ session, profile }) {
       supabase.from("chemicals").select("*"),
       supabase.from("audit_log").select("*").order("ts", { ascending: false }),
       supabase.from("trash").select("*").order("deleted_at", { ascending: false }),
-      supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at"),
+      // cash_opening_balance / cash_opening_date — база ревизии кассы: от них считается «на руках»
+      // (см. techOpening ниже). Без них остаток считается за всю историю и показывает завышенные суммы.
+      supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at, cash_opening_balance, cash_opening_date"),
       supabase.from("handouts").select("*"),
       supabase.from("partners").select("*"),
       supabase.from("doc_services").select("*").order("created_at", { ascending: false }),
