@@ -374,6 +374,13 @@ body{
 .kd-weekfill{height:100%;background:linear-gradient(90deg,var(--primary),var(--primary-d));border-radius:999px;min-width:2px;box-shadow:0 0 10px 0 var(--em-glow);}
 .kd-weekcount{font-family:var(--font-mono);font-size:12px;color:var(--muted);text-align:right;}
 .kd-weeksum{text-align:right;}
+.kd-sortbar{margin:4px 0 12px;}
+.kd-mweeks .kd-weekrow{grid-template-columns:88px 1fr 60px 92px 16px;}
+.kd-mweeks .kd-weekrow.head{cursor:pointer;}
+.kd-mweeks .kd-weekrow.sub{padding:5px 0 5px 14px;font-weight:600;}
+.kd-mweeks .kd-weekrow.sub .kd-weekday{font-weight:600;font-size:12.5px;}
+.kd-weekchev{color:var(--muted);justify-self:center;transition:transform .15s;}
+.kd-weekchev.open{transform:rotate(180deg);}
 .kd-card.low{border-color:rgba(242,114,106,.4);background:linear-gradient(180deg,var(--rust-tint),var(--surface));}
 .kd-card.low::before{content:"";position:absolute;left:0;top:16px;bottom:16px;width:3px;border-radius:4px;background:var(--rust);box-shadow:0 0 12px 0 var(--rust);}
 .kd-lowtag{font-size:11px;font-weight:700;color:var(--rust);background:var(--rust-tint);border-radius:6px;padding:2px 7px;margin-left:8px;}
