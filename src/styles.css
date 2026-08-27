@@ -265,6 +265,20 @@ body{
 .kd-srctag{font-size:12px;font-weight:700;color:var(--blue);background:var(--blue-tint);border-radius:8px;padding:5px 9px;}
 .kd-card-foot{margin-bottom:15px;display:flex;flex-direction:column;gap:6px;padding-top:14px;border-top:1px solid var(--line);}
 .kd-actions{display:flex;gap:8px;flex-wrap:wrap;}
+/* Строка-флаг в подвале карточки: цветом кодируем «нужно действие / закрыто / проблема»,
+   чтобы важное не терялось в сплошном сером тексте. */
+.kd-flag{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;max-width:100%;padding:3px 9px;border-radius:8px;font-size:12px;font-weight:750;line-height:1.45;}
+.kd-flag.warn{color:var(--amber);background:var(--amber-tint);}
+.kd-flag.danger{color:var(--rust);background:var(--rust-tint);}
+.kd-flag.ok{color:var(--primary-d);background:var(--primary-tint);}
+/* «Ещё» — редкие административные действия карточки */
+.kd-more{margin-top:10px;}
+.kd-more>summary{display:inline-flex;align-items:center;gap:6px;width:auto;padding:6px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surface-sunk);color:var(--muted);font-size:12.5px;font-weight:750;cursor:pointer;list-style:none;user-select:none;}
+.kd-more>summary::-webkit-details-marker{display:none;}
+.kd-more>summary::after{content:"⌄";font-size:14px;line-height:1;transform:translateY(-2px);}
+.kd-more[open]>summary::after{content:"⌃";transform:translateY(2px);}
+.kd-more>summary:hover{color:var(--ink);border-color:var(--line-hi);}
+.kd-more[open]>summary{margin-bottom:9px;}
 .kd-empty{background:var(--surface);border:1px dashed var(--line-hi);border-radius:var(--radius);padding:32px 24px;text-align:center;color:var(--muted);font-size:14px;font-weight:600;}
 
 /* ===================== BUTTONS ===================== */
