@@ -2,7 +2,7 @@
 // Модальные окна Этапа 3: клиент 360 и единый жизненный цикл заявки.
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
-import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -2346,4 +2346,142 @@ function ContractModal({ contract, people = [], onClose, onSave }) {
   </ModalShell>;
 }
 
-export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, ViewModal, jobToForm };
+// ----------------------------- Доступы сотрудников -----------------------------
+// Каталог прав для окна «Права доступа». Ярлыки вкладок берём из TAB_LABELS,
+// чтобы названия совпадали с боковым меню.
+const ACCESS_GROUPS = [
+  {
+    title: "Разделы",
+    items: [
+      "today", "jobs", "schedule", "done", "canceled", "tasks", "repeats", "leads", "retention",
+      "subscriptions", "routes", "growth", "finance", "opex", "cash", "stock", "team", "partners",
+      "tenders", "docs", "materials", "knowledge", "myequip",
+    ].map((t) => [`tab.${t}`, TAB_LABELS[t] || (t === "myequip" ? "Моё оборудование" : t)]),
+  },
+  {
+    title: "Действия",
+    items: [
+      ["action.jobs_edit", "Заявки: создание и редактирование"],
+      ["action.leads_edit", "Клиенты и лиды: редактирование"],
+      ["action.tasks_manage", "Задачи: управление и назначение"],
+      ["action.finance_edit", "Финансы и касса: редактирование"],
+      ["action.docs_edit", "Документы: редактирование"],
+      ["action.tenders_edit", "Тендеры: редактирование"],
+      ["action.partners_edit", "Партнёры: редактирование"],
+      ["action.stock_edit", "Склад: приход и редактирование"],
+      ["action.team_manage", "Команда: управление сотрудниками"],
+      ["action.settings", "Доступ к настройкам"],
+    ],
+  },
+  {
+    title: "Данные",
+    items: [
+      ["data.stock_self", "Свой остаток препаратов"],
+      ["data.equipment", "Оборудование"],
+    ],
+  },
+];
+
+function UserAccessModal({ user, onClose, onSave }) {
+  const isEdit = !!user?.id;
+  const [fullName, setFullName] = useState(user?.full_name || "");
+  const [email, setEmail] = useState(user?.email || "");
+  const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState(user?.phone || "");
+  const [role, setRole] = useState(user?.role || "tech");
+  const [isActive, setIsActive] = useState(user?.is_active !== false);
+  const [overrides, setOverrides] = useState(
+    user?.access_overrides && typeof user.access_overrides === "object" ? { ...user.access_overrides } : {}
+  );
+  const [showPerms, setShowPerms] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const roleKeys = Object.keys(ROLE_DEFINITIONS).filter((r) => r !== "admin");
+  const roleDefaults = new Set(ROLE_DEFAULT_PERMISSIONS[role] || []);
+  const isAdminRole = role === "admin";
+  const emailOk = /\S+@\S+\.\S+/.test(email.trim());
+  const ok = fullName.trim() && (isEdit || (emailOk && password.trim().length >= 6));
+  const overrideCount = Object.keys(overrides).length;
+
+  function stateOf(key) {
+    if (key in overrides) return overrides[key] ? "allow" : "deny";
+    return "default";
+  }
+  function setOverride(key, value) {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      if (value === "default") delete next[key];
+      else next[key] = value === "allow";
+      return next;
+    });
+  }
+
+  async function save() {
+    setSaving(true);
+    const payload = {
+      full_name: fullName.trim(),
+      phone: phone.trim() || null,
+      role,
+      is_active: isActive,
+      access_overrides: overrides,
+    };
+    if (isEdit) payload.id = user.id;
+    else { payload.email = email.trim(); payload.password = password; }
+    await onSave(payload);
+    setSaving(false);
+  }
+
+  return (
+    <ModalShell wide title={isEdit ? `Права · ${user.full_name || user.email || "сотрудник"}` : "Добавить сотрудника"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : isEdit ? "Сохранить" : "Создать"}</button>
+    </>}>
+      <Field label="Имя (как видно в приложении)"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Байсеит" /></Field>
+      <div className="kd-grid2">
+        <Field label="Почта (логин)"><input type="email" value={email} disabled={isEdit} onChange={(e) => setEmail(e.target.value)} placeholder="user@example.com" /></Field>
+        <Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 ..." /></Field>
+      </div>
+      {!isEdit && <Field label="Пароль (минимум 6 символов)"><input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Придумай пароль" /></Field>}
+      {isEdit && <div className="kd-muted" style={{ marginBottom: 10 }}>Почту и пароль здесь изменить нельзя — только имя, телефон, роль и доступы.</div>}
+      <Field label="Роль">
+        <select value={role} onChange={(e) => setRole(e.target.value)}>
+          {roleKeys.map((r) => <option key={r} value={r}>{ROLE_DEFINITIONS[r].label} — {ROLE_DEFINITIONS[r].description}</option>)}
+        </select>
+      </Field>
+      <label className="kd-check"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /><span>Учётная запись активна (снять галочку — вход заблокирован)</span></label>
+
+      <div className="kd-section" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>Персональные доступы{overrideCount > 0 ? ` · изменено: ${overrideCount}` : ""}</span>
+        <button type="button" className="kd-btn ghost sm" onClick={() => setShowPerms((v) => !v)}>{showPerms ? "Скрыть" : "Настроить"}</button>
+      </div>
+      {showPerms && (isAdminRole ? (
+        <div className="kd-hint">Администратор имеет полный доступ ко всему — персональные ограничения не применяются.</div>
+      ) : (
+        <div>
+          <div className="kd-muted" style={{ marginBottom: 10 }}>«По роли» — как задано для роли «{ROLE_DEFINITIONS[role].label}». «Разрешить» / «Запретить» переопределяют это только для этого сотрудника.</div>
+          {ACCESS_GROUPS.map((group) => (
+            <div key={group.title} style={{ marginBottom: 14 }}>
+              <div className="kd-muted" style={{ fontWeight: 700, marginBottom: 6 }}>{group.title}</div>
+              {group.items.map(([key, label]) => {
+                const st = stateOf(key);
+                const byRole = roleDefaults.has(key);
+                return (
+                  <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "6px 0", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13 }}>{label} <span className="kd-muted" style={{ fontSize: 11 }}>· по роли: {byRole ? "да" : "нет"}</span></span>
+                    <div className="kd-seg">
+                      <button type="button" className={`kd-segbtn ${st === "default" ? "on" : ""}`} onClick={() => setOverride(key, "default")}>По роли</button>
+                      <button type="button" className={`kd-segbtn ${st === "allow" ? "on" : ""}`} onClick={() => setOverride(key, "allow")}>Разрешить</button>
+                      <button type="button" className={`kd-segbtn ${st === "deny" ? "on" : ""}`} onClick={() => setOverride(key, "deny")}>Запретить</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      ))}
+    </ModalShell>
+  );
+}
+
+export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
