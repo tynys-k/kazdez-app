@@ -11,7 +11,7 @@ import {
 
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -264,6 +264,7 @@ function Dashboard({ session, profile }) {
   const [notifications, setNotifications] = useState([]);
   const [jobProofs, setJobProofs] = useState([]);
   const [cashAdjustments, setCashAdjustments] = useState([]);
+  const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -399,9 +400,12 @@ function Dashboard({ session, profile }) {
       // Ревизии кассы и ручные корректировки остатков. Последняя запись kind="revision"
       // задаёт новую точку отсчёта для «на руках» (см. techCashOnHand).
       supabase.from("cash_adjustments").select("*").order("created_at", { ascending: false }),
+      // Ревизии и движения препаратов у сотрудников. Последняя запись kind="revision"
+      // по паре сотрудник+препарат задаёт точку отсчёта (см. techLedger).
+      supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr, car] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ", "Ревизии кассы"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr, car, iar] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
     const useOfflineSnapshot = !navigator.onLine && !!jr.error && !!offlineSnapshot?.jobs;
@@ -450,6 +454,7 @@ function Dashboard({ session, profile }) {
     setNotifications(ntr.data || []);
     setJobProofs(jpr.data || []);
     setCashAdjustments(car.data || []);
+    setInventoryAdjustments(iar.data || []);
     if (!useOfflineSnapshot && !jr.error) {
       try {
         const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
@@ -631,10 +636,23 @@ function Dashboard({ session, profile }) {
   const defaultGuarantee = Number(settings.default_guarantee_months) || 6;
   function techLedger(techId) {
     const m = {};
-    const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0 });
+    const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0, adjusted: 0 });
     handouts.filter((h) => h.tech_id === techId).forEach((h) => { const g = get(h.chemical_id); if (h.kind === "opening") g.opening += Number(h.amount) || 0; else g.issued += Number(h.amount) || 0; });
     jobs.filter((j) => j.assigned_to === techId).forEach((j) => (j.chemicals || []).forEach((l) => { if (l.chemical_id) get(l.chemical_id).consumed += lineAmount(l); }));
-    return Object.entries(m).map(([cid, v]) => { const c = chemById(cid); const received = v.issued + v.opening; return c ? { chem: c, ...v, received, balance: received - v.consumed } : null; }).filter(Boolean);
+    inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId)).forEach((a) => { get(a.chemical_id).adjusted += Number(a.amount_delta) || 0; });
+    return Object.entries(m).map(([cid, v]) => {
+      const c = chemById(cid); if (!c) return null;
+      const received = v.issued + v.opening;
+      // Была ревизия по этому препарату — она и есть точка отсчёта: берём зафиксированный
+      // факт и добавляем только движение ПОСЛЕ неё. Иначе считаем как раньше.
+      const revisions = inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.chemical_id) === String(cid) && a.kind === "revision").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      if (!revisions.length) return { chem: c, ...v, received, balance: received - v.consumed + v.adjusted };
+      const checkpoint = revisions[0];
+      const issuedAfter = handouts.filter((h) => String(h.tech_id) === String(techId) && String(h.chemical_id) === String(cid) && (h.created_at || "").slice(0, 10) > checkpoint.event_date).reduce((s, h) => s + (Number(h.amount) || 0), 0);
+      const consumedAfter = jobs.filter((j) => String(j.assigned_to) === String(techId) && j.scheduled_date > checkpoint.event_date).reduce((sum, j) => sum + (j.chemicals || []).filter((l) => String(l.chemical_id) === String(cid)).reduce((s, l) => s + lineAmount(l), 0), 0);
+      const adjustedAfter = inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.chemical_id) === String(cid) && String(a.created_at) > String(checkpoint.created_at)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
+      return { chem: c, ...v, received, balance: Number(checkpoint.balance_after) + issuedAfter - consumedAfter + adjustedAfter, revision: checkpoint };
+    }).filter(Boolean);
   }
 
   const techById = (id) => techs.find((t) => t.id === id);
@@ -710,6 +728,34 @@ function Dashboard({ session, profile }) {
     const laterAdjustments = cashAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.created_at) > String(latest.created_at)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
     return Number(latest.balance_after) + collectedAfter - depositedAfter + laterAdjustments;
   };
+  // Ревизия / списание / передача препаратов между сотрудниками.
+  // Передача пишется двумя связанными строками (out + in) с общим transfer_group.
+  async function saveInventoryMovement(tech, payload) {
+    const current = Number(payload.current_balance) || 0;
+    const quantity = Number(payload.amount) || 0;
+    const common = {
+      chemical_id: String(payload.chemical_id), event_date: payload.event_date,
+      reason: payload.reason, note: payload.note || null, created_by: session.user.id,
+    };
+    let rows;
+    if (payload.kind === "transfer") {
+      const targetBefore = techLedger(payload.to_tech_id).find((r) => String(r.chem.id) === String(payload.chemical_id))?.balance || 0;
+      const transferGroup = crypto.randomUUID();
+      rows = [
+        { ...common, tech_id: String(tech.id), kind: "transfer_out", amount_delta: -quantity, balance_before: current, balance_after: current - quantity, counterparty_tech_id: String(payload.to_tech_id), transfer_group: transferGroup },
+        { ...common, tech_id: String(payload.to_tech_id), kind: "transfer_in", amount_delta: quantity, balance_before: targetBefore, balance_after: targetBefore + quantity, counterparty_tech_id: String(tech.id), transfer_group: transferGroup },
+      ];
+    } else {
+      const delta = payload.kind === "revision" ? quantity - current : payload.kind === "correction_in" ? quantity : -quantity;
+      rows = [{ ...common, tech_id: String(tech.id), kind: payload.kind, amount_delta: delta, balance_before: current, balance_after: current + delta }];
+    }
+    const { error } = await supabase.from("inventory_adjustments").insert(rows);
+    if (error) { showToast("Ошибка: " + error.message); return false; }
+    const chem = chemById(payload.chemical_id);
+    const after = rows[0].balance_after;
+    await logAction("Остатки препаратов", `${tech.full_name || "?"} · ${chem?.name || "?"}: ${fmtAmount(current, chem?.unit_kind)} → ${fmtAmount(after, chem?.unit_kind)} · ${payload.reason}`);
+    setModal(null); showToast("Движение сохранено"); load(); return true;
+  }
   // Запись ревизии / «забрали в офис» / ручной корректировки. Суммы приходят уже
   // посчитанными из CashRevisionModal, здесь только фиксируем автора и пишем в базу.
   async function saveCashRevision(tech, payload) {
@@ -1976,15 +2022,15 @@ function Dashboard({ session, profile }) {
     if (result.kind === "chemical") setTab("stock");
     if (result.kind === "profile") setTab("team");
   }
-  // Счётчик в меню ставим ТОЛЬКО там, где число требует действия.
-  // «Выполненные · 482» или «Корзина · 60» — это объём архива, реагировать на него нельзя,
-  // и такой шум топит те счётчики, ради которых в раздел действительно надо зайти.
+  // Счётчики: там, где число требует действия (просрочки, ожидание подтверждения),
+  // и там, где владелец следит за объёмом — «Выполненные»/«Отменённые» нужны как
+  // ежедневный показатель работы. Без счётчика оставлены только справочные разделы.
   const baseTabs = [
     { id: "today", icon: LayoutDashboard, label: `Сегодня${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "schedule", icon: CalendarClock, label: "График" },
-    { id: "done", icon: CheckCircle2, label: "Выполненные" },
-    { id: "canceled", icon: XCircle, label: "Отменённые" },
+    { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
+    { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `Задачи${allOpenTasks ? " · " + allOpenTasks : ""}` },
     { id: "leads", icon: Contact, label: `Лиды${activeLeads ? " · " + activeLeads : ""}` },
     { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : ""}` },
@@ -3392,6 +3438,7 @@ function Dashboard({ session, profile }) {
                     </div>
                     <div className="kd-actions" style={{ marginBottom: 0 }}>
                       {canAccess("action.team_manage") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "techedit", tech: t })}><Pencil size={13} />Данные</button>}
+                      {canAccess("action.stock_edit") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "inventoryMovement", tech: t })}><ClipboardCheck size={13} />Ревизия / движение</button>}
                       {canAccess("action.stock_edit") && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "handout", tech: t })}>Выдать / остаток</button>}
                       {canAccess("action.finance_edit") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "expense", tech: t })}><Plus size={13} />Выплата</button>}
                     </div>
@@ -3656,6 +3703,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "expense" && <ExpenseModal tech={modal.tech} onClose={() => setModal(null)} onSave={saveExpense} />}
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
+      {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
       {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
       {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
