@@ -11,7 +11,7 @@ import {
 
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -263,6 +263,7 @@ function Dashboard({ session, profile }) {
   const [publicFeedback, setPublicFeedback] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [jobProofs, setJobProofs] = useState([]);
+  const [cashAdjustments, setCashAdjustments] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -395,9 +396,12 @@ function Dashboard({ session, profile }) {
       supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }),
       supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(80),
       supabase.from("job_proofs").select("*").order("updated_at", { ascending: false }),
+      // Ревизии кассы и ручные корректировки остатков. Последняя запись kind="revision"
+      // задаёт новую точку отсчёта для «на руках» (см. techCashOnHand).
+      supabase.from("cash_adjustments").select("*").order("created_at", { ascending: false }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr, car] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ", "Ревизии кассы"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
     const useOfflineSnapshot = !navigator.onLine && !!jr.error && !!offlineSnapshot?.jobs;
@@ -445,6 +449,7 @@ function Dashboard({ session, profile }) {
     setPublicFeedback(pfr.data || []);
     setNotifications(ntr.data || []);
     setJobProofs(jpr.data || []);
+    setCashAdjustments(car.data || []);
     if (!useOfflineSnapshot && !jr.error) {
       try {
         const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
@@ -691,7 +696,36 @@ function Dashboard({ session, profile }) {
   // Сумма ожидающих подтверждения внесений (деньги «в пути», ещё не подтверждены)
   const techDepositedPending = (techId) => { const op = techOpening(techId); return deposits.filter((d) => d.tech_id === techId && d.status === "pending" && (!op.date || (d.requested_at || "").slice(0, 10) >= op.date)).reduce((s, d) => s + (Number(d.amount) || 0), 0); };
   // Наличные, реально лежащие на руках прямо сейчас = собрано − подтверждено − в ожидании
-  const techCashOnHand = (techId) => techOpening(techId).bal + techCashCollected(techId) - techDepositedConfirmed(techId) - techDepositedPending(techId);
+  // Ревизии и корректировки по сотруднику, свежая первой.
+  const techCashRevisions = (techId) => cashAdjustments.filter((a) => String(a.tech_id) === String(techId) && a.kind === "revision").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  // Наличные на руках. Если ревизия была — она и есть точка отсчёта: берём зафиксированный
+  // по ней факт и добавляем только движение ПОСЛЕ неё. Если ревизий нет — считаем от
+  // начального остатка в карточке сотрудника (старое поведение).
+  const techCashOnHand = (techId) => {
+    const latest = techCashRevisions(techId)[0];
+    if (!latest) return techOpening(techId).bal + techCashCollected(techId) - techDepositedConfirmed(techId) - techDepositedPending(techId);
+    const collectedAfter = jobs.filter((j) => String(j.assigned_to) === String(techId) && j.status === "done" && j.scheduled_date > latest.event_date).reduce((s, j) => s + (Number(j.report_cash) || 0), 0);
+    const depositedAfter = deposits.filter((d) => String(d.tech_id) === String(techId) && ["confirmed", "pending"].includes(d.status) && (d.requested_at || "").slice(0, 10) > latest.event_date).reduce((s, d) => s + (Number(d.amount) || 0), 0);
+    // корректировки и «забрали в офис», записанные уже после этой ревизии
+    const laterAdjustments = cashAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.created_at) > String(latest.created_at)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
+    return Number(latest.balance_after) + collectedAfter - depositedAfter + laterAdjustments;
+  };
+  // Запись ревизии / «забрали в офис» / ручной корректировки. Суммы приходят уже
+  // посчитанными из CashRevisionModal, здесь только фиксируем автора и пишем в базу.
+  async function saveCashRevision(tech, payload) {
+    const { error } = await supabase.from("cash_adjustments").insert({
+      tech_id: String(tech.id), kind: payload.kind || "revision",
+      amount_delta: Number(payload.amount_delta) || 0,
+      balance_before: Number(payload.balance_before) || 0,
+      balance_after: Number(payload.balance_after) || 0,
+      event_date: payload.event_date, reason: payload.reason, note: payload.note || null,
+      created_by: session.user.id,
+    });
+    if (error) { showToast("Ошибка: " + error.message); return false; }
+    const label = payload.kind === "office_take" ? "Забрали в офис" : payload.kind === "correction" ? "Корректировка наличных" : "Ревизия наличных";
+    await logAction(label, `${tech.full_name || "?"}: ${fmt(payload.balance_before)} ₸ → ${fmt(payload.balance_after)} ₸ · ${payload.reason}`);
+    setModal(null); showToast("Сохранено"); load(); return true;
+  }
 
   async function ensureCatalog(table, list, value) {
     const v = (value || "").trim();
@@ -2403,6 +2437,11 @@ function Dashboard({ session, profile }) {
             {techs.map((t) => {
               const onHand = techCashOnHand(t.id);
               const pending = techDepositedPending(t.id);
+              // если ревизия была — в карточке показываем движение от неё, а не за всю историю
+              const lastRevision = techCashRevisions(t.id)[0];
+              const collectedSince = lastRevision
+                ? jobs.filter((j) => String(j.assigned_to) === String(t.id) && j.status === "done" && j.scheduled_date > lastRevision.event_date).reduce((s, j) => s + (Number(j.report_cash) || 0), 0)
+                : 0;
               return (
                 <div key={t.id} className="kd-card">
                   <div className="kd-card-head">
@@ -2410,9 +2449,13 @@ function Dashboard({ session, profile }) {
                     <strong style={{ fontSize: 16, color: onHand > 0 ? "#B4650B" : "var(--muted)" }}>{fmt(onHand)} ₸ на руках</strong>
                   </div>
                   <div className="kd-meta">
-                    <span>Собрано: {fmt(techCashCollected(t.id))} ₸</span><span>·</span>
+                    {lastRevision && <><span>Ревизия {isoToRu(lastRevision.event_date)}: {fmt(lastRevision.balance_after)} ₸</span><span>·</span></>}
+                    <span>Собрано{lastRevision ? " после" : ""}: {fmt(lastRevision ? collectedSince : techCashCollected(t.id))} ₸</span><span>·</span>
                     <span>Внесено: {fmt(techDepositedConfirmed(t.id))} ₸</span>
                     {pending > 0 && <><span>·</span><span style={{ color: "#B4650B" }}>в ожидании: {fmt(pending)} ₸</span></>}
+                  </div>
+                  <div className="kd-actions">
+                    <button className="kd-btn primary sm" onClick={() => setModal({ kind: "cashRevision", tech: t })}><ClipboardCheck size={13} />Ревизия кассы</button>
                   </div>
                 </div>
               );
@@ -3612,6 +3655,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
       {modal?.kind === "expense" && <ExpenseModal tech={modal.tech} onClose={() => setModal(null)} onSave={saveExpense} />}
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
+      {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
       {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
