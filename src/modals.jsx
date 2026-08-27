@@ -1207,15 +1207,57 @@ function ExpenseModal({ tech, onClose, onSave }) {
   );
 }
 
+// Выплата зарплаты с проведением по кассе: в отличие от ExpenseModal здесь
+// обязателен счёт — по нему создаётся расходное движение, и остаток уменьшается.
+function PayrollPayModal({ tech, owed, accounts = [], onClose, onSave }) {
+  const [type, setType] = useState("salary");
+  const [amount, setAmount] = useState(owed > 0 ? String(owed) : "");
+  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = Number(amount) > 0 && payDate && accountId;
+  async function save() {
+    setSaving(true);
+    await onSave({ tech_id: tech.id, type, amount: Number(amount) || 0, expense_date: payDate, account_id: accountId, note: note.trim() || null });
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={`Выплата — ${tech.full_name || "сотрудник"}`} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Выплатить"}</button>
+    </>}>
+      <div className="kd-row" style={{ marginBottom: 12 }}><span>К выплате за период</span><strong>{fmt(owed)} ₸</strong></div>
+      <div className="kd-grid2">
+        <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
+        <Field label="Дата выплаты"><input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} /></Field>
+      </div>
+      <div className="kd-grid2">
+        <Field label="Тип"><select value={type} onChange={(e) => setType(e.target.value)}>{Object.entries(EXPENSE_TYPES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
+        <Field label="С какого счёта">
+          <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <option value="">— выбери счёт —</option>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      {accounts.length === 0 && <div className="kd-hint">Счетов пока нет — заведи их в разделе «Счета и расходы», иначе выплату некуда провести.</div>}
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за август / аванс" /></Field>
+      <div className="kd-muted" style={{ marginTop: 8 }}>Сумма спишется с выбранного счёта — остаток в разделе «Счета и расходы» уменьшится.</div>
+    </ModalShell>
+  );
+}
+
 function TechEditModal({ tech, onClose, onSave }) {
   const [fullName, setFullName] = useState(tech.full_name || "");
   const [phone, setPhone] = useState(tech.phone || "");
   const [role, setRole] = useState(tech.role || "tech");
   const [openBal, setOpenBal] = useState(tech.cash_opening_balance ?? "");
   const [openDate, setOpenDate] = useState(tech.cash_opening_date || "");
+  const [salary, setSalary] = useState(tech.salary_monthly ?? "");
   const [saving, setSaving] = useState(false);
   const ok = fullName.trim();
-  async function save() { setSaving(true); await onSave({ full_name: fullName.trim(), phone: phone.trim() || null, role, cash_opening_balance: Number(openBal) || 0, cash_opening_date: openDate || null }); setSaving(false); }
+  async function save() { setSaving(true); await onSave({ full_name: fullName.trim(), phone: phone.trim() || null, role, cash_opening_balance: Number(openBal) || 0, cash_opening_date: openDate || null, salary_monthly: Number(salary) || 0 }); setSaving(false); }
   return (
     <ModalShell title="Данные сотрудника" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
@@ -1230,6 +1272,9 @@ function TechEditModal({ tech, onClose, onSave }) {
           <option value="manager">Менеджер (ставит задачи, без доступа к финансам)</option>
         </select>
       </Field>
+      <div className="kd-section">Оклад</div>
+      <Field label="Оклад в месяц (₸)"><input value={salary} onChange={(e) => setSalary(e.target.value)} inputMode="numeric" placeholder="0 — если только процент с заявок" /></Field>
+      <div className="kd-muted" style={{ marginBottom: 10 }}>Подставляется в раздел «Зарплата» каждый месяц. Бонусы и дорожные туда попадают из заявок автоматически.</div>
       <div className="kd-section">Начальный остаток наличных (П.8)</div>
       <div className="kd-grid2">
         <Field label="На руках на дату старта (₸)"><input value={openBal} onChange={(e) => setOpenBal(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
@@ -2623,4 +2668,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
