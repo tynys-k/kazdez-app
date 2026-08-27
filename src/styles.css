@@ -177,29 +177,50 @@ body{
 .kd-mobile-nav{display:none;}
 
 /* ===================== TODAY DASHBOARD ===================== */
-.kd-today{display:flex;flex-direction:column;gap:18px;}
-.kd-todayhero{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px 26px;border:1px solid rgba(52,211,153,.22);border-radius:var(--radius-lg);background:radial-gradient(600px 260px at 0 0,rgba(52,211,153,.13),transparent 65%),linear-gradient(145deg,var(--surface-hi),var(--surface));box-shadow:var(--shadow-card);}
-.kd-todayhero h2{font-family:var(--font-display);font-size:25px;line-height:1.18;letter-spacing:-.6px;margin:4px 0 7px;}
-.kd-todayhero p{margin:0;color:var(--muted);font-size:14px;font-weight:600;}
+/* Ритм командного центра: блоки-показатели стоят плотнее друг к другу,
+   а перед крупными секциями («SLA», «Заявки на сегодня») пауза больше —
+   так экран читается группами, а не сплошной лентой. */
+.kd-today{display:flex;flex-direction:column;gap:12px;}
+.kd-today>.kd-todaysection{margin-top:8px;}
+.kd-today>.kd-todaysection+.kd-todaysection{margin-top:0;}
+.kd-todayhero{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 22px;border:1px solid rgba(52,211,153,.18);border-radius:var(--radius-lg);background:radial-gradient(620px 220px at 0 0,rgba(52,211,153,.10),transparent 68%),linear-gradient(145deg,var(--surface-hi),var(--surface));box-shadow:var(--shadow-card);}
+.kd-todayhero h2{font-family:var(--font-display);font-size:22px;line-height:1.2;letter-spacing:-.5px;margin:5px 0 5px;text-wrap:balance;}
+.kd-todayhero p{margin:0;color:var(--muted);font-size:13px;font-weight:600;}
 .kd-eyebrow{font-family:var(--font-mono);font-size:10.5px;color:var(--primary-d);font-weight:800;text-transform:uppercase;letter-spacing:1.2px;}
 .kd-todayhero-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
 .kd-kpigrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
-.kd-kpigrid>button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:15px 16px;color:var(--ink);cursor:pointer;font:inherit;transition:border-color .15s,transform .15s,background .15s;}
-.kd-kpigrid>button:hover{border-color:rgba(52,211,153,.3);background:var(--surface-hi);transform:translateY(-1px);}
-.kd-kpigrid span{font-size:11.5px;color:var(--muted);font-weight:750;}
-.kd-kpigrid strong{font-family:var(--font-display);font-size:23px;line-height:1.25;margin-top:3px;letter-spacing:-.4px;}
+.kd-kpigrid>button{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;text-align:left;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:16px 17px 15px;color:var(--ink);cursor:pointer;font:inherit;transition:border-color .18s,transform .18s,background .18s,box-shadow .18s;}
+/* тонкая верхняя подсветка — плитка читается как «карточка показателя», а не как кнопка */
+.kd-kpigrid>button::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.07),transparent);}
+.kd-kpigrid>button:hover{border-color:rgba(52,211,153,.32);background:var(--surface-hi);transform:translateY(-2px);box-shadow:0 16px 34px -24px rgba(0,0,0,.9);}
+.kd-kpigrid span{font-size:11px;color:var(--muted);font-weight:750;letter-spacing:.2px;text-transform:uppercase;}
+/* Главное число крупнее и моноширинным с tabular-nums: суммы в колонке выравниваются
+   по разрядам, а разрыв с подписью делает иерархию очевидной. */
+.kd-kpigrid strong{font-family:var(--font-mono);font-weight:800;font-size:30px;line-height:1.1;margin-top:8px;letter-spacing:-1px;font-variant-numeric:tabular-nums;}
 .kd-kpigrid strong.danger{color:var(--rust);}.kd-kpigrid strong.ok{color:var(--primary-d);}
-.kd-kpigrid small{font-size:10.5px;color:var(--faint);font-weight:650;margin-top:2px;}
-.kd-todaysection{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-card);}
-.kd-todaysection-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;}
+/* плитка с проблемой светится по краю — её видно, не читая текст */
+.kd-kpigrid>button:has(strong.danger){border-color:rgba(242,114,106,.3);background:linear-gradient(180deg,var(--rust-tint),var(--surface));}
+.kd-kpigrid small{font-size:11px;color:var(--faint);font-weight:650;margin-top:6px;line-height:1.35;}
+.kd-todaysection{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);padding:20px 22px;box-shadow:var(--shadow-card);}
+/* Заголовок секции — служебный указатель, а не герой: тише подпись, крупнее контент. */
+.kd-todaysection .kd-title{font-size:16px;letter-spacing:-.2px;}
+.kd-todaysection-head .kd-muted{font-size:12px;margin-top:2px;}
+.kd-todaysection-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px;padding-bottom:13px;border-bottom:1px solid var(--line-soft);}
 .kd-alertgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
 .kd-alertgrid>button{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:9px;border:1px solid var(--line);background:var(--surface-sunk);color:var(--ink);border-radius:12px;padding:11px 12px;text-align:left;font:inherit;cursor:pointer;}
 .kd-alertgrid>button span{font-size:13px;font-weight:700;}.kd-alertgrid>button strong{font-family:var(--font-mono);font-size:14px;}
+/* Тревоги: цветная полоса слева читается быстрее рамки — видно тяжесть, не читая текст */
+.kd-alertgrid>button{position:relative;overflow:hidden;transition:background .15s,border-color .15s,transform .15s;}
+.kd-alertgrid>button::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:transparent;}
+.kd-alertgrid>button:hover{transform:translateX(2px);background:var(--surface-hi);}
 .kd-alertgrid>button.danger{border-color:rgba(242,114,106,.28);}.kd-alertgrid>button.danger>svg:first-child,.kd-alertgrid>button.danger strong{color:var(--rust);}
+.kd-alertgrid>button.danger::before{background:var(--rust);}
 .kd-alertgrid>button.warning{border-color:rgba(245,180,84,.25);}.kd-alertgrid>button.warning>svg:first-child,.kd-alertgrid>button.warning strong{color:var(--amber);}
+.kd-alertgrid>button.warning::before{background:var(--amber);}
 .kd-allgood{display:flex;align-items:center;gap:9px;color:var(--primary-d);font-weight:700;font-size:13.5px;padding:12px 13px;background:var(--primary-tint);border:1px solid rgba(52,211,153,.2);border-radius:12px;}
 .kd-todayjobs{display:flex;flex-direction:column;}
-.kd-todayjob{display:grid;grid-template-columns:105px 1fr auto;gap:14px;align-items:center;padding:12px 3px;border-bottom:1px solid var(--line-soft);}
+.kd-todayjob{display:grid;grid-template-columns:105px 1fr auto;gap:14px;align-items:center;padding:11px 8px;margin:0 -8px;border-radius:12px;border-bottom:1px solid var(--line-soft);transition:background .15s;}
+.kd-todayjob:hover{background:var(--surface-sunk);}
 .kd-todayjob:last-child{border-bottom:0;}
 .kd-todayjob.done{opacity:.62;}.kd-todayjob.late{border-left:3px solid var(--rust);padding-left:10px;}
 .kd-todaytime{font-family:var(--font-mono);font-size:12px;font-weight:800;color:var(--amber);}
@@ -224,8 +245,12 @@ body{
 .kd-stage2grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
 .kd-stage2head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px;}
 .kd-stage2head>svg{color:var(--primary-d);flex-shrink:0;}
-.kd-kpicard{display:flex;flex-direction:column;align-items:flex-start;text-align:left;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:15px 16px;color:var(--ink);}
-.kd-kpicard>span{font-size:11.5px;color:var(--muted);font-weight:750;}.kd-kpicard>strong{font-family:var(--font-display);font-size:22px;line-height:1.25;margin-top:3px;}.kd-kpicard>small{font-size:10.5px;color:var(--faint);font-weight:650;margin-top:2px;}
+/* Те же показатели, что на главной, но в разделах «Прибыль», «Обзвон» и др. —
+   держим одинаковый вид, иначе цифры на разных экранах выглядят разными сущностями. */
+.kd-kpicard{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;text-align:left;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:16px 17px 15px;color:var(--ink);}
+.kd-kpicard::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.07),transparent);}
+.kd-kpicard>span{font-size:11px;color:var(--muted);font-weight:750;letter-spacing:.2px;text-transform:uppercase;}.kd-kpicard>strong{font-family:var(--font-mono);font-weight:800;font-size:28px;line-height:1.1;margin-top:8px;letter-spacing:-.9px;font-variant-numeric:tabular-nums;}.kd-kpicard>small{font-size:11px;color:var(--faint);font-weight:650;margin-top:6px;line-height:1.35;}
+.kd-kpicard:has(>strong.neg){border-color:rgba(242,114,106,.3);background:linear-gradient(180deg,var(--rust-tint),var(--surface));}
 .pos{color:var(--primary-d)!important}.neg,.kd-neg{color:var(--rust)!important}
 .kd-metrictable{display:flex;flex-direction:column;max-height:530px;overflow:auto;}
 .kd-metrictable>button{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;width:100%;border:0;border-bottom:1px solid var(--line-soft);background:transparent;color:var(--ink);padding:10px 3px;font:inherit;text-align:left;cursor:pointer;}.kd-metrictable>button:hover{background:var(--surface-sunk);}.kd-metrictable>button>span{display:flex;flex-direction:column;min-width:0;}.kd-metrictable strong{font-size:13px;}.kd-metrictable small{font-size:10.5px;color:var(--muted);font-weight:600;}.kd-metrictable .right{text-align:right;align-items:flex-end;}
@@ -556,6 +581,11 @@ body{
   .kd-todayhero h2{font-size:21px;}
   .kd-todayhero-actions{justify-content:flex-start;width:100%;}
   .kd-kpigrid{grid-template-columns:1fr 1fr;}
+  /* В две колонки 30px моноширинного не помещается — суммы вида «172 500 ₸»
+     переносили знак валюты на отдельную строку и ломали высоту плиток. */
+  .kd-kpigrid strong,.kd-kpicard>strong{font-size:22px;letter-spacing:-.6px;}
+  .kd-kpigrid>button,.kd-kpicard{padding:13px 14px;}
+  .kd-kpigrid span,.kd-kpicard>span{font-size:10px;}
   .kd-alertgrid,.kd-todaytasks{grid-template-columns:1fr;}
   .kd-todayjob{grid-template-columns:72px 1fr;gap:10px;}
   .kd-todayjobactions{grid-column:1 / -1;justify-content:flex-end;}
@@ -625,8 +655,8 @@ body{
 .kd-pulsestrip{display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:linear-gradient(135deg,rgba(52,211,153,.09),var(--surface));border:1px solid rgba(52,211,153,.2);border-radius:16px;box-shadow:var(--shadow-card);}
 .kd-pulsestrip>button{flex:1 1 150px;display:flex;flex-direction:column;gap:1px;text-align:left;padding:9px 12px;background:rgba(7,11,8,.35);border:1px solid var(--line);border-radius:11px;color:var(--ink);font:inherit;cursor:pointer;transition:border-color .15s;}
 .kd-pulsestrip>button:hover{border-color:rgba(52,211,153,.32);}
-.kd-pulsestrip span{font-size:10.5px;color:var(--muted);font-weight:750;}
-.kd-pulsestrip strong{font:700 17px var(--font-mono);letter-spacing:-.3px;}
+.kd-pulsestrip span{font-size:10px;color:var(--muted);font-weight:750;letter-spacing:.2px;text-transform:uppercase;}
+.kd-pulsestrip strong{font:800 17px var(--font-mono);letter-spacing:-.3px;font-variant-numeric:tabular-nums;}
 .kd-pulsestrip strong.danger{color:var(--rust);}.kd-pulsestrip strong.ok{color:var(--primary-d);}
 .kd-pulsestrip em{font-style:normal;font-size:10px;color:var(--faint);font-weight:650;}
 .kd-pulsestrip>button.copy{flex:0 0 auto;align-items:center;justify-content:center;padding:9px 14px;font-size:12px;font-weight:750;color:var(--muted);background:transparent;}
