@@ -686,3 +686,18 @@ body{
 
 @media (max-width:960px){.kd-installbtn,.kd-syncbtn{font-size:0;width:40px;padding:0;}.kd-installbtn svg,.kd-syncbtn svg{margin:0;}}
 @media (max-width:720px){.kd-notification-panel{position:fixed;left:12px;right:12px;top:66px;width:auto;}.kd-proof-grid{grid-template-columns:1fr;}.kd-proof-head{flex-direction:column;}.kd-proof-locactions .kd-btn{width:100%;}.kd-proof-gallery img{height:100px;}.kd-partner-origin{padding:11px;margin-bottom:12px;}.kd-partner-origin-copy em{font-size:11px;}}
+
+/* Таблица «Зарплата»: имя тянется, числа узкие и справа, кнопка выплаты последней. */
+.kd-payrollrow{grid-template-columns:1.5fr .9fr .9fr .9fr 1fr .9fr 1fr auto;}
+/* На телефоне таблица в 8 колонок нечитаема: числа теряют подписи и превращаются
+   в столбик безымянных сумм. Разворачиваем строку в список «подпись: значение». */
+@media (max-width:900px){
+  .kd-ledgerhead.kd-payrollrow{display:none;}
+  .kd-payrollrow{grid-template-columns:1fr;row-gap:3px;padding:12px 0;}
+  .kd-payrollrow>.kd-ledgername{font-size:15px;margin-bottom:3px;}
+  .kd-payrollrow>span,.kd-payrollrow>strong{text-align:left;}
+  .kd-payrollrow>[data-l]{display:flex;justify-content:space-between;gap:12px;}
+  .kd-payrollrow>[data-l]::before{content:attr(data-l);color:var(--muted);font-weight:700;}
+  .kd-payrollrow>span:last-child{margin-top:8px;}
+  .kd-payrollrow>span:last-child .kd-btn{width:100%;}
+}

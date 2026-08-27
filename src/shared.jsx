@@ -46,12 +46,12 @@ const DRIVE_LINKS = [
 ];
 // Короткое честное имя раздела: используется в заголовке страницы и мобильной навигации.
 // Счётчики сюда НЕ добавляем — они живут только в боковом меню и только там, где требуют действия.
-const TAB_LABELS = { today: "Сегодня", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Лиды", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторные выезды", growth: "Прибыль по заявкам", retention: "Обзвон и качество", subscriptions: "Абоненты", routes: "Маршруты", finance: "Выручка и чек", opex: "Счета и расходы", cash: "Наличные от бригад", stock: "Склад", team: "Сотрудники", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина", myequip: "Моё оборудование" };
+const TAB_LABELS = { today: "Сегодня", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Лиды", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторные выезды", growth: "Прибыль по заявкам", retention: "Обзвон и качество", subscriptions: "Абоненты", routes: "Маршруты", finance: "Выручка и чек", opex: "Счета и расходы", cash: "Наличные от бригад", stock: "Склад", team: "Сотрудники", payroll: "Зарплата", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина", myequip: "Моё оборудование" };
 // Нижняя панель на телефоне даёт ~9 символов на подпись — длинные имена там режутся многоточием.
 // Здесь только те разделы, чьё полное имя не влезает; остальные берутся из TAB_LABELS.
-const TAB_LABELS_SHORT = { cash: "Касса", finance: "Выручка", growth: "Прибыль", opex: "Расходы", retention: "Обзвон", repeats: "Повторы", subscriptions: "Абоненты", team: "Люди", myequip: "Инвентарь" };
+const TAB_LABELS_SHORT = { payroll: "Зарплата", cash: "Касса", finance: "Выручка", growth: "Прибыль", opex: "Расходы", retention: "Обзвон", repeats: "Повторы", subscriptions: "Абоненты", team: "Люди", myequip: "Инвентарь" };
 // Порядок по частоте использования: сначала ежедневная работа, потом клиенты, деньги, архив, команда.
-const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "routes", "tasks", "leads", "retention", "subscriptions", "repeats", "finance", "growth", "opex", "cash", "done", "canceled", "team", "partners", "stock", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
+const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "routes", "tasks", "leads", "retention", "subscriptions", "repeats", "finance", "growth", "opex", "cash", "done", "canceled", "team", "payroll", "partners", "stock", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
 
 // Единый справочник ролей для экрана «Команда и доступы».
 // Поля permissions и defaultPermissions намеренно содержат один набор:
@@ -60,7 +60,7 @@ const ROLE_DEFAULT_PERMISSIONS = {
   tech: ["tab.today", "tab.jobs", "tab.done", "tab.tasks", "tab.cash", "tab.materials", "tab.knowledge", "tab.myequip", "data.stock_self", "data.equipment"],
   manager: ["tab.today", "tab.jobs", "tab.schedule", "tab.done", "tab.canceled", "tab.routes", "tab.tasks", "action.tasks_manage", "action.jobs_edit", "tab.leads", "action.leads_edit", "tab.repeats", "tab.retention", "tab.subscriptions", "tab.partners", "action.partners_edit", "tab.materials", "tab.knowledge"],
   marketer: ["tab.today", "tab.leads", "action.leads_edit", "tab.retention", "tab.growth", "tab.materials", "tab.knowledge", "tab.tasks"],
-  accountant: ["tab.today", "tab.finance", "tab.opex", "tab.cash", "tab.docs", "action.docs_edit", "tab.tasks", "action.finance_edit", "tab.materials"],
+  accountant: ["tab.today", "tab.finance", "tab.opex", "tab.cash", "tab.payroll", "tab.docs", "action.docs_edit", "tab.tasks", "action.finance_edit", "tab.materials"],
   tender: ["tab.today", "tab.tenders", "action.tenders_edit", "tab.docs", "action.docs_edit", "tab.tasks", "action.tasks_manage", "tab.materials", "tab.knowledge"],
   curator: ["tab.today", "tab.jobs", "tab.schedule", "tab.done", "tab.canceled", "tab.routes", "tab.tasks", "action.tasks_manage", "action.jobs_edit", "tab.retention", "action.leads_edit", "tab.team", "tab.stock", "data.stock_self", "data.equipment", "tab.materials", "tab.knowledge"],
 };

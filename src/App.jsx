@@ -11,7 +11,7 @@ import {
 
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -364,8 +364,9 @@ function Dashboard({ session, profile }) {
       supabase.from("audit_log").select("*").order("ts", { ascending: false }),
       supabase.from("trash").select("*").order("deleted_at", { ascending: false }),
       // cash_opening_balance / cash_opening_date — база ревизии кассы: от них считается «на руках»
-      // (см. techOpening ниже). Без них остаток считается за всю историю и показывает завышенные суммы.
-      supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at, cash_opening_balance, cash_opening_date"),
+      // (см. techOpening ниже). salary_monthly — оклад для вкладки «Зарплата».
+      // Поле, забытое в этом select, читается как undefined и молча ломает расчёт — так уже было с ревизией.
+      supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at, cash_opening_balance, cash_opening_date, salary_monthly"),
       supabase.from("handouts").select("*"),
       supabase.from("partners").select("*"),
       supabase.from("doc_services").select("*").order("created_at", { ascending: false }),
@@ -1087,6 +1088,32 @@ function Dashboard({ session, profile }) {
     await logAction("Документы", `Удалено: ${d.type} · ${fmt(d.amount)} ₸`);
     showToast("Удалено"); load();
   }
+  // Выплата из раздела «Зарплата»: пишем факт выплаты и сразу проводим её по кассе,
+  // иначе остаток счёта расходится с реально отданными деньгами.
+  async function savePayrollPayment(tech, payload) {
+    const { data: created, error } = await supabase.from("tech_expenses").insert({
+      tech_id: payload.tech_id, type: payload.type, amount: payload.amount,
+      expense_date: payload.expense_date, account_id: payload.account_id || null,
+      paid_at: payload.expense_date, status: "paid", note: payload.note,
+      created_by: session.user.id,
+    }).select().single();
+    if (error) { showToast("Ошибка: " + error.message); return false; }
+    if (payload.account_id) {
+      // тот же приём, что при зачёте перечисления: не задваиваем движение при повторе
+      const exists = moves.some((m) => m.source === "payroll" && m.ref_id === created?.id);
+      if (!exists) {
+        const { error: moveError } = await supabase.from("money_moves").insert({
+          account_id: payload.account_id, direction: "expense", amount: payload.amount,
+          move_date: payload.expense_date,
+          note: `Зарплата: ${tech.full_name || "сотрудник"}${payload.note ? " · " + payload.note : ""}`,
+          source: "payroll", ref_id: created?.id, created_by: session.user.id,
+        });
+        if (moveError) showToast("Выплата записана, но по кассе не провелась: " + moveError.message);
+      }
+    }
+    await logAction("Выплата", `${tech.full_name || "?"} · ${EXPENSE_TYPES[payload.type] || payload.type} · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
+    setModal(null); showToast("Выплата проведена"); load(); return true;
+  }
   async function saveExpense(payload, existing) {
     const res = existing ? await supabase.from("tech_expenses").update(payload).eq("id", existing.id) : await supabase.from("tech_expenses").insert({ ...payload, created_by: session.user.id });
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
@@ -1789,6 +1816,31 @@ function Dashboard({ session, profile }) {
     return { revenue, cost, partnerShares, executorShares, qrFees, partnerComp, profit: revenue - cost - partnerShares - executorShares - qrFees + partnerComp, cash, qr, bySource, byTech, byPest, week, weekMax, monthWeeks, monthWeekMax, avgCheck, avgByType };
   })();
 
+  // ---- зарплата за период ----
+  // Начислено = оклад (только в месячном режиме) + бонусы и дорожные по выполненным
+  // заявкам периода. Выплачено = проведённые tech_expenses периода. Разница — долг.
+  // Оклад намеренно не делим на недели: это месячная величина, дробить её некорректно.
+  const payrollSalaryCounts = pMode === "month";
+  const inPeriodIso = (iso) => {
+    if (pMode === "all") return true;
+    const dt = parseIso(iso);
+    return !!dt && dt.getTime() >= range.start && dt.getTime() < range.end;
+  };
+  const payrollRows = techs.map((t) => {
+    const jobsOf = jobs.filter((j) => j.assigned_to === t.id && j.status === "done" && inPeriodIso(j.scheduled_date));
+    const bonus = jobsOf.reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
+    const travel = jobsOf.reduce((s, j) => s + (Number(j.tech_travel) || 0), 0);
+    const salary = payrollSalaryCounts ? (Number(t.salary_monthly) || 0) : 0;
+    const payments = expenses.filter((e) => e.tech_id === t.id && e.status === "paid" && inPeriodIso(e.expense_date));
+    const paid = payments.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    const accrued = salary + bonus + travel;
+    return { tech: t, salary, bonus, travel, accrued, paid, owed: accrued - paid, payments, jobsCount: jobsOf.length };
+  });
+  const payrollTotals = payrollRows.reduce((a, r) => ({
+    accrued: a.accrued + r.accrued, paid: a.paid + r.paid, owed: a.owed + r.owed,
+  }), { accrued: 0, paid: 0, owed: 0 });
+  const payrollOwedCount = payrollRows.filter((r) => r.owed > 0).length;
+
   const expensesInRange = expenses.filter((e) => {
     if (pMode === "all") return true;
     if (!e.expense_date) return false;
@@ -2044,6 +2096,7 @@ function Dashboard({ session, profile }) {
     { id: "cash", icon: Banknote, label: `Наличные от бригад${deposits.filter((d) => d.status === "pending").length ? " · " + deposits.filter((d) => d.status === "pending").length : ""}` },
     { id: "stock", icon: Package, label: `Склад${lowCount ? " · " + lowCount + " мало" : ""}` },
     { id: "team", icon: Users, label: "Сотрудники и доступы" },
+    { id: "payroll", icon: Wallet, label: `Зарплата${payrollOwedCount ? " · " + payrollOwedCount : ""}` },
     { id: "partners", icon: Handshake, label: "Партнёры" },
     { id: "docs", icon: FileText, label: "Документы" },
     { id: "materials", icon: FolderOpen, label: "Материалы" },
@@ -2068,7 +2121,7 @@ function Dashboard({ session, profile }) {
     { label: "Клиенты и возвраты", ids: ["leads", "retention", "subscriptions", "repeats"] },
     { label: "Деньги", ids: ["finance", "growth", "opex", "cash"] },
     { label: "Архив заявок", ids: ["done", "canceled"] },
-    { label: "Команда и склад", ids: ["team", "partners", "stock", "myequip"] },
+    { label: "Команда и склад", ids: ["team", "payroll", "partners", "stock", "myequip"] },
   ];
   const moreNavGroup = { label: "Ещё разделы", ids: ["tenders", "docs", "materials", "knowledge", "journal", "trash"] };
   const mobileTabIds = (isAdmin ? ["today", "jobs", "leads", "routes"] : ["today", "jobs", "tasks", "cash", "tenders", "finance"]).filter((id) => tabs.some((item) => item.id === id)).slice(0, 4);
@@ -3116,6 +3169,66 @@ function Dashboard({ session, profile }) {
           </>
         )}
 
+        {!loading && tab === "payroll" && (
+          <>
+            <div className="kd-periodbar">
+              <div className="kd-seg">
+                {[{ id: "all", label: "Всё время" }, { id: "week", label: "Неделя" }, { id: "month", label: "Месяц" }].map((p) => (
+                  <button key={p.id} className={`kd-segbtn ${pMode === p.id ? "on" : ""}`} onClick={() => { setPMode(p.id); setPOff(0); }}>{p.label}</button>
+                ))}
+              </div>
+              {pMode !== "all" && (
+                <div className="kd-pernav">
+                  <button className="kd-arrow" onClick={() => setPOff(pOff - 1)}><ChevronLeft size={18} /></button>
+                  <span className="kd-perlabel">{range.label}</span>
+                  <button className="kd-arrow" disabled={pOff >= 0} onClick={() => setPOff(pOff + 1)}><ChevronRight size={18} /></button>
+                </div>
+              )}
+            </div>
+            <div className="kd-kpigrid" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
+              <div className="kd-kpicard"><span>Начислено</span><strong>{fmt(payrollTotals.accrued)} ₸</strong><small>{payrollSalaryCounts ? "оклады + бонусы + дорожные" : "бонусы + дорожные (без окладов)"}</small></div>
+              <div className="kd-kpicard"><span>Выплачено</span><strong>{fmt(payrollTotals.paid)} ₸</strong><small>проведено по кассе за период</small></div>
+              <div className="kd-kpicard"><span>К выплате</span><strong className={payrollTotals.owed > 0 ? "neg" : ""}>{fmt(payrollTotals.owed)} ₸</strong><small>{payrollOwedCount ? `${payrollOwedCount} сотр. ждут выплаты` : "все рассчитаны"}</small></div>
+            </div>
+            {!payrollSalaryCounts && (
+              <div className="kd-hint" style={{ marginTop: 12 }}>Оклады показываются только в режиме «Месяц» — это месячная величина, делить её на недели некорректно. Здесь видны бонусы и дорожные за выбранный период.</div>
+            )}
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Начисления и выплаты · {range.label}</div>
+              {techs.length === 0 && <div className="kd-muted">Сотрудников пока нет.</div>}
+              {techs.length > 0 && (
+                <div className="kd-ledgerhead kd-payrollrow"><span>Сотрудник</span><span>Оклад</span><span>Бонусы</span><span>Дорожные</span><span>Начислено</span><span>Выплачено</span><span>К выплате</span><span /></div>
+              )}
+              {payrollRows.map((r) => (
+                <div key={r.tech.id}>
+                  <div className="kd-ledgerrow kd-payrollrow">
+                    <span className="kd-ledgername">{r.tech.full_name || "(без имени)"}</span>
+                    <span className="kd-muted" data-l="Оклад">{payrollSalaryCounts ? fmt(r.salary) : "—"}</span>
+                    <span data-l="Бонусы">{fmt(r.bonus)}</span>
+                    <span data-l="Дорожные">{fmt(r.travel)}</span>
+                    <span data-l="Начислено">{fmt(r.accrued)}</span>
+                    <span className="kd-muted" data-l="Выплачено">{fmt(r.paid)}</span>
+                    <strong data-l="К выплате" style={{ color: r.owed > 0 ? "var(--amber)" : "var(--muted)" }}>{fmt(r.owed)} ₸</strong>
+                    <span>{canManageCash && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "payrollPay", tech: r.tech, owed: r.owed })}>Выплатить</button>}</span>
+                  </div>
+                  {r.payments.length > 0 && (
+                    <details className="kd-more" style={{ margin: "0 0 10px" }}>
+                      <summary>Выплаты за период · {r.payments.length}</summary>
+                      {r.payments.map((e) => (
+                        <div className="kd-row" key={e.id}>
+                          <span>{isoToRu(e.expense_date)} · {EXPENSE_TYPES[e.type] || e.type}{e.account_id ? ` · ${accountById(e.account_id)?.name || "счёт"}` : ""}{e.note ? ` · ${e.note}` : ""}</span>
+                          <strong>{fmt(e.amount)} ₸</strong>
+                        </div>
+                      ))}
+                    </details>
+                  )}
+                </div>
+              ))}
+              <div className="kd-muted" style={{ marginTop: 10 }}>Бонусы и дорожные подтягиваются из выполненных заявок периода (кнопка «Бонус / дорожные» в карточке заявки). Оклад задаётся в карточке сотрудника.</div>
+            </div>
+          </>
+        )}
+
         {!loading && tab === "opex" && (
           <>
             <div className="kd-seg" style={{ marginBottom: 14 }}>
@@ -3433,7 +3546,7 @@ function Dashboard({ session, profile }) {
                       <div>
                         <div className="kd-tech-name">{t.full_name || "(без имени)"}</div>
                         <div className="kd-muted">{t.phone || "—"} · заявок: {cnt}</div>
-                        {techExtrasTotal(t.id) > 0 && <div className="kd-muted" style={{ color: "var(--violet)", fontWeight: 700 }}>🎁 бонусы {fmt(techBonusTotal(t.id))} ₸ · дорожные {fmt(techTravelTotal(t.id))} ₸</div>}
+                        {techExtrasTotal(t.id) > 0 && canManageCash && <button className="kd-clientlink" style={{ color: "var(--violet)" }} onClick={() => setTab("payroll")} title="Бонусы и дорожные за период — в разделе «Зарплата»">🎁 Зарплата за период →</button>}
                       </div>
                     </div>
                     <div className="kd-actions" style={{ marginBottom: 0 }}>
@@ -3704,6 +3817,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
+      {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} accounts={accounts} onClose={() => setModal(null)} onSave={(payload) => savePayrollPayment(modal.tech, payload)} />}
       {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
       {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
