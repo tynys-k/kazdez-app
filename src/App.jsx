@@ -552,10 +552,32 @@ function Dashboard({ session, profile }) {
       signatureUrl: proof.signature_path ? byPath.get(proof.signature_path) || "" : "",
     });
   }
+  // Сжимаем фото прямо на телефоне: снимок с камеры весит ~800 КБ, после
+  // приведения к 1280px и JPEG 72% — около 150 КБ. Качества «до/после» хватает,
+  // расход хранилища падает впятеро, а выгрузка по слабой связи идёт быстрее.
+  // Любая ошибка — молча грузим оригинал: потерять фото хуже, чем место.
+  async function shrinkImage(file, maxSide = 1280, quality = 0.72) {
+    try {
+      if (!file || !file.type || !file.type.startsWith("image/")) return null;
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+      const w = Math.round(bitmap.width * scale), h = Math.round(bitmap.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+      if (bitmap.close) bitmap.close();
+      const out = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+      return out && out.size < file.size ? out : null;
+    } catch { return null; }
+  }
   async function uploadProofBlob(job, blob, kind, index, extension = "jpg") {
-    const safeExt = ["jpg", "jpeg", "png", "webp"].includes(extension) ? extension : "jpg";
+    let payload = blob, safeExt = ["jpg", "jpeg", "png", "webp"].includes(extension) ? extension : "jpg";
+    if (kind !== "signature") {
+      const shrunk = await shrinkImage(blob);
+      if (shrunk) { payload = shrunk; safeExt = "jpg"; }
+    }
     const path = `${job.id}/${kind}-${Date.now()}-${index}.${safeExt}`;
-    const { error } = await supabase.storage.from("job-proofs").upload(path, blob, { cacheControl: "3600", upsert: false, contentType: blob.type || `image/${safeExt}` });
+    const { error } = await supabase.storage.from("job-proofs").upload(path, payload, { cacheControl: "3600", upsert: false, contentType: payload.type || `image/${safeExt}` });
     if (error) throw error; return path;
   }
   async function saveJobProof(job, payload) {
