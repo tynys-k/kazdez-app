@@ -786,7 +786,7 @@ function DetailsModal({ job, header, partnerName, onReport, onClose }) {
   );
 }
 
-function ViewModal({ job, partnerName, chemicals, performedBy, onClose }) {
+function ViewModal({ job, partnerName, chemicals, performedBy, chemicalsUnavailable = false, onClose }) {
   const hasSplit = (job.report_cash || 0) > 0 && (job.report_qr || 0) > 0;
   const chemOf = (l) => (l.chemical_id ? (chemicals || []).find((x) => x.id === l.chemical_id) : (chemicals || []).find((x) => norm(x.name) === norm(l.name)));
   return (
@@ -805,7 +805,12 @@ function ViewModal({ job, partnerName, chemicals, performedBy, onClose }) {
       </>)}
       {job.report_note && <div className="kd-row"><span>Примечание</span><strong>{job.report_note}</strong></div>}
       <div className="kd-section" style={{ marginTop: 10 }}>Расход</div>
-      {(job.chemicals || []).length === 0 && <div className="kd-muted">Не указан.</div>}
+      {/* Пустой расход может значить две разные вещи: препараты не вносили ИЛИ таблица
+         report_chemicals не загрузилась (обычно из-за прав доступа). Раньше в обоих
+         случаях писали «Не указан.» — админ видел ложь вместо ошибки. */}
+      {(job.chemicals || []).length === 0 && (chemicalsUnavailable
+        ? <div className="kd-flag warn">Расход не загрузился — нет доступа к таблице «Препараты в отчётах». Данные не потеряны, нужно открыть доступ в базе.</div>
+        : <div className="kd-muted">Не указан.</div>)}
       {(job.chemicals || []).map((l) => { const c = chemOf(l); return (<div className="kd-row" key={l.id}><span>{l.name || (c && c.name)}</span><strong>{fmtAmount(lineAmount(l), c && c.unit_kind)}</strong></div>); })}
       {job.followup_wanted && <div className="kd-followbox"><strong>Повторный выезд:</strong> {job.followup_note || "по просьбе клиента"}{job.followup_date ? ` — ${job.followup_date}` : ""}</div>}
       {job.docs_needed && <div className="kd-docbox"><strong>Документы:</strong> {[job.docs_avr && "АВР", job.docs_dogovor && "Договор"].filter(Boolean).join(", ") || "да"}{job.docs_note ? ` — ${job.docs_note}` : ""}{job.docs_done ? " · готовы" : " · ожидают"}</div>}

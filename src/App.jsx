@@ -298,6 +298,9 @@ function Dashboard({ session, profile }) {
   const [moreNavOpen, setMoreNavOpen] = useState(() => localStorage.getItem("kd-more-nav") === "1");
   const [online, setOnline] = useState(() => navigator.onLine);
   const [dataWarnings, setDataWarnings] = useState([]);
+  // report_chemicals не загрузилась — расход по заявкам будет пустым у всех.
+  // Держим отдельно, чтобы отличать «препараты не вносили» от «нет доступа к таблице».
+  const [reportChemsFailed, setReportChemsFailed] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState(null);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
@@ -408,6 +411,7 @@ function Dashboard({ session, profile }) {
     const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr, car, iar] = responses;
     const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
+    setReportChemsFailed(!!cr.error);
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
     const useOfflineSnapshot = !navigator.onLine && !!jr.error && !!offlineSnapshot?.jobs;
     const chems = cr.data || [];
@@ -3800,7 +3804,7 @@ function Dashboard({ session, profile }) {
         };
       })()} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "reportSuccess" && <ReportSuccessModal onClose={() => setModal(null)} />}
-      {modal?.kind === "view" && <ViewModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} />}
+      {modal?.kind === "view" && <ViewModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} chemicalsUnavailable={reportChemsFailed} onClose={() => setModal(null)} />}
       {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} partnerName={partnerNameOf(modal.job)} onReport={() => setModal({ kind: "report", job: modal.job })} onClose={() => setModal(null)} />}
       {modal?.kind === "proof" && <ProofModal job={modal.job} proof={proofByJob(modal.job.id)} media={proofMedia} onClose={() => setModal(null)} onSave={saveJobProof} />}
       {modal?.kind === "history" && <HistoryModal
