@@ -1260,9 +1260,10 @@ function TechEditModal({ tech, onClose, onSave }) {
   const [openBal, setOpenBal] = useState(tech.cash_opening_balance ?? "");
   const [openDate, setOpenDate] = useState(tech.cash_opening_date || "");
   const [salary, setSalary] = useState(tech.salary_monthly ?? "");
+  const [schedule, setSchedule] = useState(tech.work_schedule || "");
   const [saving, setSaving] = useState(false);
   const ok = fullName.trim();
-  async function save() { setSaving(true); await onSave({ full_name: fullName.trim(), phone: phone.trim() || null, role, cash_opening_balance: Number(openBal) || 0, cash_opening_date: openDate || null, salary_monthly: Number(salary) || 0 }); setSaving(false); }
+  async function save() { setSaving(true); await onSave({ full_name: fullName.trim(), phone: phone.trim() || null, role, cash_opening_balance: Number(openBal) || 0, cash_opening_date: openDate || null, salary_monthly: Number(salary) || 0, work_schedule: schedule || null }); setSaving(false); }
   return (
     <ModalShell title="Данные сотрудника" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
@@ -1279,6 +1280,14 @@ function TechEditModal({ tech, onClose, onSave }) {
       </Field>
       <div className="kd-section">Оклад</div>
       <Field label="Оклад в месяц (₸)"><input value={salary} onChange={(e) => setSalary(e.target.value)} inputMode="numeric" placeholder="0 — если только процент с заявок" /></Field>
+      <Field label="График работы">
+        <select value={schedule} onChange={(e) => setSchedule(e.target.value)}>
+          <option value="">Без графика — оклад не режется за пропуски</option>
+          <option value="6/1">6/1 — шесть рабочих, один выходной</option>
+          <option value="5/2">5/2 — пятидневка</option>
+          <option value="7/0">7/0 — без выходных</option>
+        </select>
+      </Field>
       <div className="kd-muted" style={{ marginBottom: 10 }}>Подставляется в раздел «Зарплата» каждый месяц. Бонусы и дорожные туда попадают из заявок автоматически.</div>
       <div className="kd-section">Начальный остаток наличных (П.8)</div>
       <div className="kd-grid2">

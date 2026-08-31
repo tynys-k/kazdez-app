@@ -410,7 +410,7 @@ function Dashboard({ session, profile }) {
       // cash_opening_balance / cash_opening_date — база ревизии кассы: от них считается «на руках»
       // (см. techOpening ниже). salary_monthly — оклад для вкладки «Зарплата».
       // Поле, забытое в этом select, читается как undefined и молча ломает расчёт — так уже было с ревизией.
-      supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at, cash_opening_balance, cash_opening_date, salary_monthly"),
+      supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at, cash_opening_balance, cash_opening_date, salary_monthly, work_schedule"),
       supabase.from("handouts").select("*"),
       supabase.from("partners").select("*"),
       supabase.from("doc_services").select("*").order("created_at", { ascending: false }),
@@ -1861,7 +1861,12 @@ function Dashboard({ session, profile }) {
     const jobsOf = jobs.filter((j) => j.assigned_to === t.id && j.status === "done" && inPeriodIso(j.scheduled_date));
     const bonus = jobsOf.reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
     const travel = jobsOf.reduce((s, j) => s + (Number(j.tech_travel) || 0), 0);
-    const salary = payrollSalaryCounts ? (Number(t.salary_monthly) || 0) : 0;
+    // Оклад режется за пропуски сверх положенных выходных: дни берём из
+    // раздела «Выходные», норму — из графика в карточке сотрудника.
+    const monthKey = payrollSalaryCounts ? isoOf(new Date(range.start)).slice(0, 7) : "";
+    const absenceDays = payrollSalaryCounts ? calc.absenceDaysInMonth(t.id, daysOff, monthKey) : 0;
+    const salaryCalc = calc.salaryForMonth({ salary: t.salary_monthly, schedule: t.work_schedule, absenceDays });
+    const salary = payrollSalaryCounts ? salaryCalc.payable : 0;
     const payments = expenses.filter((e) => e.tech_id === t.id && e.status === "paid" && inPeriodIso(e.expense_date));
     const paid = payments.reduce((s, e) => s + (Number(e.amount) || 0), 0);
     // Выплаты, не дошедшие до кассы. Ищем по факту отсутствия движения, а не по
@@ -1870,7 +1875,7 @@ function Dashboard({ session, profile }) {
     const unposted = expenses.filter((e) => e.tech_id === t.id
       && !moves.some((m) => m.source === "payroll" && m.ref_id === e.id));
     const accrued = salary + bonus + travel;
-    return { tech: t, salary, bonus, travel, accrued, paid, owed: accrued - paid, payments, unposted, jobsCount: jobsOf.length };
+    return { tech: t, salary, salaryCalc, bonus, travel, accrued, paid, owed: accrued - paid, payments, unposted, jobsCount: jobsOf.length };
   });
   const payrollTotals = payrollRows.reduce((a, r) => ({
     accrued: a.accrued + r.accrued, paid: a.paid + r.paid, owed: a.owed + r.owed,
@@ -3343,7 +3348,10 @@ function Dashboard({ session, profile }) {
                 <div key={r.tech.id}>
                   <div className="kd-ledgerrow kd-payrollrow">
                     <span className="kd-ledgername">{r.tech.full_name || "(без имени)"}</span>
-                    <span className="kd-muted" data-l="Оклад">{payrollSalaryCounts ? fmt(r.salary) : "—"}</span>
+                    <span className="kd-muted" data-l="Оклад" title={r.salaryCalc.deduction > 0 ? `Оклад ${fmt(r.salaryCalc.base)} ₸, отсутствовал ${r.salaryCalc.absenceDays} дн. при норме ${r.salaryCalc.norm?.offDays}, вычет ${fmt(r.salaryCalc.deduction)} ₸` : ""}>
+                      {payrollSalaryCounts ? fmt(r.salary) : "—"}
+                      {payrollSalaryCounts && r.salaryCalc.deduction > 0 && <em style={{ display: "block", fontStyle: "normal", fontSize: 10.5, color: "var(--rust)" }}>−{fmt(r.salaryCalc.deduction)} за {r.salaryCalc.excessDays} дн.</em>}
+                    </span>
                     <span data-l="Бонусы">{fmt(r.bonus)}</span>
                     <span data-l="Дорожные">{fmt(r.travel)}</span>
                     <span data-l="Начислено">{fmt(r.accrued)}</span>
@@ -3370,7 +3378,7 @@ function Dashboard({ session, profile }) {
                   )}
                 </div>
               ))}
-              <div className="kd-muted" style={{ marginTop: 10 }}>Бонусы и дорожные подтягиваются из выполненных заявок периода (кнопка «Бонус / дорожные» в карточке заявки). Оклад задаётся в карточке сотрудника.</div>
+              <div className="kd-muted" style={{ marginTop: 10 }}>Оклад режется за дни отсутствия сверх нормы графика: при 6/1 положено 4 выходных в месяц, при 5/2 — девять. Дни берутся из раздела «Выходные», график задаётся в карточке сотрудника. Бонусы и дорожные подтягиваются из выполненных заявок периода (кнопка «Бонус / дорожные» в карточке заявки). Оклад задаётся в карточке сотрудника.</div>
             </div>
           </>
         )}

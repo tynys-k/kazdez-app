@@ -392,3 +392,48 @@ export function cashForecast({ onAccounts = 0, inHands = 0, expected = 0, payrol
     monthsOfRunway: monthlyOpex && monthlyOpex > 0 ? Math.round(afterPayroll / monthlyOpex * 10) / 10 : null,
   };
 }
+
+// --- оклад с учётом отсутствий -------------------------------------------
+
+// График вида «6/1» — шесть рабочих дней на один выходной.
+export const WORK_SCHEDULES = { "6/1": [6, 1], "5/2": [5, 2], "7/0": [7, 0] };
+
+// Месячная норма считается по средней длине месяца в неделях (52/12 ≈ 4,333),
+// а не по календарю: так «26 рабочих дней при 6/1» одинаково и в феврале,
+// и в августе, и сотрудник не получает разный оклад из-за длины месяца.
+export function scheduleNorm(schedule) {
+  const pair = WORK_SCHEDULES[schedule];
+  if (!pair) return null;
+  const [work, off] = pair;
+  return { workDays: Math.round(work * 52 / 12), offDays: Math.round(off * 52 / 12) };
+}
+
+// Оклад за месяц с вычетом за пропуски СВЕРХ положенных выходных.
+// Отгулы, больничные и отпуск лежат в одной таблице «Выходные» и считаются
+// одинаково: приложение не знает, что из этого оплачивается, и не решает
+// за владельца — просто показывает, сколько дней сверх нормы человек отсутствовал.
+export function salaryForMonth({ salary = 0, schedule = null, absenceDays = 0 } = {}) {
+  const base = Number(salary) || 0;
+  const norm = scheduleNorm(schedule);
+  // Без графика вычитать не из чего: норму рабочих дней взять неоткуда.
+  if (!norm || base <= 0) {
+    return { base, norm: null, absenceDays, excessDays: 0, dailyRate: 0, deduction: 0, payable: base };
+  }
+  const excessDays = Math.max(0, absenceDays - norm.offDays);
+  const dailyRate = base / norm.workDays;
+  // Вычет не может превысить сам оклад, даже если человек отсутствовал весь месяц.
+  const deduction = Math.min(base, Math.round(excessDays * dailyRate));
+  return { base, norm, absenceDays, excessDays, dailyRate: Math.round(dailyRate), deduction, payable: base - deduction };
+}
+
+// Сколько дней сотрудник отсутствовал в месяце. Один день считается один раз,
+// даже если его отметили дважды.
+export function absenceDaysInMonth(techId, daysOff = [], monthKey = "") {
+  const set = new Set();
+  for (const d of daysOff) {
+    if (String(d.tech_id) !== String(techId)) continue;
+    if (!d.off_date || !String(d.off_date).startsWith(monthKey)) continue;
+    set.add(String(d.off_date).slice(0, 10));
+  }
+  return set.size;
+}
