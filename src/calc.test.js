@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
-  techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
+  techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate, allocationPerJob, jobFullEconomics,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -192,5 +192,70 @@ describe("isClosedDate", () => {
 
   it("отметка времени сравнивается по дню, а не по часам", () => {
     expect(isClosedDate("2026-08-31T23:59:00Z", "2026-08-31")).toBe(true);
+  });
+});
+
+describe("allocationPerJob", () => {
+  const profiles = [
+    { id: "t1", salary_monthly: 300000 },
+    { id: "t2", salary_monthly: 0 },
+  ];
+  const jobs = [
+    { id: "a", status: "done", assigned_to: "t1", scheduled_date: "2026-08-05" },
+    { id: "b", status: "done", assigned_to: "t1", scheduled_date: "2026-08-20" },
+    { id: "c", status: "done", assigned_to: "t2", scheduled_date: "2026-08-21" },
+    { id: "d", status: "done", assigned_to: "t1", scheduled_date: "2026-09-01" },
+    { id: "e", status: "new",  assigned_to: "t1", scheduled_date: "2026-08-25" },
+  ];
+  const opex = [{ spent_date: "2026-08-10", amount: 90000 }];
+
+  it("оклад делится на заявки ЭТОГО дезинфектора за ЭТОТ месяц", () => {
+    const at = allocationPerJob(jobs, { profiles, opex });
+    // t1 сделал в августе 2 заявки → 300 000 / 2
+    expect(at(jobs[0]).labor).toBe(150000);
+    // в сентябре одну → весь оклад на неё
+    expect(at(jobs[3]).labor).toBe(300000);
+  });
+
+  it("невыполненные заявки не уменьшают стоимость труда", () => {
+    const at = allocationPerJob(jobs, { profiles, opex });
+    expect(at(jobs[0]).labor).toBe(150000); // заявка "e" в статусе new не считается
+  });
+
+  it("постоянные расходы делятся поровну на все выполненные заявки месяца", () => {
+    const at = allocationPerJob(jobs, { profiles, opex });
+    // в августе 3 выполненных → 90 000 / 3
+    expect(at(jobs[0]).overhead).toBe(30000);
+    expect(at(jobs[2]).overhead).toBe(30000);
+    // в сентябре расходов не было
+    expect(at(jobs[3]).overhead).toBe(0);
+  });
+
+  it("без оклада труд не начисляется", () => {
+    const at = allocationPerJob(jobs, { profiles, opex });
+    expect(at(jobs[2]).labor).toBe(0);
+  });
+
+  it("заявка без даты или невыполненная ничего не получает", () => {
+    const at = allocationPerJob(jobs, { profiles, opex });
+    expect(at(jobs[4])).toEqual({ labor: 0, overhead: 0 });
+    expect(at({ status: "done", assigned_to: "t1" })).toEqual({ labor: 0, overhead: 0 });
+  });
+});
+
+describe("jobFullEconomics", () => {
+  it("вычитает труд и постоянные из прямой прибыли", () => {
+    const job = { status: "done", report_paid: 30000, report_qr: 0, chemicals: [] };
+    const e = jobFullEconomics(job, { labor: 12000, overhead: 5000 });
+    expect(e.profit).toBe(30000);       // прямая прибыль не меняется
+    expect(e.fullProfit).toBe(13000);
+    expect(e.fullMargin).toBe(43);
+  });
+
+  it("показывает убыток там, где прямая прибыль выглядела плюсом", () => {
+    const job = { status: "done", report_paid: 10000, report_qr: 0, chemicals: [] };
+    const e = jobFullEconomics(job, { labor: 9000, overhead: 4000 });
+    expect(e.profit).toBeGreaterThan(0);
+    expect(e.fullProfit).toBeLessThan(0); // ради этого всё и считается
   });
 });

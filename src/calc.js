@@ -188,3 +188,62 @@ export function isClosedDate(dateIso, closedUntil) {
   if (!closedUntil || !dateIso) return false;
   return String(dateIso).slice(0, 10) <= String(closedUntil).slice(0, 10);
 }
+
+// --- полная себестоимость заявки ----------------------------------------
+
+const monthOf = (iso) => (iso ? String(iso).slice(0, 7) : "");
+
+// Оклады и постоянные расходы, разнесённые на одну заявку.
+//
+// Оклад делится на выполненные заявки ЭТОГО дезинфектора за месяц: оклад
+// платится именно за эти выезды, и у того, кто сделал 10 заявок, каждая
+// «дороже» по труду, чем у того, кто сделал 40.
+//
+// Операционные расходы (аренда, реклама, связь) делятся ПОРОВНУ на все
+// выполненные заявки месяца, а не пропорционально выручке: аренда не растёт
+// от того, что заявка дороже — она обслуживает сам факт выезда.
+export function allocationPerJob(jobs = [], { profiles = [], opex = [] } = {}) {
+  const doneByTechMonth = new Map();   // "techId|2026-08" -> сколько заявок
+  const doneByMonth = new Map();       // "2026-08"        -> сколько заявок
+  for (const j of jobs) {
+    if (j.status !== "done" || !j.scheduled_date) continue;
+    const m = monthOf(j.scheduled_date);
+    doneByMonth.set(m, (doneByMonth.get(m) || 0) + 1);
+    if (j.assigned_to) {
+      const k = `${j.assigned_to}|${m}`;
+      doneByTechMonth.set(k, (doneByTechMonth.get(k) || 0) + 1);
+    }
+  }
+
+  const opexByMonth = new Map();
+  for (const o of opex) {
+    if (!o.spent_date) continue;
+    const m = monthOf(o.spent_date);
+    opexByMonth.set(m, (opexByMonth.get(m) || 0) + (Number(o.amount) || 0));
+  }
+
+  const salaryOf = (techId) => Number(profiles.find((p) => p.id === techId)?.salary_monthly) || 0;
+
+  return function forJob(job) {
+    if (!job || job.status !== "done" || !job.scheduled_date) return { labor: 0, overhead: 0 };
+    const m = monthOf(job.scheduled_date);
+    const techJobs = doneByTechMonth.get(`${job.assigned_to}|${m}`) || 0;
+    const monthJobs = doneByMonth.get(m) || 0;
+    return {
+      labor: techJobs > 0 ? Math.round(salaryOf(job.assigned_to) / techJobs) : 0,
+      overhead: monthJobs > 0 ? Math.round((opexByMonth.get(m) || 0) / monthJobs) : 0,
+    };
+  };
+}
+
+// Прибыль заявки с учётом труда и постоянных расходов.
+// Прямая прибыль (jobEconomics) остаётся как была: по ней видно, окупает ли
+// заявка сама себя, а полная показывает, зарабатывает ли на ней компания.
+export function jobFullEconomics(job, { chemicals = [], qrFeeRate = 0.0095, labor = 0, overhead = 0 } = {}) {
+  const base = jobEconomics(job, { chemicals, qrFeeRate });
+  const fullProfit = Math.round(base.profit - labor - overhead);
+  return {
+    ...base, labor, overhead, fullProfit,
+    fullMargin: base.revenue > 0 ? Math.round(fullProfit / base.revenue * 100) : 0,
+  };
+}
