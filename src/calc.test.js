@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
-  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats,
+  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -386,5 +386,42 @@ describe("jobDurations и durationStats", () => {
       { status: "new", pest: "Клопы", en_route_at: "2026-08-20T09:00:00Z", arrived_at: "2026-08-20T09:10:00Z", reported_at: "2026-08-20T10:10:00Z" },
     ]);
     expect(s.measured).toBe(0);
+  });
+});
+
+describe("cashForecast и monthlyOpexAverage", () => {
+  it("средние расходы считаются по полным прошедшим месяцам", () => {
+    const opex = [
+      { spent_date: "2026-08-10", amount: 90000 },
+      { spent_date: "2026-07-10", amount: 60000 },
+      { spent_date: "2026-06-10", amount: 30000 },
+      { spent_date: "2026-09-01", amount: 999999 }, // текущий месяц не в счёт
+    ];
+    expect(monthlyOpexAverage(opex, { today: new Date("2026-09-15"), months: 3 })).toBe(60000);
+  });
+
+  it("без истории расходов норма не выдумывается", () => {
+    expect(monthlyOpexAverage([], { today: new Date("2026-09-15") })).toBeNull();
+    expect(monthlyOpexAverage([{ spent_date: "2026-09-01", amount: 5000 }], { today: new Date("2026-09-15") })).toBeNull();
+  });
+
+  it("ожидаемые поступления не смешиваются с фактическими деньгами", () => {
+    const f = cashForecast({ onAccounts: 200000, inHands: 50000, expected: 300000, payrollOwed: 400000 });
+    expect(f.available).toBe(250000);
+    expect(f.afterPayroll).toBe(-150000);          // фактически не хватает
+    expect(f.covered).toBe(false);
+    expect(f.afterPayrollWithExpected).toBe(150000); // хватит, только если заплатят
+  });
+
+  it("зарплата покрыта, когда денег хватает без ожидаемых поступлений", () => {
+    const f = cashForecast({ onAccounts: 500000, inHands: 0, expected: 0, payrollOwed: 400000 });
+    expect(f.covered).toBe(true);
+    expect(f.afterPayroll).toBe(100000);
+  });
+
+  it("запас в месяцах считается только при известной норме расходов", () => {
+    expect(cashForecast({ onAccounts: 600000, payrollOwed: 0, monthlyOpex: 200000 }).monthsOfRunway).toBe(3);
+    expect(cashForecast({ onAccounts: 600000, payrollOwed: 0, monthlyOpex: null }).monthsOfRunway).toBeNull();
+    expect(cashForecast({ onAccounts: 600000, payrollOwed: 0, monthlyOpex: 0 }).monthsOfRunway).toBeNull();
   });
 });
