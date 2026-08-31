@@ -11,6 +11,7 @@ import {
 
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import * as calc from "./calc";
 import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -680,31 +681,11 @@ function Dashboard({ session, profile }) {
     showToast(`Статус: ${WORK_STAGE[stageKey].short}`); load();
   }
   const chemById = (id) => chemicals.find((x) => x.id === id);
-  const lineChem = (l) => (l.chemical_id ? chemById(l.chemical_id) : chemicals.find((x) => norm(x.name) === norm(l.name)));
-  const jobChemCost = (job) => (job.chemicals || []).reduce((s, l) => { const c = lineChem(l); return s + lineAmount(l) * pricePerBase(c); }, 0);
+  const lineChem = (l) => calc.lineChem(l, chemicals);
+  const jobChemCost = (job) => calc.jobChemCost(job, chemicals);
   const qrFeeRate = (Number(settings.qr_fee_rate) || 0.95) / 100;
   const defaultGuarantee = Number(settings.default_guarantee_months) || 6;
-  function techLedger(techId) {
-    const m = {};
-    const get = (cid) => (m[cid] = m[cid] || { issued: 0, opening: 0, consumed: 0, adjusted: 0 });
-    handouts.filter((h) => h.tech_id === techId).forEach((h) => { const g = get(h.chemical_id); if (h.kind === "opening") g.opening += Number(h.amount) || 0; else g.issued += Number(h.amount) || 0; });
-    jobs.filter((j) => j.assigned_to === techId).forEach((j) => (j.chemicals || []).forEach((l) => { if (l.chemical_id) get(l.chemical_id).consumed += lineAmount(l); }));
-    inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId)).forEach((a) => { get(a.chemical_id).adjusted += Number(a.amount_delta) || 0; });
-    return Object.entries(m).map(([cid, v]) => {
-      const c = chemById(cid); if (!c) return null;
-      const received = v.issued + v.opening;
-      // Была ревизия по этому препарату — она и есть точка отсчёта: берём зафиксированный
-      // факт и добавляем только движение ПОСЛЕ неё. Иначе считаем как раньше.
-      const revisions = inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.chemical_id) === String(cid) && a.kind === "revision").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-      if (!revisions.length) return { chem: c, ...v, received, balance: received - v.consumed + v.adjusted };
-      const checkpoint = revisions[0];
-      const issuedAfter = handouts.filter((h) => String(h.tech_id) === String(techId) && String(h.chemical_id) === String(cid) && (h.created_at || "").slice(0, 10) > checkpoint.event_date).reduce((s, h) => s + (Number(h.amount) || 0), 0);
-      const consumedAfter = jobs.filter((j) => String(j.assigned_to) === String(techId) && j.scheduled_date > checkpoint.event_date).reduce((sum, j) => sum + (j.chemicals || []).filter((l) => String(l.chemical_id) === String(cid)).reduce((s, l) => s + lineAmount(l), 0), 0);
-      const adjustedAfter = inventoryAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.chemical_id) === String(cid) && String(a.created_at) > String(checkpoint.created_at)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
-      return { chem: c, ...v, received, balance: Number(checkpoint.balance_after) + issuedAfter - consumedAfter + adjustedAfter, revision: checkpoint };
-    }).filter(Boolean);
-  }
-
+  const techLedger = (techId) => calc.techLedger(techId, { handouts, jobs, inventoryAdjustments, chemicals });
   const techById = (id) => techs.find((t) => t.id === id);
   const pestGuideObj = (() => { try { return JSON.parse(settings.pest_guide || "{}"); } catch { return {}; } })();
   // сделать гарантийный сертификат по заявке (реальные данные)
@@ -757,27 +738,16 @@ function Dashboard({ session, profile }) {
   const techEquipment = (techId) => equipHandouts.filter((h) => h.tech_id === techId && h.status === "with_tech").map((h) => ({ handout: h, equip: equipById(h.equipment_id) })).filter((r) => r.equip);
   // Наличные, собранные дезинфектором со всех его выполненных заявок
   // П.8: собранное считается только С даты начального остатка (заявки задним числом до неё не влияют на «на руках»)
-  const techOpening = (techId) => { const p = profileById(techId); return { bal: Number(p?.cash_opening_balance) || 0, date: p?.cash_opening_date || null }; };
-  const techCashCollected = (techId) => { const op = techOpening(techId); return jobs.filter((j) => j.assigned_to === techId && j.status === "done" && (!op.date || (j.scheduled_date && j.scheduled_date >= op.date))).reduce((s, j) => s + (Number(j.report_cash) || 0), 0); };
-  // Сумма уже подтверждённых внесений (деньги, которые точно дошли)
-  const techDepositedConfirmed = (techId) => { const op = techOpening(techId); return deposits.filter((d) => d.tech_id === techId && d.status === "confirmed" && (!op.date || (d.requested_at || "").slice(0, 10) >= op.date)).reduce((s, d) => s + (Number(d.amount) || 0), 0); };
-  // Сумма ожидающих подтверждения внесений (деньги «в пути», ещё не подтверждены)
-  const techDepositedPending = (techId) => { const op = techOpening(techId); return deposits.filter((d) => d.tech_id === techId && d.status === "pending" && (!op.date || (d.requested_at || "").slice(0, 10) >= op.date)).reduce((s, d) => s + (Number(d.amount) || 0), 0); };
-  // Наличные, реально лежащие на руках прямо сейчас = собрано − подтверждено − в ожидании
-  // Ревизии и корректировки по сотруднику, свежая первой.
-  const techCashRevisions = (techId) => cashAdjustments.filter((a) => String(a.tech_id) === String(techId) && a.kind === "revision").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-  // Наличные на руках. Если ревизия была — она и есть точка отсчёта: берём зафиксированный
-  // по ней факт и добавляем только движение ПОСЛЕ неё. Если ревизий нет — считаем от
-  // начального остатка в карточке сотрудника (старое поведение).
-  const techCashOnHand = (techId) => {
-    const latest = techCashRevisions(techId)[0];
-    if (!latest) return techOpening(techId).bal + techCashCollected(techId) - techDepositedConfirmed(techId) - techDepositedPending(techId);
-    const collectedAfter = jobs.filter((j) => String(j.assigned_to) === String(techId) && j.status === "done" && j.scheduled_date > latest.event_date).reduce((s, j) => s + (Number(j.report_cash) || 0), 0);
-    const depositedAfter = deposits.filter((d) => String(d.tech_id) === String(techId) && ["confirmed", "pending"].includes(d.status) && (d.requested_at || "").slice(0, 10) > latest.event_date).reduce((s, d) => s + (Number(d.amount) || 0), 0);
-    // корректировки и «забрали в офис», записанные уже после этой ревизии
-    const laterAdjustments = cashAdjustments.filter((a) => String(a.tech_id) === String(techId) && String(a.created_at) > String(latest.created_at)).reduce((s, a) => s + (Number(a.amount_delta) || 0), 0);
-    return Number(latest.balance_after) + collectedAfter - depositedAfter + laterAdjustments;
-  };
+  // Денежная математика живёт в src/calc.js и покрыта тестами (src/calc.test.js).
+  // Здесь только подставляем текущее состояние — сами формулы не дублируем,
+  // иначе копия в компоненте разойдётся с проверенной и всё начнётся заново.
+  const cashCtx = (techId) => ({ jobs, deposits, cashAdjustments, profile: profileById(techId) });
+  const techOpening = (techId) => calc.techOpening(profileById(techId));
+  const techCashCollected = (techId) => calc.techCashCollected(techId, cashCtx(techId));
+  const techDepositedConfirmed = (techId) => calc.techDepositedConfirmed(techId, cashCtx(techId));
+  const techDepositedPending = (techId) => calc.techDepositedPending(techId, cashCtx(techId));
+  const techCashRevisions = (techId) => calc.techCashRevisions(techId, cashAdjustments);
+  const techCashOnHand = (techId) => calc.techCashOnHand(techId, cashCtx(techId));
   // Ревизия / списание / передача препаратов между сотрудниками.
   // Передача пишется двумя связанными строками (out + in) с общим transfer_group.
   async function saveInventoryMovement(tech, payload) {
@@ -1058,29 +1028,9 @@ function Dashboard({ session, profile }) {
     if (job.brand === "partner" || job.partner_id || job.partner_name) return `Партнёр · ${partnerNameOf(job)}`;
     return "KazDez";
   }
-  const partnerShareAmt = (job) => {
-    if (!job.partner_id || job.status !== "done") return 0;
-    const paid = Number(job.report_paid) || 0;
-    if (!job.joint_work) return Math.round(paid * (Number(job.partner_share) || 0) / 100);
-    const cost = jobChemCost(job);
-    const net = paid - cost;
-    const profitShare = net * (Number(job.partner_share) || 0) / 100;
-    const costOwed = job.joint_supplier === "us" ? cost * (Number(job.joint_cost_share) || 0) / 100 : 0;
-    return Math.round(profitShare - costOwed);
-  };
-  const executorShareAmt = (job) => job.executor_partner_id && job.executor_settlement === "qr_full"
-    ? Math.round((Number(job.report_paid) || 0) * (Number(job.executor_share_pct) || 0) / 100) : 0;
-  function jobEconomics(job) {
-    const revenue = Number(job.report_paid) || 0;
-    const chemicalsCost = Math.round(jobChemCost(job));
-    const qrFee = Math.round((Number(job.report_qr) || 0) * qrFeeRate);
-    const partnersCost = Math.max(0, partnerShareAmt(job)) + executorShareAmt(job);
-    const techExtras = (Number(job.tech_bonus) || 0) + (Number(job.tech_travel) || 0);
-    const transport = Number(job.transport_cost) || 0;
-    const other = Number(job.other_cost) || 0;
-    const profit = Math.round(revenue - chemicalsCost - qrFee - partnersCost - techExtras - transport - other);
-    return { revenue, chemicals: chemicalsCost, qrFee, partners: partnersCost, techExtras, transport, other, profit, margin: revenue > 0 ? Math.round(profit / revenue * 100) : 0 };
-  }
+  const partnerShareAmt = (job) => calc.partnerShareAmt(job, chemicals);
+  const executorShareAmt = (job) => calc.executorShareAmt(job);
+  const jobEconomics = (job) => calc.jobEconomics(job, { chemicals, qrFeeRate });
   function upsellFor(job) {
     const text = norm(`${job.pest || ""} ${job.address || ""} ${job.note || ""}`);
     if (/склад|цех|производ|общепит|кафе|ресторан/.test(text)) return "регулярное абонентское обслуживание и мониторинг объекта";
