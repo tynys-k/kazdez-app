@@ -775,3 +775,10 @@ body{
 /* Текст на изумрудной заливке: в тёмной теме он почти чёрный, на светлой
    заливка сама стала тёмной — значит текст должен стать белым. */
 [data-theme="light"] ::selection{background:var(--primary-tint);color:var(--ink);}
+
+/* Загрузка бригады в шапке графика: полоса «сколько дня занято» и остаток.
+   Диспетчеру нужен ответ «влезет ли ещё одна заявка», а не точные минуты. */
+.kd-tlload{display:flex;flex-direction:column;gap:3px;margin-top:5px;}
+.kd-tlload>span{font-family:var(--font-mono);font-size:9.5px;font-weight:700;color:var(--muted);}
+.kd-tlloadbar{height:4px;border-radius:999px;background:var(--surface-sunk);border:1px solid var(--line-soft);overflow:hidden;}
+.kd-tlloadbar>div{height:100%;border-radius:999px;min-width:2px;transition:width .2s;}

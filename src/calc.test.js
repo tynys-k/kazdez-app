@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
-  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats,
+  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats, dayLoad,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -548,5 +548,40 @@ describe("ожидание лида", () => {
   it("без указания первой стадии не выдумывает просрочку по реакции", () => {
     const s = leadSlaStats([lead({ updated_at: hoursAgo(99) })], { firstStageId: null, now });
     expect(s.lateReaction).toBe(0);
+  });
+});
+
+describe("загрузка бригады на день", () => {
+  const durations = { avgTotal: 120, byPest: [{ pest: "Клопы", avgTotal: 180 }, { pest: "Муравьи", avgTotal: 60 }] };
+
+  it("считает по виду вредителя, а не по средней «по больнице»", () => {
+    const l = dayLoad([{ pest: "Клопы" }, { pest: "Муравьи" }], durations);
+    expect(l.busyMin).toBe(240);          // 180 + 60, а не 120 + 120
+    expect(l.freeMin).toBe(9 * 60 - 240);
+    expect(l.known).toBe(true);
+  });
+
+  it("для незнакомого вида берёт общий средний и помечает оценку неточной", () => {
+    const l = dayLoad([{ pest: "Мокрицы" }], durations);
+    expect(l.busyMin).toBe(120);
+    expect(l.known).toBe(true); // общий средний известен
+  });
+
+  it("без всякой статистики не выдумывает загрузку", () => {
+    const l = dayLoad([{ pest: "Клопы" }], { avgTotal: null, byPest: [] });
+    expect(l.busyMin).toBeNull();
+    expect(l.known).toBe(false);
+  });
+
+  it("пустой день — весь день свободен", () => {
+    const l = dayLoad([], durations);
+    expect(l.busyMin).toBe(0);
+    expect(l.freeMin).toBe(9 * 60);
+  });
+
+  it("переполненный день не уходит в минус", () => {
+    const l = dayLoad(Array(6).fill({ pest: "Клопы" }), durations); // 18 часов работы
+    expect(l.freeMin).toBe(0);
+    expect(l.busyMin).toBe(1080);
   });
 });
