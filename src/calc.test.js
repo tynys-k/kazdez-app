@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
-  clientStats, allocationPerJob, jobFullEconomics,
+  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -323,5 +323,68 @@ describe("clientStats", () => {
       job({ client_phone: "7011111111", scheduled_date: "2026-08-01", source: "Instagram" }),
     ], { phoneKeyOf: pk });
     expect(s.sources[0].label).toBe("Instagram");
+  });
+});
+
+describe("jobDurations и durationStats", () => {
+  const j = (over) => ({ status: "done", pest: "Тараканы", ...over });
+
+  it("считает путь, работу на объекте и полный цикл", () => {
+    const d = jobDurations(j({
+      en_route_at: "2026-08-20T09:00:00Z",
+      arrived_at:  "2026-08-20T09:30:00Z",
+      reported_at: "2026-08-20T10:45:00Z",
+    }));
+    expect(d.travel).toBe(30);
+    expect(d.onSite).toBe(75);
+    expect(d.total).toBe(105);
+  });
+
+  it("отбрасывает выброс: забыли нажать «В путь» и отметились вечером", () => {
+    const d = jobDurations(j({
+      en_route_at: "2026-08-20T09:00:00Z",
+      arrived_at:  "2026-08-20T23:30:00Z", // 14.5 часа — не бывает
+      reported_at: "2026-08-20T23:59:00Z",
+    }));
+    expect(d.travel).toBeNull();
+    expect(d.onSite).not.toBeNull(); // 29 минут — правдоподобно
+  });
+
+  it("нажатие в обратном порядке не даёт отрицательного времени", () => {
+    const d = jobDurations(j({ en_route_at: "2026-08-20T10:00:00Z", arrived_at: "2026-08-20T09:00:00Z" }));
+    expect(d.travel).toBeNull();
+  });
+
+  it("без отметок ничего не выдумывает", () => {
+    expect(jobDurations(j({}))).toEqual({ travel: null, onSite: null, total: null });
+  });
+
+  it("средние считаются только по заявкам с отметками", () => {
+    const s = durationStats([
+      j({ en_route_at: "2026-08-20T09:00:00Z", arrived_at: "2026-08-20T09:20:00Z", reported_at: "2026-08-20T10:20:00Z" }),
+      j({ en_route_at: "2026-08-21T09:00:00Z", arrived_at: "2026-08-21T09:40:00Z", reported_at: "2026-08-21T11:40:00Z" }),
+      j({}), // без отметок — не должна занижать среднее
+    ]);
+    expect(s.doneJobs).toBe(3);
+    expect(s.measured).toBe(2);
+    expect(s.avgTravel).toBe(30);   // (20+40)/2
+    expect(s.avgOnSite).toBe(90);   // (60+120)/2
+  });
+
+  it("разбивка по видам вредителей: от вида зависит длительность", () => {
+    const s = durationStats([
+      j({ pest: "Клопы", en_route_at: "2026-08-20T09:00:00Z", arrived_at: "2026-08-20T09:10:00Z", reported_at: "2026-08-20T11:10:00Z" }),
+      j({ pest: "Тараканы", en_route_at: "2026-08-20T09:00:00Z", arrived_at: "2026-08-20T09:10:00Z", reported_at: "2026-08-20T10:10:00Z" }),
+    ]);
+    const klopy = s.byPest.find((p) => p.pest === "Клопы");
+    expect(klopy.avgOnSite).toBe(120);
+    expect(s.byPest.find((p) => p.pest === "Тараканы").avgOnSite).toBe(60);
+  });
+
+  it("невыполненные заявки в статистику не идут", () => {
+    const s = durationStats([
+      { status: "new", pest: "Клопы", en_route_at: "2026-08-20T09:00:00Z", arrived_at: "2026-08-20T09:10:00Z", reported_at: "2026-08-20T10:10:00Z" },
+    ]);
+    expect(s.measured).toBe(0);
   });
 });

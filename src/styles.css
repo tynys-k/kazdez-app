@@ -41,6 +41,12 @@
   --font-display:"Space Grotesk", var(--font-body);
   --font-mono:"JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
+  /* Завеса поверх пастельных цветов статуса: в тёмной теме гасит их до тёмного,
+     в светлой — наоборот осветляет. Раньше цвет был вшит числом, и на светлой
+     теме график становился нечитаемым: тёмная карточка и тёмный текст. */
+  --card-veil:rgba(9,13,11,.84);
+  --card-veil-hover:rgba(20,27,22,.80);
+
   --sidebar:256px;
 }
 /* Тёмная — база. Светлая нужна не для красоты: дезинфекторы смотрят в телефон
@@ -78,6 +84,8 @@
   --shadow-sm:0 1px 2px rgba(15,42,29,.08);
   --shadow-card:0 1px 0 rgba(255,255,255,.9) inset, 0 12px 30px -22px rgba(15,42,29,.40);
   --shadow-pop:0 30px 70px -20px rgba(15,42,29,.26), 0 0 0 1px var(--line-hi);
+  --card-veil:rgba(255,255,255,.58);
+  --card-veil-hover:rgba(255,255,255,.24);
 }
 :root,[data-theme="dark"]{color-scheme:dark;}
 [data-theme="light"]{color-scheme:light;}
@@ -529,8 +537,8 @@ body{
 /* карточки таймлайна: фон приходит светлым инлайн-стилем (st.bg) —
    накрываем его тёмным слоем через inset box-shadow, чтобы светлый текст читался,
    при этом сохраняется лёгкий оттенок статуса и яркая цветная левая полоса */
-.kd-tlcard{position:absolute;left:4px;right:4px;background:var(--surface-hi);border:1px solid var(--line-hi);border-left:4px solid;border-radius:9px;padding:5px 9px;text-align:left;cursor:pointer;overflow:hidden;font:inherit;z-index:2;display:block;box-shadow:inset 0 0 0 2000px rgba(9,13,11,.84);}
-.kd-tlcard:hover{box-shadow:inset 0 0 0 2000px rgba(20,27,22,.80);}
+.kd-tlcard{position:absolute;left:4px;right:4px;background:var(--surface-hi);border:1px solid var(--line-hi);border-left:4px solid;border-radius:9px;padding:5px 9px;text-align:left;cursor:pointer;overflow:hidden;font:inherit;z-index:2;display:block;box-shadow:inset 0 0 0 2000px var(--card-veil);}
+.kd-tlcard:hover{box-shadow:inset 0 0 0 2000px var(--card-veil-hover);}
 .kd-tladdr{font-size:13px;font-weight:800;color:var(--ink);line-height:1.32;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .kd-tlsub{font-size:11px;font-weight:700;color:var(--ink-soft);margin-top:2px;letter-spacing:.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .kd-tlhead.off{background:repeating-linear-gradient(45deg,var(--surface-sunk) 0 8px,var(--surface) 8px 16px);color:var(--muted);}

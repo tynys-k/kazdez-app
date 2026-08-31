@@ -2068,6 +2068,9 @@ function Dashboard({ session, profile }) {
   const totalLabor = completedEconomics.reduce((s, r) => s + r.econ.labor, 0);
   const totalOverhead = completedEconomics.reduce((s, r) => s + r.econ.overhead, 0);
   const trueLossJobs = completedEconomics.filter((r) => r.econ.fullProfit < 0);
+  // Длительность выездов. Отметки этапов писались давно, но их никто не смотрел.
+  const durations = calc.durationStats(doneJobs);
+  const fmtMin = (m) => (m === null ? "—" : m >= 60 ? `${Math.floor(m / 60)} ч ${m % 60} мин` : `${m} мин`);
   const totalJobRevenue = completedEconomics.reduce((s, r) => s + r.econ.revenue, 0);
   const averageJobMargin = totalJobRevenue > 0 ? Math.round(totalJobProfit / totalJobRevenue * 100) : 0;
   const lossJobs = completedEconomics.filter((r) => r.econ.profit < 0);
@@ -2986,6 +2989,31 @@ function Dashboard({ session, profile }) {
                 </div>
               )}
               <div className="kd-muted" style={{ marginTop: 10 }}>Оклад делится на выполненные заявки того же дезинфектора за месяц. Постоянные расходы — поровну на все заявки месяца: аренда не растёт от того, что заявка дороже. Оклад задаётся в карточке сотрудника, расходы — в «Счетах и расходах».</div>
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section" style={{ marginTop: 0 }}>Сколько занимает работа</div>
+              {durations.measured === 0 ? (
+                <div className="kd-muted">Пока не по чему считать: нужны отметки «В путь» и «На объекте» в заявке. Дезинфекторы жмут их в поле — статистика наберётся сама.</div>
+              ) : (<>
+                <div className="kd-kpigrid" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
+                  <div className="kd-kpicard"><span>В пути</span><strong>{fmtMin(durations.avgTravel)}</strong><small>в среднем до объекта</small></div>
+                  <div className="kd-kpicard"><span>На объекте</span><strong>{fmtMin(durations.avgOnSite)}</strong><small>сама обработка</small></div>
+                  <div className="kd-kpicard"><span>Полный выезд</span><strong>{fmtMin(durations.avgTotal)}</strong><small>от выхода до отчёта</small></div>
+                </div>
+                {durations.byPest.length > 0 && (
+                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr .8fr 1fr 1fr", marginTop: 14 }}><span>Вид</span><span>Замеров</span><span>На объекте</span><span>Полный выезд</span></div>
+                )}
+                {durations.byPest.map((p) => (
+                  <div className="kd-ledgerrow" key={p.pest} style={{ gridTemplateColumns: "1.6fr .8fr 1fr 1fr" }}>
+                    <span className="kd-ledgername">{p.pest}</span>
+                    <span>{p.jobs}</span>
+                    <span>{fmtMin(p.avgOnSite)}</span>
+                    <strong>{fmtMin(p.avgTotal)}</strong>
+                  </div>
+                ))}
+                <div className="kd-muted" style={{ marginTop: 10 }}>Посчитано по {durations.measured} из {durations.doneJobs} выполненных заявок — только там, где есть отметки этапов. Промежутки длиннее 12 часов отброшены: обычно это забытая кнопка, а не реальный выезд.</div>
+              </>)}
             </div>
 
             <div className="kd-stage2grid">
