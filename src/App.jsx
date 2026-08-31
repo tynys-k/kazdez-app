@@ -276,6 +276,7 @@ function Dashboard({ session, profile }) {
   const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
   const [clientErrors, setClientErrors] = useState([]);
   const [jobHelpers, setJobHelpers] = useState([]);
+  const [priceList, setPriceList] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -449,10 +450,11 @@ function Dashboard({ session, profile }) {
       // по паре сотрудник+препарат задаёт точку отсчёта (см. techLedger).
       supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
       supabase.from("client_errors").select("*").order("occurred_at", { ascending: false }).limit(200),
+      supabase.from("price_list").select("*").order("pest").order("area_from"),
       supabase.from("job_helpers").select("*"),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     setReportChemsFailed(!!cr.error);
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
@@ -504,6 +506,7 @@ function Dashboard({ session, profile }) {
     setInventoryAdjustments(iar.data || []);
     setClientErrors(errr.data || []);
     setJobHelpers(jhr.data || []);
+    setPriceList(plr.data || []);
     if (!useOfflineSnapshot && !jr.error) {
       try {
         const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
@@ -1173,6 +1176,18 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Дезинфектор", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
     setModal(null); showToast("Сохранено"); load();
+  }
+  async function savePriceRow(row, existing) {
+    const payload = { pest: row.pest, area_from: Number(row.area_from) || 0, area_to: row.area_to === "" || row.area_to === null ? null : Number(row.area_to), price: Number(row.price) || 0, updated_at: new Date().toISOString() };
+    const res = existing ? await supabase.from("price_list").update(payload).eq("id", existing.id) : await supabase.from("price_list").insert(payload);
+    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+    await logAction("Прайс", `${payload.pest} ${payload.area_from}–${payload.area_to ?? "∞"} м² → ${fmt(payload.price)} ₸`);
+    showToast("Прайс обновлён"); load();
+  }
+  async function removePriceRow(row) {
+    await supabase.from("price_list").delete().eq("id", row.id);
+    await logAction("Прайс", `Удалено: ${row.pest} ${row.area_from}–${row.area_to ?? "∞"} м²`);
+    showToast("Удалено"); load();
   }
   async function saveAppSetting(key, value) {
     const { error } = await supabase.from("app_settings").upsert({ key, value, updated_at: new Date().toISOString() });
@@ -3997,8 +4012,8 @@ function Dashboard({ session, profile }) {
       </main>
       </div>
 
-      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} pestGuide={pestGuideObj} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
-      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
+      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
+      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} assignInfo={(techId) => {
         const d = modal.job.scheduled_date;
         if (!d) return { off: false, night: false, count: 0, score: 50, reasons: ["дата ещё не задана"] };
@@ -4060,11 +4075,12 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "reportEquip" && <ReportEquipModal equip={modal.equip} status={modal.status} onClose={() => setModal(null)} onSave={(note) => reportEquipIssue(modal.handout, modal.status, note)} />}
       {modal?.kind === "settings" && (
         <SettingsModal
-          settings={settings} sources={sources} pestTypes={pestTypes} expCats={expCats} accounts={accounts}
+          settings={settings} sources={sources} pestTypes={pestTypes} priceList={priceList} expCats={expCats} accounts={accounts}
           tabOrder={savedOrder.length ? [...ADMIN_TAB_ORDER].sort((a, b) => { const ia = savedOrder.indexOf(a), ib = savedOrder.indexOf(b); return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib); }) : ADMIN_TAB_ORDER}
           leadStages={leadStages} onAddLeadStage={addLeadStage} onRemoveLeadStage={removeLeadStage} onMoveLeadStage={moveLeadStage}
           onClose={() => setModal(null)}
           onSaveSetting={saveAppSetting}
+          priceList={priceList} onSavePriceRow={savePriceRow} onRemovePriceRow={removePriceRow}
           onSetTheme={setTheme}
           onAddSource={(name) => addCatalogItem("client_sources", name)}
           onRemoveSource={(item) => removeCatalogItem("client_sources", item)}

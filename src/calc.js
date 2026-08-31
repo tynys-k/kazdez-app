@@ -493,3 +493,30 @@ export function leadSlaStats(leads = [], { firstStageId = null, reactionHours = 
     reactionHours, staleDays,
   };
 }
+
+// --- прайс ----------------------------------------------------------------
+
+// Цена по виду вредителя и площади. Вид сравниваем без учёта регистра и
+// пробелов: в заявках он вводится руками и «Клопы» встречается как «клопы».
+//
+// area_to = null означает «и больше»: верхняя ступень всегда открыта, иначе
+// заявка на 300 м² не попала бы ни в одну строку прайса.
+export function priceFor(pest, area, priceList = []) {
+  const key = norm(pest);
+  if (!key) return null;
+  const rows = priceList.filter((r) => norm(r.pest) === key);
+  if (!rows.length) return null;
+
+  const a = Number(area);
+  // Площадь не указали — берём самую нижнюю ступень как ориентир.
+  if (!Number.isFinite(a) || a <= 0) {
+    const lowest = [...rows].sort((x, y) => (Number(x.area_from) || 0) - (Number(y.area_from) || 0))[0];
+    return lowest ? { price: Number(lowest.price) || 0, row: lowest, exact: false } : null;
+  }
+  const hit = rows.find((r) => {
+    const from = Number(r.area_from) || 0;
+    const to = r.area_to === null || r.area_to === undefined || r.area_to === "" ? Infinity : Number(r.area_to);
+    return a >= from && a <= to;
+  });
+  return hit ? { price: Number(hit.price) || 0, row: hit, exact: true } : null;
+}

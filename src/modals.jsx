@@ -2,6 +2,7 @@
 // Модальные окна Этапа 3: клиент 360 и единый жизненный цикл заявки.
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
+import { priceFor as calcPriceFor } from "./calc";
 import { AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -309,7 +310,7 @@ function jobToForm(job) {
 const JOB_DRAFT_KEY = "kazdez-new-job-draft-v2";
 const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
 
-function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, defaultGuarantee = 6, onClose, onSave }) {
+function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, onClose, onSave }) {
   const draftRef = useRef(undefined);
   if (draftRef.current === undefined) {
     try { draftRef.current = !initial ? JSON.parse(localStorage.getItem(JOB_DRAFT_KEY) || "null") : null; }
@@ -325,6 +326,17 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
+  // Цена по прайсу: подставляем в пустое поле, но не переписываем введённое
+  // руками — менеджер мог договориться о другой сумме, и затирать её нельзя.
+  const priceMatch = calcPriceFor(f.pest, f.area, priceList);
+  const priceHint = !priceMatch ? null : (
+    <div className="kd-hint" style={{ marginTop: -4 }}>
+      По прайсу{priceMatch.exact ? "" : " (площадь не указана)"}: <strong>{fmt(priceMatch.price)} ₸</strong>
+      {String(f.p1amount || "") !== String(priceMatch.price) && (
+        <button type="button" className="kd-btn ghost sm" style={{ marginLeft: 10 }} onClick={() => setF({ ...f, p1amount: String(priceMatch.price) })}>Подставить</button>
+      )}
+    </div>
+  );
   const phoneDigits = String(f.client_phone || "").replace(/\D/g, "");
   const clientHistory = phoneDigits.length >= 10
     ? existingJobs.filter((j) => samePhone(j.client_phone, f.client_phone)).sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || "")))
@@ -502,6 +514,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
           <Field label="Цена 2 — подпись"><input value={f.p2label} onChange={set("p2label")} /></Field>
           <Field label="Цена 2 — сумма (₸)"><input value={f.p2amount} onChange={set("p2amount")} inputMode="numeric" placeholder="20000" /></Field>
         </div>}
+      {priceHint}
       {formMode === "expanded" && <>
       <datalist id="kd-contact-roles">{["Муж", "Жена", "Сестра", "Брат", "Коллега", "Директор", "Диспетчер", "Охранник", "Бухгалтер", "Администратор", "Сосед"].map((r) => <option key={r} value={r} />)}</datalist>
       {(f.extra_contacts || []).map((c, i) => (
@@ -1416,7 +1429,7 @@ function SettingsSection({ title, subtitle, open, onToggle, children }) {
   );
 }
 
-function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], tabOrder = [], leadStages = [], onAddLeadStage, onRemoveLeadStage, onMoveLeadStage, onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
+function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], onSavePriceRow, onRemovePriceRow, accounts = [], tabOrder = [], leadStages = [], onAddLeadStage, onRemoveLeadStage, onMoveLeadStage, onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
   const [newStage, setNewStage] = useState("");
   const [theme, setThemeLocal] = useState(localStorage.getItem("kd-theme") || "light");
   const [qrRate, setQrRate] = useState(settings.qr_fee_rate ?? 0.95);
@@ -1443,6 +1456,7 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
   const [pgPest, setPgPest] = useState(firstPest);
   const [pg, setPg] = useState(pestGuideMap[firstPest] || { info: "", chems: "", times: "", drive: "" });
   const [closedUntil, setClosedUntil] = useState(settings.books_closed_until || "");
+  const [pRow, setPRow] = useState({ pest: "", area_from: "", area_to: "", price: "" });
   const loadPg = (name) => { setPgPest(name); setPg(pestGuideMap[name] || { info: "", chems: "", times: "", drive: "" }); };
   const savePg = () => {
     const map = { ...pestGuideMap };
@@ -1519,6 +1533,30 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
 
         <SettingsSection title="Источники клиентов" subtitle={`${sources.length} шт. · откуда пришёл клиент`} open={openSection === "sources"} onToggle={() => toggle("sources")}>
           <CatalogList items={sources} onAdd={onAddSource} onRemove={onRemoveSource} placeholder="Напр.: Facebook" />
+        </SettingsSection>
+
+        <SettingsSection title="Прайс" subtitle={priceList.length ? `${priceList.length} строк` : "цены нигде не записаны"} open={openSection === "prices"} onToggle={() => toggle("prices")}>
+          <div className="kd-muted" style={{ marginBottom: 10 }}>Вид вредителя и диапазон площади. Цена подставляется в новую заявку, когда выбран вид и указан метраж. Верхнюю границу можно оставить пустой — это «и больше».</div>
+          {priceList.map((r) => (
+            <div className="kd-chemrow3" key={r.id} style={{ gridTemplateColumns: "1.4fr 1fr 1fr auto" }}>
+              <span className="kd-ledgername">{r.pest}</span>
+              <span className="kd-muted">{r.area_from}–{r.area_to ?? "∞"} м²</span>
+              <strong>{fmt(r.price)} ₸</strong>
+              <button className="kd-btn ghost danger sm" onClick={() => onRemovePriceRow(r)}>Убрать</button>
+            </div>
+          ))}
+          <div className="kd-grid2" style={{ marginTop: 10 }}>
+            <Field label="Вид вредителя">
+              <input list="kd-price-pests" value={pRow.pest} onChange={(e) => setPRow({ ...pRow, pest: e.target.value })} placeholder="Клопы" />
+            </Field>
+            <Field label="Цена (₸)"><input value={pRow.price} onChange={(e) => setPRow({ ...pRow, price: e.target.value })} inputMode="numeric" placeholder="25000" /></Field>
+          </div>
+          <datalist id="kd-price-pests">{pestTypes.map((p) => <option key={p.id} value={p.name} />)}</datalist>
+          <div className="kd-grid2">
+            <Field label="Площадь от (м²)"><input value={pRow.area_from} onChange={(e) => setPRow({ ...pRow, area_from: e.target.value })} inputMode="numeric" placeholder="0" /></Field>
+            <Field label="Площадь до (м²)"><input value={pRow.area_to} onChange={(e) => setPRow({ ...pRow, area_to: e.target.value })} inputMode="numeric" placeholder="пусто = и больше" /></Field>
+          </div>
+          <button className="kd-btn primary sm" disabled={!pRow.pest.trim() || !(Number(pRow.price) > 0)} onClick={() => { onSavePriceRow(pRow); setPRow({ pest: "", area_from: "", area_to: "", price: "" }); }}>Добавить строку</button>
         </SettingsSection>
 
         <SettingsSection title="Закрытие периода" subtitle={settings.books_closed_until ? `закрыто до ${isoToRu(settings.books_closed_until)}` : "период открыт — прошлое можно править"} open={openSection === "closing"} onToggle={() => toggle("closing")}>

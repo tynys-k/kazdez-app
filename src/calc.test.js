@@ -3,6 +3,7 @@ import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
   clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats,
+  priceFor,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -548,5 +549,45 @@ describe("ожидание лида", () => {
   it("без указания первой стадии не выдумывает просрочку по реакции", () => {
     const s = leadSlaStats([lead({ updated_at: hoursAgo(99) })], { firstStageId: null, now });
     expect(s.lateReaction).toBe(0);
+  });
+});
+
+describe("прайс", () => {
+  const list = [
+    { pest: "Клопы", area_from: 0, area_to: 40, price: 25000 },
+    { pest: "Клопы", area_from: 41, area_to: 80, price: 35000 },
+    { pest: "Клопы", area_from: 81, area_to: null, price: 50000 },
+    { pest: "Тараканы", area_from: 0, area_to: null, price: 20000 },
+  ];
+
+  it("подбирает ступень по площади", () => {
+    expect(priceFor("Клопы", 30, list).price).toBe(25000);
+    expect(priceFor("Клопы", 60, list).price).toBe(35000);
+    expect(priceFor("Клопы", 300, list).price).toBe(50000); // верхняя ступень открыта
+  });
+
+  it("вид сравнивается без учёта регистра и пробелов", () => {
+    expect(priceFor("  клопы ", 30, list).price).toBe(25000);
+  });
+
+  it("без площади берёт нижнюю ступень и помечает как неточную", () => {
+    const r = priceFor("Клопы", null, list);
+    expect(r.price).toBe(25000);
+    expect(r.exact).toBe(false);
+  });
+
+  it("на границе диапазона попадает в нужную ступень", () => {
+    expect(priceFor("Клопы", 40, list).price).toBe(25000);
+    expect(priceFor("Клопы", 41, list).price).toBe(35000);
+  });
+
+  it("незнакомый вид цены не выдумывает", () => {
+    expect(priceFor("Мокрицы", 30, list)).toBeNull();
+    expect(priceFor("", 30, list)).toBeNull();
+  });
+
+  it("дыра в прайсе честно возвращает пусто, а не соседнюю цену", () => {
+    const holed = [{ pest: "Клопы", area_from: 0, area_to: 40, price: 25000 }];
+    expect(priceFor("Клопы", 100, holed)).toBeNull();
   });
 });
