@@ -78,7 +78,10 @@ function AppContent() {
   const [profile, setProfile] = useState(null);
   const [booting, setBooting] = useState(true);
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", localStorage.getItem("kd-theme") || "light");
+    // Умолчание — тёмная: она и так у всех сейчас. Светлая включается сознательно
+    // в Настройках, иначе после появления темы вся команда получила бы новый вид
+    // приложения без предупреждения.
+    document.documentElement.setAttribute("data-theme", localStorage.getItem("kd-theme") || "dark");
   }, []);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setBooting(false); });

@@ -43,8 +43,44 @@
 
   --sidebar:256px;
 }
-/* тёмная тема = базовая; атрибут data-theme игнорируется */
-[data-theme]{color-scheme:dark;}
+/* Тёмная — база. Светлая нужна не для красоты: дезинфекторы смотрят в телефон
+   на улице, где тёмный экран бликует и выцветает на солнце.
+   Роли пересчитаны, а не инвертированы: на белом «выделенный» оттенок обязан
+   быть ТЕМНЕЕ основного, иначе он исчезает. Поэтому --primary-d здесь тёмный,
+   хотя в тёмной теме он самый светлый. */
+[data-theme="light"]{
+  --bg:#F3F6F3;
+  --bg-2:#EBF0EC;
+  --surface:#FFFFFF;
+  --surface-sunk:#F0F4F0;
+  --surface-hi:#FAFCFA;
+  --ink:#0F1A14;
+  --ink-soft:#33423A;
+  --muted:#5C6B63;
+  --faint:#828F87;
+  --line:rgba(15,42,29,.13);
+  --line-soft:rgba(15,42,29,.07);
+  --line-hi:rgba(15,42,29,.22);
+
+  --primary:#0B7D5C;
+  --primary-d:#08654A;
+  --primary-tint:rgba(11,125,92,.11);
+  --em-glow:rgba(11,125,92,.22);
+  --accent:#0B7D5C;
+  --accent-ink:#FFFFFF;
+
+  --amber:#8A5A08;   --amber-tint:rgba(138,90,8,.12);
+  --rust:#A32118;    --rust-tint:rgba(163,33,24,.10);
+  --violet:#5F4499;  --violet-tint:rgba(95,68,153,.12);
+  --blue:#1B5A9E;    --blue-tint:rgba(27,90,158,.12);
+  --wa:#128C4A;
+
+  --shadow-sm:0 1px 2px rgba(15,42,29,.08);
+  --shadow-card:0 1px 0 rgba(255,255,255,.9) inset, 0 12px 30px -22px rgba(15,42,29,.40);
+  --shadow-pop:0 30px 70px -20px rgba(15,42,29,.26), 0 0 0 1px var(--line-hi);
+}
+:root,[data-theme="dark"]{color-scheme:dark;}
+[data-theme="light"]{color-scheme:light;}
 
 *{box-sizing:border-box;}
 html,body,#root{height:100%;margin:0;}
@@ -66,6 +102,14 @@ body{
   background-size:auto,auto,auto,46px 46px,46px 46px;
   background-attachment:fixed;
 }
+[data-theme="light"] body{
+  background-image:
+    radial-gradient(900px 520px at 4% -6%, rgba(11,125,92,.07), transparent 60%),
+    radial-gradient(760px 500px at 104% 4%, rgba(11,125,92,.05), transparent 55%),
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size:auto,auto,46px 46px,46px 46px;
+}
 .kd-center{display:flex;height:100vh;align-items:center;justify-content:center;color:var(--muted);}
 .kd-crash{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);}.kd-crash>div{max-width:520px;text-align:center;border:1px solid var(--line-hi);border-radius:22px;background:var(--surface);padding:32px;box-shadow:var(--shadow-pop);}.kd-crash svg{color:var(--amber);}.kd-crash h1{font-family:var(--font-display);font-size:24px;margin:12px 0 8px;}.kd-crash p{color:var(--muted);line-height:1.55;margin:0 0 20px;}
 .kd-muted{color:var(--muted);font-size:13px;font-weight:600;line-height:1.45;}
@@ -84,7 +128,7 @@ body{
     radial-gradient(circle at 84% 90%, rgba(52,211,153,.08), transparent 42%),
     var(--bg);
 }
-.kd-login-card{background:linear-gradient(180deg,rgba(20,27,22,.9),rgba(12,17,14,.92));border:1px solid var(--line-hi);border-radius:var(--radius-lg);
+.kd-login-card{background:linear-gradient(180deg,var(--surface-hi),var(--surface));border:1px solid var(--line-hi);border-radius:var(--radius-lg);
   padding:0 26px 28px; width:100%;max-width:388px;box-shadow:var(--shadow-pop);overflow:hidden;backdrop-filter:blur(12px);}
 .kd-login-card .kd-hazard{margin:0 -26px 26px;width:calc(100% + 52px);opacity:.7;mask:none;}
 .kd-logo-big{display:flex;align-items:center;gap:11px;font-family:var(--font-display);font-weight:700;font-size:25px;color:var(--ink);letter-spacing:-.4px;}
@@ -310,7 +354,7 @@ body{
 .kd-btn{font-family:var(--font-body);font-weight:700;font-size:13.5px;letter-spacing:-.01em;cursor:pointer;border-radius:var(--radius-sm);padding:10px 16px;min-height:44px;border:1px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:7px;transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,transform .05s ease,color .15s ease;}
 .kd-btn svg{flex-shrink:0;}
 .kd-btn:active{transform:translateY(1px);}
-.kd-btn.primary{background:linear-gradient(180deg,var(--primary-d),var(--primary));color:#04140C;font-weight:800;box-shadow:0 10px 26px -10px var(--em-glow), inset 0 1px 0 rgba(255,255,255,.32);}
+.kd-btn.primary{background:linear-gradient(180deg,var(--primary-d),var(--primary));color:var(--accent-ink);font-weight:800;box-shadow:0 10px 26px -10px var(--em-glow), inset 0 1px 0 rgba(255,255,255,.32);}
 .kd-btn.primary:hover{box-shadow:0 14px 32px -8px var(--em-glow);}
 .kd-btn.primary:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;}
 .kd-btn.primary.danger{background:linear-gradient(180deg,#ff8a82,var(--rust));color:#180706;}
@@ -701,3 +745,25 @@ body{
   .kd-payrollrow>span:last-child{margin-top:8px;}
   .kd-payrollrow>span:last-child .kd-btn{width:100%;}
 }
+
+/* ---------------------------------------------------------------------
+   Светлая тема: доводка мест, где цвет был вшит в правило, а не взят из
+   токена. Такие места на светлом фоне выглядят как тёмные заплаты.
+   --------------------------------------------------------------------- */
+/* Нативные списки и календари: без этого на светлой теме выпадающие меню
+   и выбор даты остаются чёрными системными. */
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea{color-scheme:light;}
+
+/* Полупрозрачные тёмные подложки: шапка, боковое меню, мобильная панель,
+   строка показателей владельца, плитки KPI. */
+[data-theme="light"] .kd-topbar{background:linear-gradient(180deg,rgba(255,255,255,.92),rgba(255,255,255,.62));}
+[data-theme="light"] .kd-side{background:linear-gradient(180deg,rgba(255,255,255,.90),rgba(246,249,246,.94));}
+[data-theme="light"] .kd-mobile-nav{background:rgba(255,255,255,.95);}
+[data-theme="light"] .kd-pulsestrip>button{background:rgba(255,255,255,.75);}
+[data-theme="light"] .kd-overlay{background:rgba(15,42,29,.35);}
+
+/* Текст на изумрудной заливке: в тёмной теме он почти чёрный, на светлой
+   заливка сама стала тёмной — значит текст должен стать белым. */
+[data-theme="light"] ::selection{background:var(--primary-tint);color:var(--ink);}
