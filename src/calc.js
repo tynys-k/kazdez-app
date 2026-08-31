@@ -493,3 +493,36 @@ export function leadSlaStats(leads = [], { firstStageId = null, reactionHours = 
     reactionHours, staleDays,
   };
 }
+
+// --- загрузка бригады на день --------------------------------------------
+
+// Рабочий день дезинфектора. Не настройка: величина нужна только как ориентир
+// «сколько ещё влезет», и лишний переключатель тут дороже точности.
+export const WORKDAY_MINUTES = 9 * 60;
+
+// Сколько времени займут назначенные на день заявки и сколько дня останется.
+//
+// Длительность берём по виду вредителя из накопленной статистики: обработка
+// от клопов и от муравьёв занимает разное время, и средняя «по больнице»
+// ввела бы диспетчера в заблуждение. Если по виду замеров нет — общий средний,
+// если и его нет — не гадаем и возвращаем null.
+export function dayLoad(jobsOfDay = [], durations = null, { workdayMinutes = WORKDAY_MINUTES } = {}) {
+  const perPest = new Map((durations?.byPest || []).map((p) => [p.pest, p.avgTotal]));
+  const fallback = durations?.avgTotal ?? null;
+  if (!jobsOfDay.length) return { jobs: 0, busyMin: 0, freeMin: workdayMinutes, known: true, workdayMinutes };
+
+  let busy = 0, unknown = 0;
+  for (const j of jobsOfDay) {
+    const est = perPest.get((j.pest || "—").trim()) ?? fallback;
+    if (est === null || est === undefined) unknown += 1; else busy += est;
+  }
+  // Пока статистики нет вообще, честнее не показывать загрузку, чем показать выдуманную.
+  if (unknown === jobsOfDay.length) return { jobs: jobsOfDay.length, busyMin: null, freeMin: null, known: false, workdayMinutes };
+  return {
+    jobs: jobsOfDay.length,
+    busyMin: Math.round(busy),
+    freeMin: Math.max(0, workdayMinutes - Math.round(busy)),
+    known: unknown === 0,
+    workdayMinutes,
+  };
+}
