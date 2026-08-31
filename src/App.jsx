@@ -356,13 +356,32 @@ function Dashboard({ session, profile }) {
     showToast("Учётная запись удалена"); await load(); await refreshAuthUsers();
   }
 
+  // PostgREST отдаёт ограниченное число строк на запрос, а таблицы вроде
+  // report_chemicals растут вместе с историей (715 выполненных заявок × 1-3 препарата).
+  // Обрезка происходит МОЛЧА, без ошибки: у админа просто пропадал расход по свежим
+  // заявкам, а дезинфектор видел свои, потому что его выборка меньше порога.
+  // Тянем страницами, пока страница приходит полной.
+  async function fetchAllRows(table, order = null, pageSize = 1000) {
+    let from = 0; const all = [];
+    for (;;) {
+      let q = supabase.from(table).select("*");
+      if (order) q = q.order(order.column, { ascending: !!order.ascending });
+      const { data, error } = await q.range(from, from + pageSize - 1);
+      if (error) return { data: all.length ? all : null, error };
+      const rows = data || [];
+      all.push(...rows);
+      if (rows.length < pageSize) return { data: all, error: null };
+      from += pageSize;
+      if (from > 100000) return { data: all, error: null }; // защита от бесконечного цикла
+    }
+  }
   async function load() {
     setLoading(true);
     try {
     await supabase.rpc("stage4_refresh_notifications");
     const responses = await Promise.all([
-      supabase.from("jobs").select("*"),
-      supabase.from("report_chemicals").select("*"),
+      fetchAllRows("jobs"),
+      fetchAllRows("report_chemicals"),
       supabase.from("chemicals").select("*"),
       supabase.from("audit_log").select("*").order("ts", { ascending: false }),
       supabase.from("trash").select("*").order("deleted_at", { ascending: false }),
@@ -384,7 +403,7 @@ function Dashboard({ session, profile }) {
       supabase.from("cash_deposits").select("*").order("requested_at", { ascending: false }),
       supabase.from("tasks").select("*").order("created_at", { ascending: false }),
       supabase.from("accounts").select("*").order("sort"),
-      supabase.from("money_moves").select("*").order("move_date", { ascending: false }),
+      fetchAllRows("money_moves", { column: "move_date", ascending: false }),
       supabase.from("tenders").select("*").order("created_at", { ascending: false }),
       supabase.from("tender_guarantees").select("*"),
       supabase.from("tender_services").select("*").order("seq"),
