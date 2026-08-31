@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
-  techCashOnHand, techCashCollected, techDepositedPending, techLedger,
+  techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -170,5 +170,27 @@ describe("techLedger", () => {
       jobs: [], inventoryAdjustments: [], chemicals,
     });
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("isClosedDate", () => {
+  it("граница включительно: сам день закрытия уже закрыт", () => {
+    expect(isClosedDate("2026-08-31", "2026-08-31")).toBe(true);
+    expect(isClosedDate("2026-09-01", "2026-08-31")).toBe(false);
+    expect(isClosedDate("2026-08-30", "2026-08-31")).toBe(true);
+  });
+
+  it("без даты закрытия ничего не блокируется", () => {
+    expect(isClosedDate("2020-01-01", "")).toBe(false);
+    expect(isClosedDate("2020-01-01", null)).toBe(false);
+  });
+
+  it("операция без даты не блокируется — иначе нельзя было бы завести новое", () => {
+    expect(isClosedDate(null, "2026-08-31")).toBe(false);
+    expect(isClosedDate("", "2026-08-31")).toBe(false);
+  });
+
+  it("отметка времени сравнивается по дню, а не по часам", () => {
+    expect(isClosedDate("2026-08-31T23:59:00Z", "2026-08-31")).toBe(true);
   });
 });
