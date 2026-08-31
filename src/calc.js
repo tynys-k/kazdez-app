@@ -51,12 +51,13 @@ export function executorShareAmt(job) {
 
 // --- экономика заявки ----------------------------------------------------
 
-export function jobEconomics(job, { chemicals = [], qrFeeRate = 0.0095 } = {}) {
+export function jobEconomics(job, { chemicals = [], qrFeeRate = 0.0095, helpers = 0 } = {}) {
   const revenue = Number(job?.report_paid) || 0;
   const chemicalsCost = Math.round(jobChemCost(job, chemicals));
   const qrFee = Math.round((Number(job?.report_qr) || 0) * qrFeeRate);
   const partnersCost = Math.max(0, partnerShareAmt(job, chemicals)) + executorShareAmt(job);
-  const techExtras = (Number(job?.tech_bonus) || 0) + (Number(job?.tech_travel) || 0);
+  // Бонусы помощников — такие же прямые затраты, как бонус основного исполнителя.
+  const techExtras = (Number(job?.tech_bonus) || 0) + (Number(job?.tech_travel) || 0) + (Number(helpers) || 0);
   const transport = Number(job?.transport_cost) || 0;
   const other = Number(job?.other_cost) || 0;
   const profit = Math.round(revenue - chemicalsCost - qrFee - partnersCost - techExtras - transport - other);
@@ -239,8 +240,8 @@ export function allocationPerJob(jobs = [], { profiles = [], opex = [] } = {}) {
 // Прибыль заявки с учётом труда и постоянных расходов.
 // Прямая прибыль (jobEconomics) остаётся как была: по ней видно, окупает ли
 // заявка сама себя, а полная показывает, зарабатывает ли на ней компания.
-export function jobFullEconomics(job, { chemicals = [], qrFeeRate = 0.0095, labor = 0, overhead = 0 } = {}) {
-  const base = jobEconomics(job, { chemicals, qrFeeRate });
+export function jobFullEconomics(job, { chemicals = [], qrFeeRate = 0.0095, labor = 0, overhead = 0, helpers = 0 } = {}) {
+  const base = jobEconomics(job, { chemicals, qrFeeRate, helpers });
   const fullProfit = Math.round(base.profit - labor - overhead);
   return {
     ...base, labor, overhead, fullProfit,
@@ -436,4 +437,27 @@ export function absenceDaysInMonth(techId, daysOff = [], monthKey = "") {
     set.add(String(d.off_date).slice(0, 10));
   }
   return set.size;
+}
+
+// --- помощники на заявке --------------------------------------------------
+
+// Сколько всего доплачено помощникам по заявке.
+export function helpersTotal(jobId, jobHelpers = []) {
+  return jobHelpers
+    .filter((h) => String(h.job_id) === String(jobId))
+    .reduce((sum, h) => sum + (Number(h.amount) || 0), 0);
+}
+
+// Сколько сотрудник заработал помощью на чужих заявках за период.
+// Дату берём у ЗАЯВКИ, а не у записи помощника: бонус относится к месяцу,
+// когда работа была сделана, а не когда админ вспомнил его вписать.
+export function helperEarnings(techId, { jobs = [], jobHelpers = [], inPeriod = () => true } = {}) {
+  const jobById = new Map(jobs.map((j) => [String(j.id), j]));
+  return jobHelpers
+    .filter((h) => String(h.tech_id) === String(techId))
+    .reduce((sum, h) => {
+      const job = jobById.get(String(h.job_id));
+      if (!job || job.status !== "done" || !inPeriod(job.scheduled_date)) return sum;
+      return sum + (Number(h.amount) || 0);
+    }, 0);
 }
