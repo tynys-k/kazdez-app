@@ -2,7 +2,7 @@
 // Модальные окна Этапа 3: клиент 360 и единый жизненный цикл заявки.
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
-import { AddressText, DOC_TYPES, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { AddressText, DOC_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -327,7 +327,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
   const phoneDigits = String(f.client_phone || "").replace(/\D/g, "");
   const clientHistory = phoneDigits.length >= 10
-    ? existingJobs.filter((j) => String(j.client_phone || "").replace(/\D/g, "") === phoneDigits).sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || "")))
+    ? existingJobs.filter((j) => samePhone(j.client_phone, f.client_phone)).sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || "")))
     : [];
   const latestClient = clientHistory[0];
   const activeGuarantee = clientHistory.find((j) => {
@@ -824,15 +824,15 @@ function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts
   const [saving, setSaving] = useState(false);
   const digits = (job.client_phone || "").replace(/\D/g, "");
   const list = jobs
-    .filter((j) => (j.client_phone || "").replace(/\D/g, "") === digits && digits)
+    .filter((j) => samePhone(j.client_phone, job.client_phone))
     .sort((a, b) => new Date(b.scheduled_date || b.created_at || 0) - new Date(a.scheduled_date || a.created_at || 0));
   const doneCount = list.filter((j) => j.status === "done").length;
   const revenue = list.filter((j) => j.status === "done").reduce((sum, j) => sum + (Number(j.report_paid) || 0), 0);
   const average = doneCount ? Math.round(revenue / doneCount) : 0;
   const jobIds = new Set(list.map((j) => String(j.id)));
-  const clientFollowups = followups.filter((f) => (f.phone || "").replace(/\D/g, "") === digits || jobIds.has(String(f.job_id || "")));
+  const clientFollowups = followups.filter((f) => samePhone(f.phone, job.client_phone) || jobIds.has(String(f.job_id || "")));
   const clientQuality = qualityChecks.filter((q) => jobIds.has(String(q.job_id || "")));
-  const clientContracts = contracts.filter((c) => (c.phone || "").replace(/\D/g, "") === digits);
+  const clientContracts = contracts.filter((c) => samePhone(c.phone, job.client_phone));
   const clientFeedback = feedback.filter((f) => jobIds.has(String(f.job_id || "")));
   const lastDone = list.find((j) => j.status === "done");
   const nextJob = [...list].filter((j) => j.status !== "done" && j.status !== "canceled").sort((a, b) => new Date(a.scheduled_date || "9999-12-31") - new Date(b.scheduled_date || "9999-12-31"))[0];
@@ -844,7 +844,7 @@ function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts
     return Number.isNaN(parsed.getTime()) ? new Date(date) : parsed;
   };
   const timeline = [
-    ...events.filter((e) => (e.client_phone || "").replace(/\D/g, "") === digits || jobIds.has(String(e.job_id || ""))).map((e) => ({ id: `e-${e.id}`, at: new Date(e.created_at), type: e.event_type, title: e.title, details: [e.details, e.created_by ? profileName(e.created_by) : ""].filter(Boolean).join(" · ") })),
+    ...events.filter((e) => samePhone(e.client_phone, job.client_phone) || jobIds.has(String(e.job_id || ""))).map((e) => ({ id: `e-${e.id}`, at: new Date(e.created_at), type: e.event_type, title: e.title, details: [e.details, e.created_by ? profileName(e.created_by) : ""].filter(Boolean).join(" · ") })),
     ...list.flatMap((j) => [
       j.created_at ? { id: `created-${j.id}`, at: new Date(j.created_at), type: "created", title: `Создана заявка: ${j.pest || j.type || "услуга"}`, details: j.address } : null,
       j.scheduled_date ? { id: `visit-${j.id}`, at: eventTime(j.scheduled_date, j.scheduled_time), type: "visit", title: `${j.status === "done" ? "Выполнен" : "Запланирован"} выезд`, details: `${j.type || "Обработка"} · ${j.pest || ""}` } : null,
