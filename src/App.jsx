@@ -683,6 +683,19 @@ function Dashboard({ session, profile }) {
   const chemById = (id) => chemicals.find((x) => x.id === id);
   const lineChem = (l) => calc.lineChem(l, chemicals);
   const jobChemCost = (job) => calc.jobChemCost(job, chemicals);
+  // Закрытие периода. Пока месяц открыт, цифры в нём можно править — и отчёт,
+  // который смотрели вчера, сегодня покажет другое. Дата в настройках делает
+  // прошлое неизменяемым: чтобы что-то исправить, придётся сознательно сдвинуть
+  // границу, и это будет видно в журнале. Закрыто — значит закрыто для всех,
+  // включая админа: исключение «только админу» на практике означает «всем».
+  const booksClosedUntil = settings.books_closed_until || "";
+  const isClosedDate = (iso) => calc.isClosedDate(iso, booksClosedUntil);
+  // true = операцию нужно остановить
+  function blockedByClosedPeriod(dateIso) {
+    if (!isClosedDate(dateIso)) return false;
+    showToast(`Период закрыт до ${isoToRu(booksClosedUntil)}. Чтобы исправить, сдвиньте дату закрытия в Настройках.`);
+    return true;
+  }
   const qrFeeRate = (Number(settings.qr_fee_rate) || 0.95) / 100;
   const defaultGuarantee = Number(settings.default_guarantee_months) || 6;
   const techLedger = (techId) => calc.techLedger(techId, { handouts, jobs, inventoryAdjustments, chemicals });
@@ -751,6 +764,7 @@ function Dashboard({ session, profile }) {
   // Ревизия / списание / передача препаратов между сотрудниками.
   // Передача пишется двумя связанными строками (out + in) с общим transfer_group.
   async function saveInventoryMovement(tech, payload) {
+    if (blockedByClosedPeriod(payload.event_date)) return false;
     const current = Number(payload.current_balance) || 0;
     const quantity = Number(payload.amount) || 0;
     const common = {
@@ -779,6 +793,7 @@ function Dashboard({ session, profile }) {
   // Запись ревизии / «забрали в офис» / ручной корректировки. Суммы приходят уже
   // посчитанными из CashRevisionModal, здесь только фиксируем автора и пишем в базу.
   async function saveCashRevision(tech, payload) {
+    if (blockedByClosedPeriod(payload.event_date)) return false;
     const { error } = await supabase.from("cash_adjustments").insert({
       tech_id: String(tech.id), kind: payload.kind || "revision",
       amount_delta: Number(payload.amount_delta) || 0,
@@ -810,6 +825,7 @@ function Dashboard({ session, profile }) {
     return true;
   }
   async function editJob(job, payload) {
+    if (blockedByClosedPeriod(payload.scheduled_date || job.scheduled_date)) return;
     const { error } = await supabase.from("jobs").update(payload).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return false; }
     await ensureCatalog("client_sources", sources, payload.source);
@@ -826,6 +842,7 @@ function Dashboard({ session, profile }) {
     showToast("Заявка на повторе"); load();
   }
   async function cancelJob(job, reason) {
+    if (blockedByClosedPeriod(job.scheduled_date)) return;
     const { error } = await supabase.from("jobs").update({ status: "canceled", work_stage: "canceled", cancel_reason: reason || null, canceled_at: new Date().toISOString(), canceled_by: session.user.id }).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Отмена заявки", `${job.pest} · ${job.address}${reason ? " — " + reason : ""}`);
@@ -879,6 +896,7 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Дезинфектор назначен"); load();
   }
   async function submitReport(job, report, chems, docs) {
+    if (blockedByClosedPeriod(job.scheduled_date)) return false;
     const { error } = await supabase.rpc("submit_report", {
       p_job: job.id, p_cash: report.cash, p_qr: report.qr, p_note: report.note,
       p_chems: chems,
@@ -911,6 +929,7 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Оплата зачтена"); load();
   }
   async function saveTechExtras(job, bonus, travel) {
+    if (blockedByClosedPeriod(job.scheduled_date)) return;
     const { error } = await supabase.from("jobs").update({ tech_bonus: Number(bonus) || null, tech_travel: Number(travel) || null }).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Заявка", `Бонус/дорожные: ${job.pest} · бонус ${fmt(bonus)} · дорожные ${fmt(travel)}`);
@@ -971,6 +990,7 @@ function Dashboard({ session, profile }) {
     showToast("Запрос отклонён"); load();
   }
   async function deleteJob(job) {
+    if (blockedByClosedPeriod(job.scheduled_date)) return;
     await supabase.from("trash").insert({ deleted_by: actorName, deleted_by_id: session.user.id, job: { ...job } });
     const { error } = await supabase.from("jobs").delete().eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
@@ -1104,6 +1124,7 @@ function Dashboard({ session, profile }) {
   }
   // Новая выплата из раздела «Зарплата».
   async function savePayrollPayment(tech, payload) {
+    if (blockedByClosedPeriod(payload.expense_date)) return false;
     const { data: created, error } = await supabase.from("tech_expenses").insert({
       tech_id: payload.tech_id, type: payload.type, amount: payload.amount,
       expense_date: payload.expense_date, account_id: payload.account_id || null,
@@ -1118,6 +1139,7 @@ function Dashboard({ session, profile }) {
   // Старое начисление, заведённое до того, как выплаты стали проводиться по кассе.
   // Проводим ту же запись, а не создаём новую — иначе сумма задвоится в отчётах.
   async function payExistingExpense(tech, expense, payload) {
+    if (blockedByClosedPeriod(payload.expense_date) || blockedByClosedPeriod(expense.expense_date)) return false;
     const { data: updated, error } = await supabase.from("tech_expenses").update({
       status: "paid", account_id: payload.account_id || null,
       expense_date: payload.expense_date, paid_at: payload.expense_date,
@@ -1129,6 +1151,7 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Выплата проведена"); load(); return true;
   }
   async function removeExpense(e) {
+    if (blockedByClosedPeriod(e.expense_date)) return;
     // сначала снимаем движение по кассе, иначе останется расход без основания
     await supabase.from("money_moves").delete().eq("source", "payroll").eq("ref_id", e.id);
     await supabase.from("tech_expenses").delete().eq("id", e.id);
@@ -1180,17 +1203,20 @@ function Dashboard({ session, profile }) {
     load();
   }
   async function saveOpex(payload, existing) {
+    if (blockedByClosedPeriod(payload.spent_date) || (existing && blockedByClosedPeriod(existing.spent_date))) return;
     const res = existing ? await supabase.from("opex").update(payload).eq("id", existing.id) : await supabase.from("opex").insert({ ...payload, created_by: session.user.id });
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
     await logAction("Расходы", `${existing ? "Изменено" : "Добавлено"}: ${fmt(payload.amount)} ₸`);
     setModal(null); showToast("Сохранено"); load();
   }
   async function removeOpex(o) {
+    if (blockedByClosedPeriod(o.spent_date)) return;
     await supabase.from("opex").delete().eq("id", o.id);
     await logAction("Расходы", `Удалено: ${fmt(o.amount)} ₸`);
     showToast("Удалено"); load();
   }
   async function saveMove(payload, existing) {
+    if (blockedByClosedPeriod(payload.move_date) || (existing && blockedByClosedPeriod(existing.move_date))) return;
     const res = existing ? await supabase.from("money_moves").update(payload).eq("id", existing.id) : await supabase.from("money_moves").insert({ ...payload, created_by: session.user.id, source: "manual" });
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
     const dirLabel = payload.direction === "income" ? "Доход" : payload.direction === "expense" ? "Расход" : "Перевод";
@@ -1198,6 +1224,7 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Сохранено"); load();
   }
   async function removeMove(m) {
+    if (blockedByClosedPeriod(m.move_date)) return;
     if (m.source !== "manual") { showToast("Автоматическое движение — удалить нельзя"); return; }
     await supabase.from("money_moves").delete().eq("id", m.id);
     await logAction("Финансы", `Удалено движение: ${fmt(m.amount)} ₸`);
@@ -1448,6 +1475,7 @@ function Dashboard({ session, profile }) {
     showToast("Выходной снят"); load();
   }
   async function saveJobEconomics(job, payload) {
+    if (blockedByClosedPeriod(job.scheduled_date)) return;
     const { error } = await supabase.from("jobs").update(payload).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Юнит-экономика", `${job.pest} · транспорт ${fmt(payload.transport_cost)} ₸ · прочее ${fmt(payload.other_cost)} ₸`);

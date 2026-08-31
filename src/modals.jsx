@@ -1433,6 +1433,7 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
   const firstPest = (pestTypes[0] && pestTypes[0].name) || "";
   const [pgPest, setPgPest] = useState(firstPest);
   const [pg, setPg] = useState(pestGuideMap[firstPest] || { info: "", chems: "", times: "", drive: "" });
+  const [closedUntil, setClosedUntil] = useState(settings.books_closed_until || "");
   const loadPg = (name) => { setPgPest(name); setPg(pestGuideMap[name] || { info: "", chems: "", times: "", drive: "" }); };
   const savePg = () => {
     const map = { ...pestGuideMap };
@@ -1509,6 +1510,18 @@ function SettingsModal({ settings, sources, pestTypes, expCats, accounts = [], t
 
         <SettingsSection title="Источники клиентов" subtitle={`${sources.length} шт. · откуда пришёл клиент`} open={openSection === "sources"} onToggle={() => toggle("sources")}>
           <CatalogList items={sources} onAdd={onAddSource} onRemove={onRemoveSource} placeholder="Напр.: Facebook" />
+        </SettingsSection>
+
+        <SettingsSection title="Закрытие периода" subtitle={settings.books_closed_until ? `закрыто до ${isoToRu(settings.books_closed_until)}` : "период открыт — прошлое можно править"} open={openSection === "closing"} onToggle={() => toggle("closing")}>
+          <div className="kd-muted" style={{ marginBottom: 10 }}>После закрытия заявки, выплаты, расходы, движения по счетам и ревизии за эту дату и ранее менять нельзя — ни вам, ни сотрудникам. Отчёты за закрытые месяцы перестают меняться задним числом.</div>
+          <Field label="Учёт закрыт по дату включительно">
+            <input type="date" value={closedUntil} onChange={(e) => setClosedUntil(e.target.value)} />
+          </Field>
+          <div className="kd-actions">
+            <button className="kd-btn primary sm" onClick={() => onSaveSetting("books_closed_until", closedUntil || null)}>Сохранить</button>
+            {settings.books_closed_until && <button className="kd-btn ghost sm" onClick={() => { setClosedUntil(""); onSaveSetting("books_closed_until", null); }}>Открыть период</button>}
+          </div>
+          <div className="kd-muted" style={{ marginTop: 10 }}>Обычный порядок: свели месяц, сверили кассу — закрыли. Понадобилось исправить что-то в закрытом месяце — сдвиньте дату назад, исправьте и закройте снова.</div>
         </SettingsSection>
 
         <SettingsSection title="Виды вредителей" subtitle={`${pestTypes.length} шт.`} open={openSection === "pests"} onToggle={() => toggle("pests")}>

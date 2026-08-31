@@ -178,3 +178,13 @@ export function techLedger(techId, { handouts = [], jobs = [], inventoryAdjustme
     };
   }).filter(Boolean);
 }
+
+// --- закрытие периода ----------------------------------------------------
+
+// Дата попадает в закрытый период, если она не позже границы включительно.
+// Сравниваем строками ISO: они сортируются как даты, и это избавляет от
+// часовых поясов — «31.08» в Алматы и в UTC должно значить одно и то же.
+export function isClosedDate(dateIso, closedUntil) {
+  if (!closedUntil || !dateIso) return false;
+  return String(dateIso).slice(0, 10) <= String(closedUntil).slice(0, 10);
+}
