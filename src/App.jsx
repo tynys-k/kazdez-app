@@ -370,8 +370,12 @@ function Dashboard({ session, profile }) {
       if (error) return { data: all.length ? all : null, error };
       const rows = data || [];
       all.push(...rows);
-      if (rows.length < pageSize) return { data: all, error: null };
-      from += pageSize;
+      // Сдвигаемся на СКОЛЬКО ПРИШЛО, а не на размер страницы: у сервера свой
+      // потолок строк в ответе, и если он меньше pageSize, проверка
+      // «пришло меньше запрошенного — значит конец» останавливает нас на первой
+      // же странице и молча теряет остальные данные.
+      if (rows.length === 0) return { data: all, error: null };
+      from += rows.length;
       if (from > 100000) return { data: all, error: null }; // защита от бесконечного цикла
     }
   }
