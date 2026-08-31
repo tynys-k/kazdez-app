@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
-  techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
+  techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate, clientStats,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -192,5 +192,70 @@ describe("isClosedDate", () => {
 
   it("отметка времени сравнивается по дню, а не по часам", () => {
     expect(isClosedDate("2026-08-31T23:59:00Z", "2026-08-31")).toBe(true);
+  });
+});
+
+describe("clientStats", () => {
+  const pk = (p) => { const d = String(p || "").replace(/\D/g, ""); return d.length >= 10 ? d.slice(-10) : ""; };
+  const job = (over) => ({ status: "done", report_paid: 10000, ...over });
+
+  it("склеивает один номер в разных формах в ОДНОГО клиента", () => {
+    const s = clientStats([
+      job({ client_phone: "+7 701 382 1617", scheduled_date: "2026-08-01" }),
+      job({ client_phone: "8701 382 16 17", scheduled_date: "2026-08-20" }),
+    ], { phoneKeyOf: pk });
+    // до починки это были два клиента и 0% возвратов
+    expect(s.clients).toBe(1);
+    expect(s.returned).toBe(1);
+    expect(s.returnRate).toBe(100);
+    expect(s.ltv).toBe(20000);
+  });
+
+  it("клиент попадает в когорту по ПЕРВОЙ заявке, а возврат считается позже", () => {
+    const s = clientStats([
+      job({ client_phone: "7011111111", scheduled_date: "2026-08-10" }),
+      job({ client_phone: "7011111111", scheduled_date: "2026-09-15" }),
+    ], { from: "2026-08-01", to: "2026-08-31", phoneKeyOf: pk });
+    expect(s.clients).toBe(1);
+    expect(s.returnRate).toBe(100); // вернулся в сентябре — но он клиент августа
+  });
+
+  it("клиент, пришедший позже, в когорту не попадает", () => {
+    const s = clientStats([
+      job({ client_phone: "7011111111", scheduled_date: "2026-09-10" }),
+    ], { from: "2026-08-01", to: "2026-08-31", phoneKeyOf: pk });
+    expect(s.clients).toBe(0);
+  });
+
+  it("отменённые не создают клиента", () => {
+    const s = clientStats([
+      job({ client_phone: "7011111111", scheduled_date: "2026-08-10", status: "canceled" }),
+    ], { phoneKeyOf: pk });
+    expect(s.clients).toBe(0);
+  });
+
+  it("заявки без телефона не сливаются в одного «клиента»", () => {
+    const s = clientStats([
+      job({ client_phone: "", scheduled_date: "2026-08-10" }),
+      job({ client_phone: null, scheduled_date: "2026-08-11" }),
+    ], { phoneKeyOf: pk });
+    expect(s.clients).toBe(0);
+  });
+
+  it("ценность считается по платившим — бесплатные осмотры не занижают её", () => {
+    const s = clientStats([
+      job({ client_phone: "7011111111", scheduled_date: "2026-08-01", report_paid: 30000 }),
+      job({ client_phone: "7022222222", scheduled_date: "2026-08-02", report_paid: 0 }),
+    ], { phoneKeyOf: pk });
+    expect(s.clients).toBe(2);
+    expect(s.ltv).toBe(30000);
+  });
+
+  it("источник берётся из первой заявки клиента", () => {
+    const s = clientStats([
+      job({ client_phone: "7011111111", scheduled_date: "2026-08-20", source: "Повтор" }),
+      job({ client_phone: "7011111111", scheduled_date: "2026-08-01", source: "Instagram" }),
+    ], { phoneKeyOf: pk });
+    expect(s.sources[0].label).toBe("Instagram");
   });
 });
