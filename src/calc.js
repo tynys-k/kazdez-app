@@ -349,3 +349,46 @@ export function durationStats(jobs = []) {
       .sort((a, b) => b.jobs - a.jobs),
   };
 }
+
+// --- хватит ли денег ------------------------------------------------------
+
+// Не предсказание, а сведение того, что уже известно: сколько есть на руках
+// и на счетах, сколько должны получить и сколько должны отдать. Владельцу
+// нужен ответ на «хватит ли на зарплату», а не кривая на графике.
+//
+// Средние расходы берём по ПОЛНЫМ прошедшим месяцам: текущий месяц ещё не
+// кончился, и включать его — значит каждый раз занижать норму в начале месяца.
+export function monthlyOpexAverage(opex = [], { today = new Date(), months = 3 } = {}) {
+  const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const wanted = [];
+  for (let i = 1; i <= months; i += 1) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    wanted.push(key(d));
+  }
+  const sums = new Map(wanted.map((m) => [m, 0]));
+  let seen = false;
+  for (const o of opex) {
+    if (!o.spent_date) continue;
+    const m = String(o.spent_date).slice(0, 7);
+    if (sums.has(m)) { sums.set(m, sums.get(m) + (Number(o.amount) || 0)); seen = true; }
+  }
+  if (!seen) return null;                       // нет истории — не выдумываем норму
+  const total = [...sums.values()].reduce((s, v) => s + v, 0);
+  return Math.round(total / wanted.length);
+}
+
+export function cashForecast({ onAccounts = 0, inHands = 0, expected = 0, payrollOwed = 0, monthlyOpex = null } = {}) {
+  const available = onAccounts + inHands;
+  const afterPayroll = available - payrollOwed;
+  return {
+    available, expected, payrollOwed, monthlyOpex,
+    afterPayroll,
+    // С учётом ожидаемых поступлений — но это деньги, которых ещё нет,
+    // поэтому показываем отдельной строкой, а не смешиваем с фактом.
+    afterPayrollWithExpected: afterPayroll + expected,
+    // Хватает ли на зарплату прямо сейчас, не рассчитывая на приход.
+    covered: payrollOwed <= available,
+    // На сколько месяцев обычных расходов хватит остатка после зарплаты.
+    monthsOfRunway: monthlyOpex && monthlyOpex > 0 ? Math.round(afterPayroll / monthlyOpex * 10) / 10 : null,
+  };
+}

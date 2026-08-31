@@ -2019,6 +2019,17 @@ function Dashboard({ session, profile }) {
   const todayRevenue = todayDone.reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
   const todayProfit = todayDone.reduce((s, j) => s + jobEconomics(j).profit, 0);
   const todayPlan = todayJobs.reduce((s, j) => s + Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0)), 0);
+  // Хватит ли денег. Сводим то, что уже известно: остатки счетов, наличные
+  // у бригад, ожидаемые поступления и долг по зарплате.
+  const totalOnAccounts = accounts.reduce((s, a) => s + accountBalance(a.id), 0);
+  const totalInHands = techs.reduce((s, t) => s + techCashOnHand(t.id), 0);
+  const forecast = calc.cashForecast({
+    onAccounts: totalOnAccounts,
+    inHands: totalInHands,
+    expected: doneJobs.filter((j) => Number(j.report_transfer) > 0 && !j.transfer_paid).reduce((s, j) => s + (Number(j.report_transfer) || 0), 0),
+    payrollOwed: Math.max(0, payrollTotals.owed),
+    monthlyOpex: calc.monthlyOpexAverage(opex),
+  });
   const totalReceivables = doneJobs.filter((j) => Number(j.report_transfer) > 0 && !j.transfer_paid).reduce((s, j) => s + (Number(j.report_transfer) || 0), 0);
   const enRouteNow = activeJobs.filter((j) => jobWorkStage(j) === "en_route").length;
   const onSiteNow = activeJobs.filter((j) => jobWorkStage(j) === "on_site").length;
@@ -3372,6 +3383,30 @@ function Dashboard({ session, profile }) {
             </div>
 
             {opexView === "accounts" && (<>
+            <div className="kd-card" style={{ marginBottom: 14 }}>
+              <div className="kd-section" style={{ marginTop: 0 }}>Хватит ли денег</div>
+              <div className="kd-row"><span>На счетах</span><strong>{fmt(totalOnAccounts)} ₸</strong></div>
+              <div className="kd-row"><span>Наличные у бригад</span><strong>{fmt(totalInHands)} ₸</strong></div>
+              <div className="kd-row total"><span>Есть сейчас</span><strong>{fmt(forecast.available)} ₸</strong></div>
+              <div className="kd-row"><span>Зарплата к выплате</span><strong style={{ color: "var(--rust)" }}>− {fmt(forecast.payrollOwed)} ₸</strong></div>
+              <div className="kd-row total">
+                <span>Останется после зарплаты</span>
+                <strong style={{ color: forecast.covered ? "var(--primary-d)" : "var(--rust)" }}>{fmt(forecast.afterPayroll)} ₸</strong>
+              </div>
+              {!forecast.covered && (
+                <div className="kd-flag danger" style={{ marginTop: 10 }}>
+                  Своих денег на зарплату не хватает {fmt(Math.abs(forecast.afterPayroll))} ₸
+                </div>
+              )}
+              {forecast.expected > 0 && (
+                <div className="kd-row"><span>Ждём от клиентов (ещё не пришло)</span><span className="kd-twoval"><em>с ними будет {fmt(forecast.afterPayrollWithExpected)} ₸</em><strong style={{ color: "var(--amber)" }}>+ {fmt(forecast.expected)} ₸</strong></span></div>
+              )}
+              {forecast.monthsOfRunway !== null && (
+                <div className="kd-row"><span>Хватит на обычные расходы</span><span className="kd-twoval"><em>обычно {fmt(forecast.monthlyOpex)} ₸ в месяц</em><strong>{forecast.monthsOfRunway} мес.</strong></span></div>
+              )}
+              <div className="kd-muted" style={{ marginTop: 10 }}>Ожидаемые поступления показаны отдельно: это деньги, которых ещё нет. Норма расходов — среднее за три полных прошедших месяца, текущий не учитывается, чтобы не занижать её в начале месяца.</div>
+            </div>
+
             <div className="kd-tabbar" style={{ marginBottom: 8 }}>
               <div className="kd-title" style={{ fontSize: 18 }}>Финансы · счета</div>
               <div className="kd-tabactions">
