@@ -297,3 +297,55 @@ export function clientStats(jobs = [], { from = null, to = null, phoneKeyOf } = 
       .sort((a, b) => b.clients - a.clients),
   };
 }
+
+// --- сколько занимает работа ---------------------------------------------
+
+// Приложение давно пишет отметки этапов, но никто на них не смотрел.
+// en_route_at — вышел в путь, arrived_at — на объекте, reported_at — сдал отчёт.
+//
+// Отсекаем бессмысленные промежутки: дезинфектор мог забыть нажать «В путь»
+// и отметиться только вечером, или нажать дважды. Такие выбросы сильнее
+// портят среднее, чем помогает лишняя запись, поэтому в статистику не идут.
+const MAX_SANE_MIN = 12 * 60;
+function minutesBetween(fromIso, toIso) {
+  if (!fromIso || !toIso) return null;
+  const min = (new Date(toIso) - new Date(fromIso)) / 60000;
+  if (!Number.isFinite(min) || min <= 0 || min > MAX_SANE_MIN) return null;
+  return Math.round(min);
+}
+
+export function jobDurations(job) {
+  return {
+    travel: minutesBetween(job?.en_route_at, job?.arrived_at),
+    onSite: minutesBetween(job?.arrived_at, job?.reported_at),
+    total: minutesBetween(job?.en_route_at, job?.reported_at),
+  };
+}
+
+const avg = (list) => (list.length ? Math.round(list.reduce((s, v) => s + v, 0) / list.length) : null);
+
+// Средние по всем заявкам и в разрезе видов вредителей: от вида зависит,
+// сколько реально занимает обработка, а значит и сколько заявок влезет в день.
+export function durationStats(jobs = []) {
+  const done = jobs.filter((j) => j.status === "done");
+  const rows = done.map((j) => ({ job: j, d: jobDurations(j) }));
+  const withOnSite = rows.filter((r) => r.d.onSite !== null);
+
+  const byPest = {};
+  for (const r of withOnSite) {
+    const key = (r.job.pest || "—").trim() || "—";
+    (byPest[key] = byPest[key] || { pest: key, onSite: [], total: [] }).onSite.push(r.d.onSite);
+    if (r.d.total !== null) byPest[key].total.push(r.d.total);
+  }
+
+  return {
+    doneJobs: done.length,
+    measured: withOnSite.length,
+    avgTravel: avg(rows.map((r) => r.d.travel).filter((v) => v !== null)),
+    avgOnSite: avg(withOnSite.map((r) => r.d.onSite)),
+    avgTotal: avg(rows.map((r) => r.d.total).filter((v) => v !== null)),
+    byPest: Object.values(byPest)
+      .map((p) => ({ pest: p.pest, jobs: p.onSite.length, avgOnSite: avg(p.onSite), avgTotal: avg(p.total) }))
+      .sort((a, b) => b.jobs - a.jobs),
+  };
+}
