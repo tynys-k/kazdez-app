@@ -2505,6 +2505,17 @@ function Dashboard({ session, profile }) {
                     return (
                       <div key={c.id || "none"} className={`kd-tlhead ${off ? "off" : ""}`}>
                         {c.name}{off ? <span className="kd-offtag">🌴 выходной</span> : (cnt ? <span className="kd-tlcnt">{cnt}</span> : null)}
+                        {!off && c.id && (() => {
+                          const load = calc.dayLoad(dayJobs.filter((j) => j.assigned_to === c.id), durations);
+                          if (!load.known && load.busyMin === null) return null;
+                          const pct = Math.min(100, Math.round(load.busyMin / load.workdayMinutes * 100));
+                          return (
+                            <div className="kd-tlload" title={`Занято примерно ${fmtMin(load.busyMin)} из ${fmtMin(load.workdayMinutes)}`}>
+                              <div className="kd-tlloadbar"><div style={{ width: `${pct}%`, background: pct >= 100 ? "var(--rust)" : pct >= 80 ? "var(--amber)" : "var(--primary)" }} /></div>
+                              <span>{load.freeMin > 0 ? `ещё ~${fmtMin(load.freeMin)}` : "день полон"}</span>
+                            </div>
+                          );
+                        })()}
                         {off && <button className="kd-offx" title="Снять выходной" onClick={() => askConfirm(`Снять выходной у ${c.name}?`, () => removeDayOff(off), { danger: false, confirmLabel: "Да, снять" })}><X size={12} /></button>}
                       </div>
                     );
