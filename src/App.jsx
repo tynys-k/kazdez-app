@@ -12,6 +12,7 @@ import {
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
+import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -62,10 +63,14 @@ function yandexRouteUrl(addresses) {
   return `https://yandex.com/maps/?rtext=${encodeURIComponent(rtext)}&rtt=auto`;
 }
 
+const NL = String.fromCharCode(10);
 class AppErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { failed: false }; }
   static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(error) { console.error("KazDez UI error", error); }
+  componentDidCatch(error, info) {
+    console.error("KazDez UI error", error);
+    logClientError({ kind: "crash", place: "падение интерфейса", message: error?.message || String(error), stack: [error?.stack, info?.componentStack].filter(Boolean).join(NL) });
+  }
   render() {
     if (this.state.failed) return <div className="kd-crash"><div><Bug size={30} /><h1>Интерфейс временно не загрузился</h1><p>Данные не потеряны. Обнови страницу; если ошибка повторится, проверь последнюю сборку Vercel.</p><button className="kd-btn primary" onClick={() => window.location.reload()}>Обновить страницу</button></div></div>;
     return this.props.children;
@@ -73,6 +78,7 @@ class AppErrorBoundary extends React.Component {
 }
 
 function AppContent() {
+  installGlobalErrorLogging();
   const publicToken = new URLSearchParams(window.location.search).get("track");
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -269,6 +275,7 @@ function Dashboard({ session, profile }) {
   const [jobProofs, setJobProofs] = useState([]);
   const [cashAdjustments, setCashAdjustments] = useState([]);
   const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
+  const [clientErrors, setClientErrors] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -321,6 +328,8 @@ function Dashboard({ session, profile }) {
   const canEditDocs = canAccess("action.docs_edit");
   const canEditTenders = canAccess("action.tenders_edit");
   const actorName = profile?.full_name || (isAdmin ? "Админ" : session.user.email);
+  // чтобы в журнале было видно, у кого именно упало
+  setErrorActor(session?.user?.id, actorName);
 
   useEffect(() => {
     const setOn = () => { setOnline(true); syncOfflineQueue(); }; const setOff = () => setOnline(false);
@@ -336,7 +345,14 @@ function Dashboard({ session, profile }) {
 
   useEffect(() => { if (isAdmin) refreshAuthUsers(); }, [isAdmin]);
 
-  function showToast(t) { setToast(t); setTimeout(() => setToast(""), 2200); }
+  // Сообщения, начинающиеся с «Ошибка», записываем в журнал. Это покрывает все
+  // места сразу: раньше ошибка мелькала тостом и исчезала бесследно.
+  function showToast(t) {
+    setToast(t); setTimeout(() => setToast(""), 2200);
+    if (typeof t === "string" && t.startsWith("Ошибка")) {
+      logClientError({ kind: "handled", place: `раздел «${TAB_LABELS[tab] || tab}»`, message: t });
+    }
+  }
 
   async function refreshAuthUsers() {
     const { data, error } = await supabase.functions.invoke("admin-users", { body: { action: "list" } });
@@ -434,9 +450,10 @@ function Dashboard({ session, profile }) {
       // Ревизии и движения препаратов у сотрудников. Последняя запись kind="revision"
       // по паре сотрудник+препарат задаёт точку отсчёта (см. techLedger).
       supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
+      supabase.from("client_errors").select("*").order("occurred_at", { ascending: false }).limit(200),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr, car, iar] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr, car, iar, errr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     setReportChemsFailed(!!cr.error);
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
@@ -487,6 +504,7 @@ function Dashboard({ session, profile }) {
     setJobProofs(jpr.data || []);
     setCashAdjustments(car.data || []);
     setInventoryAdjustments(iar.data || []);
+    setClientErrors(errr.data || []);
     if (!useOfflineSnapshot && !jr.error) {
       try {
         const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
@@ -3773,8 +3791,26 @@ function Dashboard({ session, profile }) {
           );
         })()}
 
+        {!loading && tab === "journal" && isAdmin && (
+          <div className="kd-card" style={{ marginBottom: 14 }}>
+            <div className="kd-section" style={{ marginTop: 0 }}>Сбои приложения{clientErrors.length ? ` · ${clientErrors.length}` : ""}</div>
+            {clientErrors.length === 0 && <div className="kd-muted">Сбоев не зафиксировано. Здесь появятся ошибки, которые раньше просто мелькали сообщением и исчезали.</div>}
+            {clientErrors.slice(0, 30).map((e) => (
+              <div className="kd-ledgerrow" key={e.id} style={{ gridTemplateColumns: "150px 1fr" }}>
+                <span className="kd-muted" style={{ textAlign: "left" }}>{fmtTs(e.occurred_at)}<br />{e.user_name || "—"}</span>
+                <span style={{ textAlign: "left", minWidth: 0 }}>
+                  <strong style={{ display: "block", color: e.kind === "crash" ? "var(--rust)" : "var(--ink)" }}>{e.message}</strong>
+                  <span className="kd-muted">{e.kind === "crash" ? "падение интерфейса" : e.place || "—"}</span>
+                </span>
+              </div>
+            ))}
+            {clientErrors.length > 30 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны последние 30 из {clientErrors.length}.</div>}
+          </div>
+        )}
+
         {!loading && tab === "journal" && (
           <div className="kd-card">
+            <div className="kd-section" style={{ marginTop: 0 }}>Действия сотрудников</div>
             {audit.length === 0 && <div className="kd-muted">Пока нет записей.</div>}
             {audit.map((a) => (
               <div key={a.id} className="kd-logrow">
