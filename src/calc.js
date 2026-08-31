@@ -461,3 +461,35 @@ export function helperEarnings(techId, { jobs = [], jobHelpers = [], inPeriod = 
       return sum + (Number(h.amount) || 0);
     }, 0);
 }
+
+// --- сколько лид ждёт ответа ---------------------------------------------
+
+// В дезинфекции побеждает тот, кто перезвонил первым. Приложение хранит лиды
+// и стадии, но нигде не показывало, сколько человек уже ждёт.
+//
+// Считаем от updated_at: он меняется при переводе по стадиям, значит это
+// «сколько лид лежит без движения». Для нового лида это совпадает с временем
+// с момента появления — то есть с временем без ответа.
+export function leadWaitingHours(lead, now = new Date()) {
+  const since = lead?.updated_at || lead?.created_at;
+  if (!since) return null;
+  const hours = (now - new Date(since)) / 3600000;
+  return Number.isFinite(hours) && hours >= 0 ? Math.floor(hours) : null;
+}
+
+// firstStageId — первая стадия воронки: лид в ней ещё никто не взял в работу.
+export function leadSlaStats(leads = [], { firstStageId = null, reactionHours = 2, staleDays = 3, now = new Date() } = {}) {
+  const open = leads.filter((l) => !l.converted_job_id);
+  const rows = open.map((l) => ({ lead: l, hours: leadWaitingHours(l, now) }));
+  const untouched = rows.filter((r) => r.hours !== null && firstStageId && String(r.lead.stage_id) === String(firstStageId));
+  return {
+    open: open.length,
+    // Не отвечено дольше норматива — самое дорогое: клиент уходит к тем, кто взял трубку.
+    lateReaction: untouched.filter((r) => r.hours >= reactionHours).length,
+    // Взяли в работу и забыли.
+    stale: rows.filter((r) => r.hours !== null && r.hours >= staleDays * 24
+      && (!firstStageId || String(r.lead.stage_id) !== String(firstStageId))).length,
+    longestHours: rows.reduce((m, r) => (r.hours !== null && r.hours > m ? r.hours : m), 0),
+    reactionHours, staleDays,
+  };
+}

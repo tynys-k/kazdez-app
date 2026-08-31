@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
-  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings,
+  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -506,5 +506,47 @@ describe("помощники на заявке", () => {
     const с = jobEconomics(job, { helpers: 15000 });
     expect(без.profit - с.profit).toBe(15000);
     expect(с.techExtras).toBe(25000);
+  });
+});
+
+describe("ожидание лида", () => {
+  const now = new Date("2026-09-01T12:00:00Z");
+  const hoursAgo = (h) => new Date(now - h * 3600000).toISOString();
+  const lead = (over) => ({ id: "l", stage_id: "s1", updated_at: hoursAgo(1), ...over });
+
+  it("считает часы без движения", () => {
+    expect(leadWaitingHours(lead({ updated_at: hoursAgo(5) }), now)).toBe(5);
+    expect(leadWaitingHours({ created_at: hoursAgo(3) }, now)).toBe(3);
+    expect(leadWaitingHours({}, now)).toBeNull();
+  });
+
+  it("новый лид дольше норматива считается непринятым", () => {
+    const s = leadSlaStats([
+      lead({ id: "a", updated_at: hoursAgo(3) }),   // ждёт 3 ч при нормативе 2
+      lead({ id: "b", updated_at: hoursAgo(1) }),   // ещё в норме
+    ], { firstStageId: "s1", reactionHours: 2, now });
+    expect(s.lateReaction).toBe(1);
+    expect(s.open).toBe(2);
+  });
+
+  it("сконвертированный лид больше не ждёт", () => {
+    const s = leadSlaStats([
+      lead({ updated_at: hoursAgo(99), converted_job_id: "j1" }),
+    ], { firstStageId: "s1", now });
+    expect(s.open).toBe(0);
+    expect(s.lateReaction).toBe(0);
+  });
+
+  it("взятый в работу и забытый попадает в «зависшие», а не в «не отвечено»", () => {
+    const s = leadSlaStats([
+      lead({ stage_id: "s2", updated_at: hoursAgo(24 * 5) }),
+    ], { firstStageId: "s1", staleDays: 3, now });
+    expect(s.stale).toBe(1);
+    expect(s.lateReaction).toBe(0);
+  });
+
+  it("без указания первой стадии не выдумывает просрочку по реакции", () => {
+    const s = leadSlaStats([lead({ updated_at: hoursAgo(99) })], { firstStageId: null, now });
+    expect(s.lateReaction).toBe(0);
   });
 });

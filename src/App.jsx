@@ -2112,10 +2112,13 @@ function Dashboard({ session, profile }) {
     if (j.status === "done") { row.done++; row.revenue += Number(j.report_paid) || 0; row.profit += jobEconomics(j).profit; }
   });
   const managerRatings = Object.values(managerRatingMap).map((r) => ({ ...r, conversion: r.total ? Math.round(r.done / r.total * 100) : 0, avgCheck: r.done ? Math.round(r.revenue / r.done) : 0 })).sort((a, b) => b.profit - a.profit);
+  // Сколько лидов ждут ответа. Первая стадия воронки = «ещё никто не взял».
+  const leadSla = calc.leadSlaStats(leads, { firstStageId: leadStages[0]?.id || null });
   const dashboardAlerts = [
     overdueJobs.length ? { id: "overdue-jobs", label: "Просроченные заявки", value: overdueJobs.length, tab: "jobs", tone: "danger" } : null,
     unassignedSoon.length ? { id: "unassigned", label: "Не назначены на сегодня/завтра", value: unassignedSoon.length, tab: "jobs", tone: "warning" } : null,
     overdueTaskList.length ? { id: "tasks", label: "Просроченные задачи", value: overdueTaskList.length, tab: "tasks", tone: "danger" } : null,
+    leadSla.lateReaction ? { id: "lead-sla", label: `Лиды без ответа дольше ${leadSla.reactionHours} ч`, value: leadSla.lateReaction, tab: "leads", tone: "danger" } : null,
     pendingDeposits.length ? { id: "cash", label: "Наличка ждёт подтверждения", value: pendingDeposits.length, tab: "cash", tone: "warning" } : null,
     isAdmin && lowCount ? { id: "stock", label: "Заканчиваются препараты", value: lowCount, tab: "stock", tone: "danger" } : null,
     isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
@@ -2708,6 +2711,13 @@ function Dashboard({ session, profile }) {
                 <button className="kd-btn primary" onClick={() => setModal({ kind: "lead" })}><Plus size={15} />Новый клиент</button>
               </div>
             </div>
+            {leadSla.open > 0 && (
+              <div className="kd-kpigrid" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))", marginBottom: 12 }}>
+                <div className="kd-kpicard"><span>В работе</span><strong>{leadSla.open}</strong><small>не превратились в заявку</small></div>
+                <div className="kd-kpicard"><span>Без ответа дольше {leadSla.reactionHours} ч</span><strong className={leadSla.lateReaction ? "neg" : ""}>{leadSla.lateReaction}</strong><small>клиент уходит к тем, кто перезвонил</small></div>
+                <div className="kd-kpicard"><span>Зависли дольше {leadSla.staleDays} дн.</span><strong className={leadSla.stale ? "neg" : ""}>{leadSla.stale}</strong><small>взяли в работу и забыли</small></div>
+              </div>
+            )}
             {leadStages.length === 0 && <div className="kd-empty">Стадии воронки не заданы. Добавь их в Настройках → «Стадии воронки».</div>}
             {/* фильтр по стадии */}
             {leadStages.length > 0 && (
@@ -2735,6 +2745,12 @@ function Dashboard({ session, profile }) {
                       <div key={l.id} className="kd-card">
                         <div className="kd-card-head">
                           <div className="kd-pest">{l.name || l.phone || "Без имени"}</div>
+                          {(() => {
+                            const h = calc.leadWaitingHours(l);
+                            if (h === null) return null;
+                            const late = String(l.stage_id) === String(leadStages[0]?.id) ? h >= leadSla.reactionHours : h >= leadSla.staleDays * 24;
+                            return <span className={late ? "kd-flag warn" : "kd-muted"} style={{ fontSize: 11, marginLeft: 8 }}>{h < 24 ? `ждёт ${h} ч` : `ждёт ${Math.floor(h / 24)} дн.`}</span>;
+                          })()}
                           <span className="kd-badge" style={{ color: l.client_type === "company" ? "#2557B0" : "#6E3FCF", background: l.client_type === "company" ? "#E9F0FC" : "#F0EAFC" }}>{l.client_type === "company" ? "Юрлицо" : "Физлицо"}</span>
                         </div>
                         <div className="kd-meta">
