@@ -2055,8 +2055,19 @@ function Dashboard({ session, profile }) {
   const unassignedSoon = isAdmin ? activeJobs.filter((j) => !j.assigned_to && !j.executor_partner_id && j.scheduled_date && j.scheduled_date <= tomorrowIso) : [];
   const overdueTaskList = visibleTasks.filter((t) => t.status !== "done" && t.due_date && t.due_date < todayIso);
   const pendingDeposits = isAdmin ? deposits.filter((d) => d.status === "pending") : [];
-  const completedEconomics = doneJobs.map((job) => ({ job, econ: jobEconomics(job) }));
+  // Разнесение оклада и постоянных расходов на заявку. Прямая прибыль
+  // (jobEconomics) остаётся прежней: по ней видно, окупает ли заявка сама себя.
+  // Полная показывает, зарабатывает ли на ней компания после оклада и аренды.
+  const allocFor = calc.allocationPerJob(jobs, { profiles: allProfiles, opex });
+  const completedEconomics = doneJobs.map((job) => {
+    const { labor, overhead } = allocFor(job);
+    return { job, econ: calc.jobFullEconomics(job, { chemicals, qrFeeRate, labor, overhead }) };
+  });
   const totalJobProfit = completedEconomics.reduce((s, r) => s + r.econ.profit, 0);
+  const totalFullProfit = completedEconomics.reduce((s, r) => s + r.econ.fullProfit, 0);
+  const totalLabor = completedEconomics.reduce((s, r) => s + r.econ.labor, 0);
+  const totalOverhead = completedEconomics.reduce((s, r) => s + r.econ.overhead, 0);
+  const trueLossJobs = completedEconomics.filter((r) => r.econ.fullProfit < 0);
   const totalJobRevenue = completedEconomics.reduce((s, r) => s + r.econ.revenue, 0);
   const averageJobMargin = totalJobRevenue > 0 ? Math.round(totalJobProfit / totalJobRevenue * 100) : 0;
   const lossJobs = completedEconomics.filter((r) => r.econ.profit < 0);
@@ -2960,6 +2971,21 @@ function Dashboard({ session, profile }) {
               <div className="kd-kpicard"><span>Средняя маржа</span><strong>{averageJobMargin}%</strong><small>{completedEconomics.length} выполненных заявок</small></div>
               <div className="kd-kpicard"><span>Убыточные заявки</span><strong className={lossJobs.length ? "neg" : "pos"}>{lossJobs.length}</strong><small>нужно проверить расходы и цену</small></div>
               <div className="kd-kpicard"><span>Потерянная выручка</span><strong className="neg">{fmt(lostRevenue)} ₸</strong><small>{canceledJobs.length} отменённых заявок</small></div>
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section" style={{ marginTop: 0 }}>С учётом труда и постоянных расходов</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>Прибыль выше — прямая: выручка минус препараты, комиссия, доли партнёров и бонусы. Она не знает про оклады и аренду, поэтому всегда выглядит бодрее, чем есть на самом деле.</div>
+              <div className="kd-row"><span>Прямая прибыль по заявкам</span><strong>{fmt(totalJobProfit)} ₸</strong></div>
+              <div className="kd-row"><span>Оклады, разнесённые на заявки</span><strong style={{ color: "var(--rust)" }}>− {fmt(totalLabor)} ₸</strong></div>
+              <div className="kd-row"><span>Постоянные расходы (аренда, реклама, связь)</span><strong style={{ color: "var(--rust)" }}>− {fmt(totalOverhead)} ₸</strong></div>
+              <div className="kd-row total"><span>Реальная прибыль</span><strong style={{ color: totalFullProfit >= 0 ? "var(--primary-d)" : "var(--rust)" }}>{fmt(totalFullProfit)} ₸</strong></div>
+              {trueLossJobs.length > lossJobs.length && (
+                <div className="kd-flag warn" style={{ marginTop: 10 }}>
+                  Убыточных заявок на самом деле {trueLossJobs.length}, а не {lossJobs.length}: остальные не окупают труд и постоянные расходы
+                </div>
+              )}
+              <div className="kd-muted" style={{ marginTop: 10 }}>Оклад делится на выполненные заявки того же дезинфектора за месяц. Постоянные расходы — поровну на все заявки месяца: аренда не растёт от того, что заявка дороже. Оклад задаётся в карточке сотрудника, расходы — в «Счетах и расходах».</div>
             </div>
 
             <div className="kd-stage2grid">
