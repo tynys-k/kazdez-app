@@ -520,8 +520,11 @@ function Dashboard({ session, profile }) {
     }
   }
   useEffect(() => { load(); }, []);
+  // Тревоги в колокольчике считаются из уже загруженных данных, поэтому
+  // раз в пять минут просто обновляем их — отдельного запроса за уведомлениями
+  // больше нет.
   useEffect(() => {
-    const timer = setInterval(() => { if (navigator.onLine) refreshNotificationCenter(); }, 5 * 60 * 1000);
+    const timer = setInterval(() => { if (navigator.onLine) load(); }, 5 * 60 * 1000);
     return () => clearInterval(timer);
   }, [session.user.id]);
 
