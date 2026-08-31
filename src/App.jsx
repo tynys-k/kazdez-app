@@ -271,7 +271,6 @@ function Dashboard({ session, profile }) {
   const [contracts, setContracts] = useState([]);
   const [clientEvents, setClientEvents] = useState([]);
   const [publicFeedback, setPublicFeedback] = useState([]);
-  const [notifications, setNotifications] = useState([]);
   const [jobProofs, setJobProofs] = useState([]);
   const [cashAdjustments, setCashAdjustments] = useState([]);
   const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
@@ -402,7 +401,6 @@ function Dashboard({ session, profile }) {
   async function load() {
     setLoading(true);
     try {
-    await supabase.rpc("stage4_refresh_notifications");
     const responses = await Promise.all([
       fetchAllRows("jobs"),
       fetchAllRows("report_chemicals"),
@@ -442,7 +440,6 @@ function Dashboard({ session, profile }) {
       supabase.from("service_contracts").select("*").order("next_service_date", { ascending: true }),
       supabase.from("client_events").select("*").order("created_at", { ascending: false }),
       supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }),
-      supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(80),
       supabase.from("job_proofs").select("*").order("updated_at", { ascending: false }),
       // Ревизии кассы и ручные корректировки остатков. Последняя запись kind="revision"
       // задаёт новую точку отсчёта для «на руках» (см. techCashOnHand).
@@ -452,8 +449,8 @@ function Dashboard({ session, profile }) {
       supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
       supabase.from("client_errors").select("*").order("occurred_at", { ascending: false }).limit(200),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, ntr, jpr, car, iar, errr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Уведомления", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     setReportChemsFailed(!!cr.error);
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
@@ -500,7 +497,6 @@ function Dashboard({ session, profile }) {
     setContracts(cor.data || []);
     setClientEvents(cer.data || []);
     setPublicFeedback(pfr.data || []);
-    setNotifications(ntr.data || []);
     setJobProofs(jpr.data || []);
     setCashAdjustments(car.data || []);
     setInventoryAdjustments(iar.data || []);
@@ -553,34 +549,10 @@ function Dashboard({ session, profile }) {
     if (!installPrompt) return;
     await installPrompt.prompt(); await installPrompt.userChoice; setInstallPrompt(null);
   }
-  const unreadNotifications = notifications.filter((item) => !item.read_at);
-  async function refreshNotificationCenter() {
-    await supabase.rpc("stage4_refresh_notifications");
-    const { data } = await supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(80);
-    if (data) setNotifications(data);
-  }
-  async function markNotificationRead(item) {
-    if (!item.read_at) {
-      const now = new Date().toISOString(); setNotifications((rows) => rows.map((row) => row.id === item.id ? { ...row, read_at: now } : row));
-      await supabase.from("notifications").update({ read_at: now }).eq("id", item.id);
-    }
-  }
-  async function markAllNotificationsRead() {
-    const now = new Date().toISOString(); setNotifications((rows) => rows.map((row) => ({ ...row, read_at: row.read_at || now })));
-    await supabase.from("notifications").update({ read_at: now }).is("read_at", null);
-  }
   function clientReminderWhatsappUrl(job) {
     const phone = String(job?.client_phone || "").replace(/\D/g, ""); if (!phone) return "";
     const message = `Сәлеметсіз бе! KazDez компаниясынан еске саламыз: дезинфекция ${isoToRu(job.scheduled_date)} күні${job.scheduled_time ? `, сағат ${job.scheduled_time}` : ""} жоспарланған.\n\nЗдравствуйте! Напоминаем: дезинфекция запланирована на ${isoToRu(job.scheduled_date)}${job.scheduled_time ? `, время ${job.scheduled_time}` : ""}.`;
     return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-  }
-  async function openNotification(item) {
-    await markNotificationRead(item); setNotificationOpen(false);
-    const job = item.job_id ? jobs.find((row) => String(row.id) === String(item.job_id)) : null;
-    if (item.kind === "client_reminder" && job) { window.open(clientReminderWhatsappUrl(job), "_blank", "noopener,noreferrer"); return; }
-    if (item.link_tab) setTab(item.link_tab);
-    if (job && ["assignment", "visit_reminder"].includes(item.kind)) setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job });
-    if (job && item.kind === "unassigned") setModal({ kind: "assign", job });
   }
   const proofByJob = (jobId) => jobProofs.find((proof) => String(proof.job_id) === String(jobId));
   const proofIsComplete = (jobId) => { const proof = proofByJob(jobId); return !!(proof?.before_paths?.length && proof?.after_paths?.length && proof?.signature_path); };
@@ -2260,11 +2232,28 @@ function Dashboard({ session, profile }) {
           <div className="kd-tabactions">
             {installPrompt && <button className="kd-btn ghost kd-installbtn" onClick={installApplication}><Smartphone size={15} />Установить</button>}
             {offlineQueued > 0 && <button className="kd-btn ghost kd-syncbtn" disabled={!online || syncingOffline} onClick={syncOfflineQueue}><CloudUpload size={15} />{syncingOffline ? "Синхронизация…" : `Офлайн · ${offlineQueued}`}</button>}
+            {/* Колокольчик показывает живые тревоги, а не хранимую ленту.
+                «Просрочено 3 заявки» устаревает в тот момент, когда их закрыли,
+                поэтому статус «прочитано» здесь только мешал бы: список должен
+                отражать положение дел сейчас, а не то, что когда-то случилось. */}
             <div className="kd-notifications" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setNotificationOpen(false); }}>
-              <button className={`kd-iconbtn kd-bell ${unreadNotifications.length ? "has-new" : ""}`} onClick={() => setNotificationOpen((value) => !value)} title="Уведомления" aria-label="Уведомления">{unreadNotifications.length ? <BellRing size={17} /> : <Bell size={17} />}{unreadNotifications.length > 0 && <span>{unreadNotifications.length > 99 ? "99+" : unreadNotifications.length}</span>}</button>
+              <button className={`kd-iconbtn kd-bell ${dashboardAlerts.length ? "has-new" : ""}`} onClick={() => setNotificationOpen((v) => !v)} title="Требуют внимания" aria-label="Требуют внимания">
+                {dashboardAlerts.length ? <BellRing size={17} /> : <Bell size={17} />}
+                {dashboardAlerts.length > 0 && <span>{dashboardAlerts.length}</span>}
+              </button>
               {notificationOpen && <div className="kd-notification-panel">
-                <div className="kd-notification-head"><div><strong>Уведомления</strong><span>{unreadNotifications.length ? `${unreadNotifications.length} непрочитано` : "Всё прочитано"}</span></div>{unreadNotifications.length > 0 && <button onClick={markAllNotificationsRead}>Прочитать все</button>}</div>
-                <div className="kd-notification-list">{notifications.length === 0 ? <div className="kd-globalempty">Новых уведомлений нет</div> : notifications.slice(0, 30).map((item) => <button key={item.id} className={`${item.read_at ? "read" : ""} ${item.priority || "normal"}`} onClick={() => openNotification(item)}><span className="kd-notification-dot" /><span><strong>{item.title}</strong><small>{item.body}</small><time>{fmtTs(item.created_at)}</time></span><ChevronRight size={15} /></button>)}</div>
+                <div className="kd-notification-head"><div><strong>Требуют внимания</strong><span>{dashboardAlerts.length ? "сейчас, по данным приложения" : "всё под контролем"}</span></div></div>
+                <div className="kd-notification-list">
+                  {dashboardAlerts.length === 0
+                    ? <div className="kd-globalempty">Ничего не горит</div>
+                    : dashboardAlerts.map((a) => (
+                        <button key={a.id} className={a.tone === "danger" ? "urgent" : "warning"} onClick={() => { setTab(a.tab); setNotificationOpen(false); }}>
+                          <span className="kd-notification-dot" />
+                          <span><strong>{a.label}</strong><small>{a.value} — открыть раздел</small></span>
+                          <ChevronRight size={15} />
+                        </button>
+                      ))}
+                </div>
               </div>}
             </div>
             {(tab === "jobs" || tab === "today") && canEditJobs && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
