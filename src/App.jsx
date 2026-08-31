@@ -12,7 +12,7 @@ import {
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -1087,8 +1087,22 @@ function Dashboard({ session, profile }) {
     await logAction("Документы", `Удалено: ${d.type} · ${fmt(d.amount)} ₸`);
     showToast("Удалено"); load();
   }
-  // Выплата из раздела «Зарплата»: пишем факт выплаты и сразу проводим её по кассе,
-  // иначе остаток счёта расходится с реально отданными деньгами.
+  // Единственное место, где выплата попадает в кассу. Раньше дорог было две:
+  // «Зарплата» проводила движение по счёту, а кнопка в «Сотрудниках» только
+  // меняла статус — деньги уходили, а остаток счёта этого не знал.
+  async function postPayoutToCash(expenseRow, tech) {
+    if (!expenseRow?.account_id) return;
+    // не задваиваем движение, если запись проводят повторно
+    if (moves.some((m) => m.source === "payroll" && m.ref_id === expenseRow.id)) return;
+    const { error } = await supabase.from("money_moves").insert({
+      account_id: expenseRow.account_id, direction: "expense", amount: expenseRow.amount,
+      move_date: expenseRow.expense_date,
+      note: `Зарплата: ${tech?.full_name || "сотрудник"}${expenseRow.note ? " · " + expenseRow.note : ""}`,
+      source: "payroll", ref_id: expenseRow.id, created_by: session.user.id,
+    });
+    if (error) showToast("Выплата записана, но по кассе не провелась: " + error.message);
+  }
+  // Новая выплата из раздела «Зарплата».
   async function savePayrollPayment(tech, payload) {
     const { data: created, error } = await supabase.from("tech_expenses").insert({
       tech_id: payload.tech_id, type: payload.type, amount: payload.amount,
@@ -1097,36 +1111,26 @@ function Dashboard({ session, profile }) {
       created_by: session.user.id,
     }).select().single();
     if (error) { showToast("Ошибка: " + error.message); return false; }
-    if (payload.account_id) {
-      // тот же приём, что при зачёте перечисления: не задваиваем движение при повторе
-      const exists = moves.some((m) => m.source === "payroll" && m.ref_id === created?.id);
-      if (!exists) {
-        const { error: moveError } = await supabase.from("money_moves").insert({
-          account_id: payload.account_id, direction: "expense", amount: payload.amount,
-          move_date: payload.expense_date,
-          note: `Зарплата: ${tech.full_name || "сотрудник"}${payload.note ? " · " + payload.note : ""}`,
-          source: "payroll", ref_id: created?.id, created_by: session.user.id,
-        });
-        if (moveError) showToast("Выплата записана, но по кассе не провелась: " + moveError.message);
-      }
-    }
+    await postPayoutToCash(created, tech);
     await logAction("Выплата", `${tech.full_name || "?"} · ${EXPENSE_TYPES[payload.type] || payload.type} · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
     setModal(null); showToast("Выплата проведена"); load(); return true;
   }
-  async function saveExpense(payload, existing) {
-    const res = existing ? await supabase.from("tech_expenses").update(payload).eq("id", existing.id) : await supabase.from("tech_expenses").insert({ ...payload, created_by: session.user.id });
-    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
-    const t = techById(payload.tech_id);
-    await logAction("Выплата", `${t?.full_name || "?"} · ${EXPENSE_TYPES[payload.type] || payload.type} · ${fmt(payload.amount)} ₸`);
-    setModal(null); showToast("Сохранено"); load();
-  }
-  async function setExpenseStatus(e, status) {
-    const { error } = await supabase.from("tech_expenses").update({ status }).eq("id", e.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    await logAction("Выплата", `${techById(e.tech_id)?.full_name || "?"} · ${status === "paid" ? "выплачено" : "отменено"}`);
-    showToast("Обновлено"); load();
+  // Старое начисление, заведённое до того, как выплаты стали проводиться по кассе.
+  // Проводим ту же запись, а не создаём новую — иначе сумма задвоится в отчётах.
+  async function payExistingExpense(tech, expense, payload) {
+    const { data: updated, error } = await supabase.from("tech_expenses").update({
+      status: "paid", account_id: payload.account_id || null,
+      expense_date: payload.expense_date, paid_at: payload.expense_date,
+      amount: payload.amount, type: payload.type, note: payload.note,
+    }).eq("id", expense.id).select().single();
+    if (error) { showToast("Ошибка: " + error.message); return false; }
+    await postPayoutToCash(updated, tech);
+    await logAction("Выплата", `${tech?.full_name || "?"} · проведено по кассе · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
+    setModal(null); showToast("Выплата проведена"); load(); return true;
   }
   async function removeExpense(e) {
+    // сначала снимаем движение по кассе, иначе останется расход без основания
+    await supabase.from("money_moves").delete().eq("source", "payroll").eq("ref_id", e.id);
     await supabase.from("tech_expenses").delete().eq("id", e.id);
     await logAction("Выплата", `Удалено: ${techById(e.tech_id)?.full_name || "?"} · ${fmt(e.amount)} ₸`);
     showToast("Удалено"); load();
@@ -1832,8 +1836,13 @@ function Dashboard({ session, profile }) {
     const salary = payrollSalaryCounts ? (Number(t.salary_monthly) || 0) : 0;
     const payments = expenses.filter((e) => e.tech_id === t.id && e.status === "paid" && inPeriodIso(e.expense_date));
     const paid = payments.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    // Выплаты, не дошедшие до кассы. Ищем по факту отсутствия движения, а не по
+    // пустому счёту: так ловятся и старые записи без счёта, и те, где проводка
+    // сорвалась. Пока они есть, остаток на счетах завышен ровно на их сумму.
+    const unposted = expenses.filter((e) => e.tech_id === t.id
+      && !moves.some((m) => m.source === "payroll" && m.ref_id === e.id));
     const accrued = salary + bonus + travel;
-    return { tech: t, salary, bonus, travel, accrued, paid, owed: accrued - paid, payments, jobsCount: jobsOf.length };
+    return { tech: t, salary, bonus, travel, accrued, paid, owed: accrued - paid, payments, unposted, jobsCount: jobsOf.length };
   });
   const payrollTotals = payrollRows.reduce((a, r) => ({
     accrued: a.accrued + r.accrued, paid: a.paid + r.paid, owed: a.owed + r.owed,
@@ -3210,6 +3219,12 @@ function Dashboard({ session, profile }) {
                     <strong data-l="К выплате" style={{ color: r.owed > 0 ? "var(--amber)" : "var(--muted)" }}>{fmt(r.owed)} ₸</strong>
                     <span>{canManageCash && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "payrollPay", tech: r.tech, owed: r.owed })}>Выплатить</button>}</span>
                   </div>
+                  {r.unposted.length > 0 && (
+                    <div className="kd-flag warn" style={{ margin: "0 0 8px", flexWrap: "wrap" }}>
+                      Не проведено по кассе: {r.unposted.length} на {fmt(r.unposted.reduce((s, e) => s + (Number(e.amount) || 0), 0))} ₸ — на эту сумму завышены остатки счетов
+                      {canManageCash && <button className="kd-btn primary sm" style={{ marginLeft: 10 }} onClick={() => setModal({ kind: "payrollPay", tech: r.tech, owed: Number(r.unposted[0].amount) || 0, expense: r.unposted[0] })}>Провести {isoToRu(r.unposted[0].expense_date) || ""}</button>}
+                    </div>
+                  )}
                   {r.payments.length > 0 && (
                     <details className="kd-more" style={{ margin: "0 0 10px" }}>
                       <summary>Выплаты за период · {r.payments.length}</summary>
@@ -3552,7 +3567,7 @@ function Dashboard({ session, profile }) {
                       {canAccess("action.team_manage") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "techedit", tech: t })}><Pencil size={13} />Данные</button>}
                       {canAccess("action.stock_edit") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "inventoryMovement", tech: t })}><ClipboardCheck size={13} />Ревизия / движение</button>}
                       {canAccess("action.stock_edit") && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "handout", tech: t })}>Выдать / остаток</button>}
-                      {canAccess("action.finance_edit") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "expense", tech: t })}><Plus size={13} />Выплата</button>}
+                      {canAccess("action.finance_edit") && <button className="kd-btn ghost sm" onClick={() => setTab("payroll")}><Plus size={13} />Зарплата</button>}
                     </div>
                   </div>
                   {ledger.length === 0
@@ -3583,7 +3598,8 @@ function Dashboard({ session, profile }) {
                             <span>{fmt(e.amount)} ₸</span>
                             <span style={{ color: e.status === "paid" ? "#0E7C66" : "#B42318", fontWeight: 700 }}>{e.status === "paid" ? "выплачено" : "к выплате"}</span>
                             <span style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                              {canAccess("action.finance_edit") && <button className="kd-btn ghost sm" onClick={() => setExpenseStatus(e, e.status === "paid" ? "unpaid" : "paid")}>{e.status === "paid" ? "Отменить" : "Выплатить"}</button>}
+                              {canAccess("action.finance_edit") && e.status !== "paid" && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "payrollPay", tech: t, owed: Number(e.amount) || 0, expense: e })}>Провести по кассе</button>}
+                              {e.status === "paid" && <span className="kd-muted" style={{ fontSize: 12 }}>{e.account_id ? (accountById(e.account_id)?.name || "проведено") : "без счёта"}</span>}
                               {canAccess("action.finance_edit") && <button className="kd-btn ghost danger sm" onClick={() => removeExpense(e)}><Trash2 size={13} /></button>}
                             </span>
                           </div>
@@ -3812,11 +3828,10 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
       {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
-      {modal?.kind === "expense" && <ExpenseModal tech={modal.tech} onClose={() => setModal(null)} onSave={saveExpense} />}
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
-      {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} accounts={accounts} onClose={() => setModal(null)} onSave={(payload) => savePayrollPayment(modal.tech, payload)} />}
+      {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} existing={modal.expense} accounts={accounts} onClose={() => setModal(null)} onSave={(payload) => (modal.expense ? payExistingExpense(modal.tech, modal.expense, payload) : savePayrollPayment(modal.tech, payload))} />}
       {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
       {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
