@@ -1214,12 +1214,12 @@ function ExpenseModal({ tech, onClose, onSave }) {
 
 // Выплата зарплаты с проведением по кассе: в отличие от ExpenseModal здесь
 // обязателен счёт — по нему создаётся расходное движение, и остаток уменьшается.
-function PayrollPayModal({ tech, owed, accounts = [], onClose, onSave }) {
-  const [type, setType] = useState("salary");
-  const [amount, setAmount] = useState(owed > 0 ? String(owed) : "");
-  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
-  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
-  const [note, setNote] = useState("");
+function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, onSave }) {
+  const [type, setType] = useState(existing?.type || "salary");
+  const [amount, setAmount] = useState(existing ? String(existing.amount ?? "") : (owed > 0 ? String(owed) : ""));
+  const [payDate, setPayDate] = useState(existing?.expense_date || new Date().toISOString().slice(0, 10));
+  const [accountId, setAccountId] = useState(existing?.account_id || accounts[0]?.id || "");
+  const [note, setNote] = useState(existing?.note || "");
   const [saving, setSaving] = useState(false);
   const ok = Number(amount) > 0 && payDate && accountId;
   async function save() {
@@ -1232,7 +1232,7 @@ function PayrollPayModal({ tech, owed, accounts = [], onClose, onSave }) {
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Выплатить"}</button>
     </>}>
-      <div className="kd-row" style={{ marginBottom: 12 }}><span>К выплате за период</span><strong>{fmt(owed)} ₸</strong></div>
+      <div className="kd-row" style={{ marginBottom: 12 }}><span>{existing ? "Начислено ранее, ещё не проведено" : "К выплате за период"}</span><strong>{fmt(owed)} ₸</strong></div>
       <div className="kd-grid2">
         <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
         <Field label="Дата выплаты"><input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} /></Field>
