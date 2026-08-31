@@ -275,6 +275,7 @@ function Dashboard({ session, profile }) {
   const [cashAdjustments, setCashAdjustments] = useState([]);
   const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
   const [clientErrors, setClientErrors] = useState([]);
+  const [jobHelpers, setJobHelpers] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -448,9 +449,10 @@ function Dashboard({ session, profile }) {
       // по паре сотрудник+препарат задаёт точку отсчёта (см. techLedger).
       supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
       supabase.from("client_errors").select("*").order("occurred_at", { ascending: false }).limit(200),
+      supabase.from("job_helpers").select("*"),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     setReportChemsFailed(!!cr.error);
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
@@ -501,6 +503,7 @@ function Dashboard({ session, profile }) {
     setCashAdjustments(car.data || []);
     setInventoryAdjustments(iar.data || []);
     setClientErrors(errr.data || []);
+    setJobHelpers(jhr.data || []);
     if (!useOfflineSnapshot && !jr.error) {
       try {
         const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
@@ -924,11 +927,22 @@ function Dashboard({ session, profile }) {
     await logAction("Оплата", `Перечисление оплачено ${fmt(job.report_transfer)} ₸${accountId ? " → " + (accountById(accountId)?.name || "") : ""}`);
     setModal(null); showToast("Оплата зачтена"); load();
   }
-  async function saveTechExtras(job, bonus, travel) {
+  async function saveTechExtras(job, bonus, travel, helpers = []) {
     if (blockedByClosedPeriod(job.scheduled_date)) return;
     const { error } = await supabase.from("jobs").update({ tech_bonus: Number(bonus) || null, tech_travel: Number(travel) || null }).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
-    await logAction("Заявка", `Бонус/дорожные: ${job.pest} · бонус ${fmt(bonus)} · дорожные ${fmt(travel)}`);
+    // Помощников переписываем целиком: так убранная строка действительно
+    // исчезает, а не остаётся висеть в базе вместе с чужой доплатой.
+    await supabase.from("job_helpers").delete().eq("job_id", job.id);
+    if (helpers.length) {
+      const { error: hError } = await supabase.from("job_helpers").insert(helpers.map((h) => ({
+        job_id: job.id, tech_id: h.tech_id, amount: Number(h.amount) || 0,
+        note: h.note || null, created_by: session.user.id,
+      })));
+      if (hError) { showToast("Ошибка: доплаты помощникам не сохранились — " + hError.message); return; }
+    }
+    const names = helpers.map((h) => `${techById(h.tech_id)?.full_name || "?"} ${fmt(h.amount)} ₸`).join(", ");
+    await logAction("Бонусы", `${job.pest} · ${techById(job.assigned_to)?.full_name || "?"}: бонус ${fmt(bonus)} ₸, дорожные ${fmt(travel)} ₸${names ? " · помощь: " + names : ""}`);
     setModal(null); showToast("Сохранено"); load();
   }
   // П.3: мы отдали заявку партнёру; он выполнил — админ фиксирует сумму и как прошла оплата
@@ -1046,7 +1060,7 @@ function Dashboard({ session, profile }) {
   }
   const partnerShareAmt = (job) => calc.partnerShareAmt(job, chemicals);
   const executorShareAmt = (job) => calc.executorShareAmt(job);
-  const jobEconomics = (job) => calc.jobEconomics(job, { chemicals, qrFeeRate });
+  const jobEconomics = (job) => calc.jobEconomics(job, { chemicals, qrFeeRate, helpers: calc.helpersTotal(job.id, jobHelpers) });
   function upsellFor(job) {
     const text = norm(`${job.pest || ""} ${job.address || ""} ${job.note || ""}`);
     if (/склад|цех|производ|общепит|кафе|ресторан/.test(text)) return "регулярное абонентское обслуживание и мониторинг объекта";
@@ -1862,7 +1876,10 @@ function Dashboard({ session, profile }) {
   };
   const payrollRows = techs.map((t) => {
     const jobsOf = jobs.filter((j) => j.assigned_to === t.id && j.status === "done" && inPeriodIso(j.scheduled_date));
-    const bonus = jobsOf.reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
+    const ownBonus = jobsOf.reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
+    // Доплаты за помощь на чужих заявках — такой же заработок сотрудника.
+    const helperBonus = calc.helperEarnings(t.id, { jobs, jobHelpers, inPeriod: inPeriodIso });
+    const bonus = ownBonus + helperBonus;
     const travel = jobsOf.reduce((s, j) => s + (Number(j.tech_travel) || 0), 0);
     // Оклад режется за пропуски сверх положенных выходных: дни берём из
     // раздела «Выходные», норму — из графика в карточке сотрудника.
@@ -1878,7 +1895,7 @@ function Dashboard({ session, profile }) {
     const unposted = expenses.filter((e) => e.tech_id === t.id
       && !moves.some((m) => m.source === "payroll" && m.ref_id === e.id));
     const accrued = salary + bonus + travel;
-    return { tech: t, salary, salaryCalc, bonus, travel, accrued, paid, owed: accrued - paid, payments, unposted, jobsCount: jobsOf.length };
+    return { tech: t, salary, salaryCalc, bonus, helperBonus, travel, accrued, paid, owed: accrued - paid, payments, unposted, jobsCount: jobsOf.length };
   });
   const payrollTotals = payrollRows.reduce((a, r) => ({
     accrued: a.accrued + r.accrued, paid: a.paid + r.paid, owed: a.owed + r.owed,
@@ -2052,7 +2069,7 @@ function Dashboard({ session, profile }) {
   const allocFor = calc.allocationPerJob(jobs, { profiles: allProfiles, opex });
   const completedEconomics = doneJobs.map((job) => {
     const { labor, overhead } = allocFor(job);
-    return { job, econ: calc.jobFullEconomics(job, { chemicals, qrFeeRate, labor, overhead }) };
+    return { job, econ: calc.jobFullEconomics(job, { chemicals, qrFeeRate, labor, overhead, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
   });
   const totalJobProfit = completedEconomics.reduce((s, r) => s + r.econ.profit, 0);
   const totalFullProfit = completedEconomics.reduce((s, r) => s + r.econ.fullProfit, 0);
@@ -3355,7 +3372,10 @@ function Dashboard({ session, profile }) {
                       {payrollSalaryCounts ? fmt(r.salary) : "—"}
                       {payrollSalaryCounts && r.salaryCalc.deduction > 0 && <em style={{ display: "block", fontStyle: "normal", fontSize: 10.5, color: "var(--rust)" }}>−{fmt(r.salaryCalc.deduction)} за {r.salaryCalc.excessDays} дн.</em>}
                     </span>
-                    <span data-l="Бонусы">{fmt(r.bonus)}</span>
+                    <span data-l="Бонусы" title={r.helperBonus > 0 ? `Свои заявки ${fmt(r.bonus - r.helperBonus)} ₸ + помощь на чужих ${fmt(r.helperBonus)} ₸` : ""}>
+                      {fmt(r.bonus)}
+                      {r.helperBonus > 0 && <em style={{ display: "block", fontStyle: "normal", fontSize: 10.5, color: "var(--violet)" }}>из них {fmt(r.helperBonus)} за помощь</em>}
+                    </span>
                     <span data-l="Дорожные">{fmt(r.travel)}</span>
                     <span data-l="Начислено">{fmt(r.accrued)}</span>
                     <span className="kd-muted" data-l="Выплачено">{fmt(r.paid)}</span>
@@ -3381,7 +3401,7 @@ function Dashboard({ session, profile }) {
                   )}
                 </div>
               ))}
-              <div className="kd-muted" style={{ marginTop: 10 }}>Оклад режется за дни отсутствия сверх нормы графика: при 6/1 положено 4 выходных в месяц, при 5/2 — девять. Дни берутся из раздела «Выходные», график задаётся в карточке сотрудника. Бонусы и дорожные подтягиваются из выполненных заявок периода (кнопка «Бонус / дорожные» в карточке заявки). Оклад задаётся в карточке сотрудника.</div>
+              <div className="kd-muted" style={{ marginTop: 10 }}>В бонусы входят доплаты за помощь на чужих заявках — они начисляются тому, кто помогал, и уменьшают прибыль по той заявке. Оклад режется за дни отсутствия сверх нормы графика: при 6/1 положено 4 выходных в месяц, при 5/2 — девять. Дни берутся из раздела «Выходные», график задаётся в карточке сотрудника. Бонусы и дорожные подтягиваются из выполненных заявок периода (кнопка «Бонус / дорожные» в карточке заявки). Оклад задаётся в карточке сотрудника.</div>
             </div>
           </>
         )}
@@ -4052,7 +4072,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "dayOff" && <DayOffModal techs={techs} defaultDate={modal.date || scheduleDate} daysOff={daysOff} personName={personName} onClose={() => setModal(null)} onAdd={addDayOff} onRemove={removeDayOff} />}
       {modal?.kind === "offCalendar" && <OffCalendarModal techs={techs} daysOff={daysOff} personName={personName} defaultDate={scheduleDate} onClose={() => setModal(null)} onPickDay={(iso) => setModal({ kind: "dayOff", date: iso })} />}
       {modal?.kind === "transferPay" && <TransferPayModal job={modal.job} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markTransferPaid(modal.job, accId, date)} />}
-      {modal?.kind === "techExtras" && <TechExtrasModal job={modal.job} techName={techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} onSave={(bonus, travel) => saveTechExtras(modal.job, bonus, travel)} />}
+      {modal?.kind === "techExtras" && <TechExtrasModal job={modal.job} techs={techs} helpers={jobHelpers.filter((h) => String(h.job_id) === String(modal.job.id))} techName={techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} onSave={(bonus, travel, helpers) => saveTechExtras(modal.job, bonus, travel, helpers)} />}
       {modal?.kind === "requestEdit" && <RequestEditModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => requestReportEdit(modal.job, reason)} />}
       {modal?.kind === "executorDone" && <ExecutorDoneModal job={modal.job} partnerName={partnerById(modal.job.executor_partner_id)?.name} accounts={accounts} defaultAccountId={settings.cash_account_id || ""} onClose={() => setModal(null)} onConfirm={(amount, settlement, accId, date) => markExecutorDone(modal.job, amount, settlement, accId, date)} />}
       {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} onClose={() => setModal(null)} onPick={(sid) => { setLeadStage(modal.lead, sid); setModal(null); }} />}

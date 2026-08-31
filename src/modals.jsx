@@ -1914,21 +1914,50 @@ function TransferPayModal({ job, accounts, onClose, onConfirm }) {
   );
 }
 
-function TechExtrasModal({ job, techName, onClose, onSave }) {
+function TechExtrasModal({ job, techName, techs = [], helpers: initialHelpers = [], onClose, onSave }) {
   const [bonus, setBonus] = useState(job.tech_bonus ?? "");
   const [travel, setTravel] = useState(job.tech_travel ?? "");
+  const [helpers, setHelpers] = useState(
+    initialHelpers.length ? initialHelpers.map((h) => ({ tech_id: h.tech_id, amount: String(h.amount ?? ""), note: h.note || "" })) : [],
+  );
   const [saving, setSaving] = useState(false);
-  async function save() { setSaving(true); await onSave(bonus, travel); setSaving(false); }
+  const setHelper = (i, key) => (e) => { const n = helpers.slice(); n[i] = { ...n[i], [key]: e.target.value }; setHelpers(n); };
+  const helpersTotal = helpers.reduce((s, h) => s + (Number(h.amount) || 0), 0);
+  // Основной исполнитель не может быть ещё и помощником у самого себя.
+  const available = techs.filter((t) => t.id !== job.assigned_to);
+  async function save() {
+    setSaving(true);
+    await onSave(bonus, travel, helpers.filter((h) => h.tech_id && Number(h.amount) > 0));
+    setSaving(false);
+  }
   return (
-    <ModalShell title="Бонус и дорожные" onClose={onClose} footer={<>
+    <ModalShell title="Бонусы по заявке" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
     </>}>
-      <div className="kd-muted" style={{ marginBottom: 12 }}>Сотрудник: <strong>{techName || "не назначен"}</strong>. Суммы попадут в его выплаты (расходы по сотруднику).</div>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Исполнитель: <strong>{techName || "не назначен"}</strong>. Суммы попадут в его зарплату за месяц заявки.</div>
       <div className="kd-grid2">
         <Field label="Бонус за заявку (₸)"><input value={bonus} onChange={(e) => setBonus(e.target.value)} inputMode="numeric" placeholder="напр. % от суммы" /></Field>
         <Field label="Дорожные (₸)"><input value={travel} onChange={(e) => setTravel(e.target.value)} inputMode="numeric" placeholder="2000" /></Field>
       </div>
+
+      <div className="kd-section">Помогали на заявке</div>
+      <div className="kd-muted" style={{ marginBottom: 10 }}>Если на объект ездили вдвоём, укажи второго сотрудника и его доплату. Она попадёт в ЕГО зарплату и уменьшит прибыль по этой заявке.</div>
+      {available.length === 0 && <div className="kd-muted">Других сотрудников нет.</div>}
+      {helpers.map((h, i) => (
+        <div className="kd-chemrow3" key={i}>
+          <select value={h.tech_id} onChange={setHelper(i, "tech_id")}>
+            <option value="">— сотрудник —</option>
+            {available.map((t) => <option key={t.id} value={t.id}>{t.full_name || t.id.slice(0, 6)}</option>)}
+          </select>
+          <input placeholder="15000" inputMode="numeric" value={h.amount} onChange={setHelper(i, "amount")} />
+          <button className="kd-btn ghost danger sm" onClick={() => setHelpers(helpers.filter((_, k) => k !== i))}>Убрать</button>
+        </div>
+      ))}
+      {available.length > 0 && (
+        <button className="kd-btn ghost sm" onClick={() => setHelpers([...helpers, { tech_id: "", amount: "", note: "" }])}>+ Добавить помощника</button>
+      )}
+      {helpersTotal > 0 && <div className="kd-row total" style={{ marginTop: 10 }}><span>Всего помощникам</span><strong>{fmt(helpersTotal)} ₸</strong></div>}
     </ModalShell>
   );
 }

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
-  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth,
+  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -468,5 +468,43 @@ describe("оклад с учётом отсутствий", () => {
       { tech_id: "t1", off_date: "2026-09-01" },
     ];
     expect(absenceDaysInMonth("t1", daysOff, "2026-08")).toBe(2);
+  });
+});
+
+describe("помощники на заявке", () => {
+  const jobs = [
+    { id: "j1", status: "done", assigned_to: "t1", scheduled_date: "2026-08-10" },
+    { id: "j2", status: "done", assigned_to: "t1", scheduled_date: "2026-09-05" },
+    { id: "j3", status: "new",  assigned_to: "t1", scheduled_date: "2026-08-12" },
+  ];
+  const helpers = [
+    { job_id: "j1", tech_id: "t2", amount: 15000 },
+    { job_id: "j1", tech_id: "t3", amount: 5000 },
+    { job_id: "j2", tech_id: "t2", amount: 7000 },
+    { job_id: "j3", tech_id: "t2", amount: 9000 },
+  ];
+  const august = (d) => String(d || "").startsWith("2026-08");
+
+  it("сумма доплат по заявке складывается со всех помощников", () => {
+    expect(helpersTotal("j1", helpers)).toBe(20000);
+    expect(helpersTotal("нет-такой", helpers)).toBe(0);
+  });
+
+  it("заработок помощника считается по месяцу ЗАЯВКИ", () => {
+    expect(helperEarnings("t2", { jobs, jobHelpers: helpers, inPeriod: august })).toBe(15000);
+    expect(helperEarnings("t2", { jobs, jobHelpers: helpers })).toBe(22000); // без периода: j1 + j2
+  });
+
+  it("невыполненная заявка бонус помощнику не приносит", () => {
+    // j3 в статусе new — 9000 не считаются
+    expect(helperEarnings("t2", { jobs, jobHelpers: helpers })).toBe(22000);
+  });
+
+  it("бонусы помощников уменьшают прибыль заявки", () => {
+    const job = { status: "done", report_paid: 100000, report_qr: 0, chemicals: [], tech_bonus: 10000 };
+    const без = jobEconomics(job, {});
+    const с = jobEconomics(job, { helpers: 15000 });
+    expect(без.profit - с.profit).toBe(15000);
+    expect(с.techExtras).toBe(25000);
   });
 });
