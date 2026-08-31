@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
-  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage,
+  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -423,5 +423,50 @@ describe("cashForecast и monthlyOpexAverage", () => {
     expect(cashForecast({ onAccounts: 600000, payrollOwed: 0, monthlyOpex: 200000 }).monthsOfRunway).toBe(3);
     expect(cashForecast({ onAccounts: 600000, payrollOwed: 0, monthlyOpex: null }).monthsOfRunway).toBeNull();
     expect(cashForecast({ onAccounts: 600000, payrollOwed: 0, monthlyOpex: 0 }).monthsOfRunway).toBeNull();
+  });
+});
+
+describe("оклад с учётом отсутствий", () => {
+  it("случай владельца: 150 000, график 6/1, отсутствовал 8 дней вместо 4", () => {
+    const r = salaryForMonth({ salary: 150000, schedule: "6/1", absenceDays: 8 });
+    expect(r.norm).toEqual({ workDays: 26, offDays: 4 });
+    expect(r.excessDays).toBe(4);
+    expect(r.deduction).toBe(23077);
+    expect(r.payable).toBe(126923);
+  });
+
+  it("отсутствовал по норме — оклад не режется", () => {
+    expect(salaryForMonth({ salary: 150000, schedule: "6/1", absenceDays: 4 }).payable).toBe(150000);
+    expect(salaryForMonth({ salary: 150000, schedule: "6/1", absenceDays: 0 }).payable).toBe(150000);
+  });
+
+  it("график 5/2 даёт другую норму и другую ставку дня", () => {
+    const r = salaryForMonth({ salary: 220000, schedule: "5/2", absenceDays: 12 });
+    expect(r.norm).toEqual({ workDays: 22, offDays: 9 });
+    expect(r.excessDays).toBe(3);
+    expect(r.payable).toBe(220000 - Math.round(3 * 220000 / 22));
+  });
+
+  it("без графика вычитать не из чего — оклад остаётся целым", () => {
+    const r = salaryForMonth({ salary: 150000, schedule: null, absenceDays: 20 });
+    expect(r.deduction).toBe(0);
+    expect(r.payable).toBe(150000);
+  });
+
+  it("вычет не уходит в минус, даже если отсутствовал весь месяц", () => {
+    const r = salaryForMonth({ salary: 150000, schedule: "6/1", absenceDays: 31 });
+    expect(r.payable).toBe(0);
+    expect(r.deduction).toBe(150000);
+  });
+
+  it("день, отмеченный дважды, считается одним", () => {
+    const daysOff = [
+      { tech_id: "t1", off_date: "2026-08-05" },
+      { tech_id: "t1", off_date: "2026-08-05" },
+      { tech_id: "t1", off_date: "2026-08-06" },
+      { tech_id: "t2", off_date: "2026-08-07" },
+      { tech_id: "t1", off_date: "2026-09-01" },
+    ];
+    expect(absenceDaysInMonth("t1", daysOff, "2026-08")).toBe(2);
   });
 });
