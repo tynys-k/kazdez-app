@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
@@ -1786,6 +1786,13 @@ function Dashboard({ session, profile }) {
 
   // ---- финансы за период ----
   const range = periodRange(pMode, pOff);
+  // Возвращаемость и ценность клиента. Считается по ключу телефона, поэтому
+  // «+7 701 …» и «8 701 …» больше не идут за двух разных людей.
+  const retention = calc.clientStats(jobs, {
+    from: pMode === "all" ? null : isoOf(new Date(range.start)),
+    to: pMode === "all" ? null : isoOf(new Date(range.end - 86400000)),
+    phoneKeyOf: phoneKey,
+  });
   const fin = (() => {
     const weekIdx = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
     const week = [1, 2, 3, 4, 5, 6, 0].map((dow) => ({ dow, label: WEEKDAYS[dow].slice(0, 2), count: 0, revenue: 0 }));
@@ -3195,6 +3202,28 @@ function Dashboard({ session, profile }) {
               </div>
             )}
 
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Клиенты и возвраты · {range.label}</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>Клиент относится к периоду по своей первой заявке. Возврат засчитывается по всей истории — даже если он пришёл снова позже.</div>
+              <div className="kd-kpigrid" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
+                <div className="kd-kpicard"><span>Клиентов пришло</span><strong>{fmt(retention.clients)}</strong><small>первая заявка за период</small></div>
+                <div className="kd-kpicard"><span>Вернулись</span><strong className={retention.returnRate < 20 ? "neg" : ""}>{retention.returnRate} %</strong><small>{fmt(retention.returned)} из {fmt(retention.clients)} заказали снова</small></div>
+                <div className="kd-kpicard"><span>Ценность клиента</span><strong>{fmt(retention.ltv)} ₸</strong><small>принёс в среднем за всё время</small></div>
+              </div>
+              {retention.sources.length > 0 && (
+                <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr .9fr .9fr 1fr", marginTop: 14 }}><span>Источник</span><span>Клиентов</span><span>Вернулись</span><span>Ценность</span></div>
+              )}
+              {retention.sources.map((r) => (
+                <div className="kd-ledgerrow" key={r.label} style={{ gridTemplateColumns: "1.6fr .9fr .9fr 1fr" }}>
+                  <span className="kd-ledgername">{r.label}</span>
+                  <span>{r.clients}</span>
+                  <span style={{ color: r.returnRate >= 20 ? "var(--primary-d)" : "var(--muted)" }}>{r.returnRate} %</span>
+                  <strong>{fmt(r.ltv)} ₸</strong>
+                </div>
+              ))}
+              {retention.clients === 0 && <div className="kd-muted">За период новых клиентов нет.</div>}
+              <div className="kd-muted" style={{ marginTop: 10 }}>Источник, дающий мало клиентов, но с высоким возвратом, обычно выгоднее того, что даёт много разовых.</div>
+            </div>
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">По видам вредителей · {range.label}</div>
               <SortBar value={pestSort} onChange={setPestSort} options={[["revenue", "По выручке"], ["count", "По заявкам"], ["avg", "По чеку"]]} />

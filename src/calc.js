@@ -247,3 +247,53 @@ export function jobFullEconomics(job, { chemicals = [], qrFeeRate = 0.0095, labo
     fullMargin: base.revenue > 0 ? Math.round(fullProfit / base.revenue * 100) : 0,
   };
 }
+
+// --- клиенты: возвращаемость и ценность ---------------------------------
+
+// Считаем по ключу телефона (последние 10 цифр), а не по строке номера:
+// «+7 701 …» и «8 701 …» — один человек, и до этой правки он считался
+// за двух, занижая долю повторных обращений.
+//
+// Клиент относится к периоду по ПЕРВОЙ своей заявке — это когорта
+// «пришёл в августе». Возвраты при этом считаются по всей его истории,
+// иначе клиент, вернувшийся в сентябре, никогда бы не попал в статистику.
+export function clientStats(jobs = [], { from = null, to = null, phoneKeyOf } = {}) {
+  const byClient = new Map();
+  for (const job of jobs) {
+    if (job.status === "canceled") continue;
+    const key = phoneKeyOf(job.client_phone);
+    if (!key) continue;
+    const date = job.scheduled_date || null;
+    let c = byClient.get(key);
+    if (!c) { c = { key, first: date, jobs: 0, done: 0, revenue: 0, source: job.source || "" }; byClient.set(key, c); }
+    if (date && (!c.first || date < c.first)) { c.first = date; c.source = job.source || c.source; }
+    c.jobs += 1;
+    if (job.status === "done") { c.done += 1; c.revenue += Number(job.report_paid) || 0; }
+  }
+
+  const inCohort = (c) => (!from || (c.first && c.first >= from)) && (!to || (c.first && c.first <= to));
+  const cohort = [...byClient.values()].filter(inCohort);
+  const returned = cohort.filter((c) => c.jobs > 1);
+  const paying = cohort.filter((c) => c.revenue > 0);
+  const revenue = cohort.reduce((s, c) => s + c.revenue, 0);
+
+  const bySource = {};
+  for (const c of cohort) {
+    const label = (c.source || "Не указан").trim() || "Не указан";
+    const row = (bySource[label] = bySource[label] || { label, clients: 0, returned: 0, revenue: 0 });
+    row.clients += 1;
+    if (c.jobs > 1) row.returned += 1;
+    row.revenue += c.revenue;
+  }
+
+  return {
+    clients: cohort.length,
+    returned: returned.length,
+    returnRate: cohort.length ? Math.round(returned.length / cohort.length * 100) : 0,
+    revenue,
+    ltv: paying.length ? Math.round(revenue / paying.length) : 0,
+    sources: Object.values(bySource)
+      .map((r) => ({ ...r, returnRate: r.clients ? Math.round(r.returned / r.clients * 100) : 0, ltv: r.clients ? Math.round(r.revenue / r.clients) : 0 }))
+      .sort((a, b) => b.clients - a.clients),
+  };
+}
