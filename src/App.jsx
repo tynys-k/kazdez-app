@@ -1815,6 +1815,11 @@ function Dashboard({ session, profile }) {
   const range = periodRange(pMode, pOff);
   // Возвращаемость и ценность клиента. Считается по ключу телефона, поэтому
   // «+7 701 …» и «8 701 …» больше не идут за двух разных людей.
+  // Оборот для отчётности: что фактически получено и каким способом.
+  const turnover = calc.turnoverReport(jobs, {
+    inPeriod: inPeriodIso,
+    brandOf: (j) => (j.brand === "partner" ? `Партнёр · ${partnerNameOf(j) || "не указан"}` : (j.brand || "KazDez")),
+  });
   const retention = calc.clientStats(jobs, {
     from: pMode === "all" ? null : isoOf(new Date(range.start)),
     to: pMode === "all" ? null : isoOf(new Date(range.end - 86400000)),
@@ -3320,6 +3325,32 @@ function Dashboard({ session, profile }) {
               </div>
             )}
 
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Оборот для отчётности · {range.label}</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>Деньги, фактически полученные за период. Перечисления считаются только после того, как оплата зачтена: до этого денег нет.</div>
+              <div className="kd-kpigrid" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
+                <div className="kd-kpicard"><span>Всего получено</span><strong>{fmt(turnover.total)} ₸</strong><small>{turnover.jobs} выполненных заявок</small></div>
+                <div className="kd-kpicard"><span>Официально</span><strong>{fmt(turnover.official)} ₸</strong><small>{turnover.officialShare}% — QR и перечисления</small></div>
+                <div className="kd-kpicard"><span>Наличными</span><strong>{fmt(turnover.cash)} ₸</strong><small>{100 - turnover.officialShare}% оборота</small></div>
+              </div>
+              {turnover.transferPending > 0 && (
+                <div className="kd-flag warn" style={{ marginTop: 10 }}>
+                  Ещё {fmt(turnover.transferPending)} ₸ выставлено по счетам, но не оплачено — в оборот периода не вошло
+                </div>
+              )}
+              {turnover.byBrand.length > 1 && (
+                <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr .8fr 1fr 1fr", marginTop: 14 }}><span>Юрлицо / бренд</span><span>Заявок</span><span>Официально</span><span>Наличными</span></div>
+              )}
+              {turnover.byBrand.length > 1 && turnover.byBrand.map((b) => (
+                <div className="kd-ledgerrow" key={b.brand} style={{ gridTemplateColumns: "1.6fr .8fr 1fr 1fr" }}>
+                  <span className="kd-ledgername">{b.brand}</span>
+                  <span>{b.jobs}</span>
+                  <span>{fmt(b.official)} ₸</span>
+                  <strong>{fmt(b.cash)} ₸</strong>
+                </div>
+              ))}
+              <div className="kd-muted" style={{ marginTop: 10 }}>Разбивка идёт по бренду заявки. Если ИП и ТОО у вас отличаются не брендом, скажите — заведём отдельное поле «юрлицо».</div>
+            </div>
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Клиенты и возвраты · {range.label}</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>Клиент относится к периоду по своей первой заявке. Возврат засчитывается по всей истории — даже если он пришёл снова позже.</div>

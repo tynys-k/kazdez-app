@@ -553,3 +553,42 @@ export function priceFor(pest, area, priceList = []) {
   });
   return hit ? { price: Number(hit.price) || 0, row: hit, exact: true } : null;
 }
+
+// --- оборот для отчётности ------------------------------------------------
+
+// Налоговую интересует не «выручка по заявкам», а деньги, которые фактически
+// получены, и то, каким способом. Разделяем официальные поступления (QR и
+// перечисление на счёт — их видно банку) и наличные.
+//
+// Перечисление считается только когда оно ОПЛАЧЕНО: до этого денег нет,
+// а доход признаётся по факту получения.
+export function turnoverReport(jobs = [], { inPeriod = () => true, brandOf = (j) => j.brand || "—" } = {}) {
+  const rows = jobs.filter((j) => j.status === "done" && inPeriod(j.scheduled_date));
+  const byBrand = new Map();
+  let cash = 0, qr = 0, transfer = 0, transferPending = 0;
+
+  for (const j of rows) {
+    const c = Number(j.report_cash) || 0;
+    const q = Number(j.report_qr) || 0;
+    const t = Number(j.report_transfer) || 0;
+    const paidTransfer = j.transfer_paid ? t : 0;
+    cash += c; qr += q; transfer += paidTransfer; transferPending += t - paidTransfer;
+
+    const key = brandOf(j);
+    const b = byBrand.get(key) || { brand: key, jobs: 0, cash: 0, official: 0 };
+    b.jobs += 1; b.cash += c; b.official += q + paidTransfer;
+    byBrand.set(key, b);
+  }
+
+  const official = qr + transfer;
+  return {
+    jobs: rows.length,
+    cash, qr, transfer, transferPending, official,
+    total: cash + official,
+    // Доля официальных поступлений — то, что видно по счетам.
+    officialShare: cash + official > 0 ? Math.round(official / (cash + official) * 100) : 0,
+    byBrand: [...byBrand.values()]
+      .map((b) => ({ ...b, total: b.cash + b.official }))
+      .sort((a, b) => b.total - a.total),
+  };
+}
