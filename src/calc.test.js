@@ -6,6 +6,7 @@ import {
   priceFor,
   turnoverReport, chemPriceOn, chemForecast, supplierPrices,
   docStatus, docsNeedingAttention, guaranteeCostOf, guaranteeStats, dormantClients,
+  periodTotals, comparePeriods,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -934,5 +935,54 @@ describe("ушедшие клиенты", () => {
     ];
     const rows = dormantClients(jobs, { months: 12, todayIso: today, phoneKeyOf: key });
     expect(rows.map((r) => r.revenue)).toEqual([90000, 10000]);
+  });
+});
+
+describe("сравнение периодов", () => {
+  const jobs = [
+    { status: "done", scheduled_date: "2026-08-05", report_paid: 30000 },
+    { status: "done", scheduled_date: "2026-08-15", report_paid: 50000 },
+    { status: "new", scheduled_date: "2026-08-20" },
+    { status: "canceled", scheduled_date: "2026-08-21", report_paid: 99000 },
+    { status: "done", scheduled_date: "2026-07-10", report_paid: 40000 },
+  ];
+  const inMonth = (m) => (iso) => String(iso).slice(0, 7) === m;
+
+  it("считает выручку, выполненные заявки и чек", () => {
+    const t = periodTotals(jobs, { inRange: inMonth("2026-08") });
+    expect(t).toMatchObject({ revenue: 80000, done: 2, jobs: 3, avg: 40000 });
+  });
+
+  it("отменённые не попадают ни в выручку, ни в счётчик", () => {
+    expect(periodTotals(jobs, { inRange: inMonth("2026-08") }).jobs).toBe(3);
+  });
+
+  it("фильтр по бренду работает так же, как в своде", () => {
+    const mixed = [
+      { status: "done", scheduled_date: "2026-08-05", report_paid: 10000, brand: "partner" },
+      { status: "done", scheduled_date: "2026-08-06", report_paid: 20000 },
+    ];
+    expect(periodTotals(mixed, { inRange: inMonth("2026-08"), brandFilter: "ours" }).revenue).toBe(20000);
+    expect(periodTotals(mixed, { inRange: inMonth("2026-08"), brandFilter: "partner" }).revenue).toBe(10000);
+  });
+
+  it("даёт процент изменения к прошлому периоду", () => {
+    const now = periodTotals(jobs, { inRange: inMonth("2026-08") });
+    const before = periodTotals(jobs, { inRange: inMonth("2026-07") });
+    const d = comparePeriods(now, before);
+    expect(d.revenue).toBe(100); // 80 000 против 40 000
+    expect(d.done).toBe(100);
+    expect(d.avg).toBe(0); // чек тот же
+  });
+
+  it("с нулём в прошлом периоде сравнивать нечего — это null, а не рост на 100%", () => {
+    const d = comparePeriods({ revenue: 50000, done: 1, avg: 50000 }, { revenue: 0, done: 0, avg: 0 });
+    expect(d.revenue).toBeNull();
+    expect(d.done).toBeNull();
+    expect(d.avg).toBeNull();
+  });
+
+  it("падение показывается отрицательным числом", () => {
+    expect(comparePeriods({ revenue: 30000 }, { revenue: 60000 }).revenue).toBe(-50);
   });
 });

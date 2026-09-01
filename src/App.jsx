@@ -2134,6 +2134,28 @@ function Dashboard({ session, profile }) {
     .filter((r) => r.done > 0 || r.returns > 0);
   const guaranteeTotals = guaranteeRows.reduce((a, r) => ({ done: a.done + r.done, returns: a.returns + r.returns }), { done: 0, returns: 0 });
 
+  // Сравнение с прошлым периодом. Считается отдельной чистой функцией по тем
+  // же правилам, что и свод: так дельта остаётся согласованной сама с собой,
+  // даже если правила отбора когда-нибудь поменяются.
+  const prevRange = pMode === "all" ? null : periodRange(pMode, pOff - 1);
+  const inRangeOf = (r) => (iso) => {
+    if (!r) return true;
+    const dt = parseIso(iso);
+    return !!dt && dt.getTime() >= r.start && dt.getTime() < r.end;
+  };
+  const totalsNow = calc.periodTotals(jobs, { inRange: inRangeOf(pMode === "all" ? null : range), brandFilter });
+  const totalsPrev = prevRange ? calc.periodTotals(jobs, { inRange: inRangeOf(prevRange), brandFilter }) : null;
+  const periodDelta = totalsPrev ? calc.comparePeriods(totalsNow, totalsPrev) : null;
+  // «Хуже» не всегда красное: падение среднего чека и падение выручки читаются
+  // одинаково, а вот рост числа заявок при падении чека — это разговор.
+  const deltaNote = (value, prevValue) => {
+    if (!periodDelta) return null;
+    // ноль в прошлом периоде — сравнивать не с чем, и это надо сказать словами
+    if (value == null) return `в ${prevRange.label} не с чем сравнивать`;
+    const sign = value > 0 ? "+" : "";
+    return `${sign}${value}% к ${prevRange.label} (${fmt(prevValue)})`;
+  };
+
   const upliftPct = upliftTotals.quote > 0 ? Math.round((upliftTotals.paid - upliftTotals.quote) / upliftTotals.quote * 100) : 0;
 
   // ---- склад ----
@@ -3423,6 +3445,14 @@ function Dashboard({ session, profile }) {
               <div className="kd-card">
                 <div className="kd-section">Итоги · {range.label}{brandFilter !== "all" ? ` · ${brandFilter === "ours" ? "наши заявки" : "партнёрские"}` : ""}</div>
                 <div className="kd-row"><span>Выручка</span><strong>{fmt(fin.revenue)} ₸</strong></div>
+                {periodDelta && (
+                  <div className="kd-row kd-delta">
+                    <span className="kd-muted">Выручка к прошлому периоду</span>
+                    <span className={periodDelta.revenue == null ? "kd-muted" : periodDelta.revenue >= 0 ? "kd-delta-up" : "kd-delta-down"}>
+                      {deltaNote(periodDelta.revenue, totalsPrev.revenue) || "—"}
+                    </span>
+                  </div>
+                )}
                 <div className="kd-row"><span>· наличными</span><span className="kd-muted">{fmt(fin.cash)} ₸</span></div>
                 <div className="kd-row"><span>· QR / переводом</span><span className="kd-muted">{fmt(fin.qr)} ₸</span></div>
                 <div className="kd-row"><span>Себестоимость препаратов</span><strong style={{ color: "#B42318" }}>− {fmt(fin.cost)} ₸</strong></div>
@@ -3439,6 +3469,22 @@ function Dashboard({ session, profile }) {
                 <div className="kd-section">Средний чек · {range.label}</div>
                 <div className="kd-row"><span>Наши заявки</span><span className="kd-twoval"><em>{fin.avgCheck.oursN} заявок</em><strong>{fmt(fin.avgCheck.ours)} ₸</strong></span></div>
                 <div className="kd-row"><span>Партнёрские</span><span className="kd-twoval"><em>{fin.avgCheck.partnerN} заявок</em><strong>{fmt(fin.avgCheck.partner)} ₸</strong></span></div>
+                {periodDelta && (
+                  <>
+                    <div className="kd-row kd-delta">
+                      <span className="kd-muted">Чек к прошлому периоду</span>
+                      <span className={periodDelta.avg == null ? "kd-muted" : periodDelta.avg >= 0 ? "kd-delta-up" : "kd-delta-down"}>
+                        {deltaNote(periodDelta.avg, totalsPrev.avg) || "—"}
+                      </span>
+                    </div>
+                    <div className="kd-row kd-delta">
+                      <span className="kd-muted">Заявок к прошлому периоду</span>
+                      <span className={periodDelta.done == null ? "kd-muted" : periodDelta.done >= 0 ? "kd-delta-up" : "kd-delta-down"}>
+                        {periodDelta.done == null ? `в ${prevRange.label} не с чем сравнивать` : `${periodDelta.done > 0 ? "+" : ""}${periodDelta.done}% к ${prevRange.label} (${totalsPrev.done})`}
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="kd-row total"><span>Общий (все заявки)</span><span className="kd-twoval"><em>{fin.avgCheck.allN} заявок</em><strong style={{ color: "var(--primary-d)" }}>{fmt(fin.avgCheck.all)} ₸</strong></span></div>
                 <div className="kd-section" style={{ marginTop: 12 }}>По типу обработки</div>
                 {fin.avgByType.filter((r) => r.n > 0).map((r) => (
