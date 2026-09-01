@@ -58,6 +58,32 @@ export function jobChemCost(job, chemicals = [], purchases = []) {
   );
 }
 
+// --- допуски сотрудников -------------------------------------------------
+
+// Состояние документа на дату: действует, скоро истекает или просрочен.
+//
+// Документ без срока считаем бессрочным, а не просроченным: у части бумаг
+// срока действительно нет, и подсвечивать их красным — значит приучить
+// смотреть мимо предупреждений.
+export function docStatus(doc, todayIso, soonDays = 30) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  if (!doc?.expires_on) return { state: "nolimit", daysLeft: null };
+  const daysLeft = Math.round((new Date(`${String(doc.expires_on).slice(0, 10)}T00:00:00`) - new Date(`${today}T00:00:00`)) / 86400000);
+  if (daysLeft < 0) return { state: "expired", daysLeft };
+  if (daysLeft <= soonDays) return { state: "soon", daysLeft };
+  return { state: "ok", daysLeft };
+}
+
+// Документы, требующие внимания: просроченные и истекающие в ближайший месяц.
+// Отсортированы по сроку — первым то, что горит сильнее.
+export function docsNeedingAttention(docs = [], { todayIso, soonDays = 30, activeTechIds = null } = {}) {
+  return docs
+    .filter((d) => (activeTechIds ? activeTechIds.has(String(d.tech_id)) : true))
+    .map((d) => ({ doc: d, ...docStatus(d, todayIso, soonDays) }))
+    .filter((r) => r.state === "expired" || r.state === "soon")
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
 // --- закуп: поставщики и прогноз -----------------------------------------
 
 const ISO_DAY = 86400000;
@@ -152,9 +178,62 @@ export function executorShareAmt(job) {
   return Math.round((Number(job.report_paid) || 0) * (Number(job.executor_share_pct) || 0) / 100);
 }
 
+// --- гарантийные возвраты ------------------------------------------------
+
+// Чистая стоимость повторных выездов по заявке.
+//
+// Повторный выезд по гарантии — это бесплатная работа: препараты, бензин,
+// день дезинфектора. В прибыли исходной заявки этих затрат не было, и заявка
+// выглядела доходнее, чем на самом деле. Связь уже есть — jobs.repeat_of.
+//
+// Если повтор оказался платным, вычитаем полученное: заявка стоила компании
+// только разницу. Ниже нуля не опускаемся — платный повтор не должен
+// «улучшать» прибыль исходной заявки, это отдельная выручка.
+export function guaranteeCostOf(jobId, { jobs = [], chemicals = [], purchases = [], jobHelpers = [] } = {}) {
+  return jobs
+    .filter((j) => j.repeat_of && String(j.repeat_of) === String(jobId) && j.status === "done")
+    .reduce((sum, j) => {
+      const cost = jobChemCost(j, chemicals, purchases)
+        + (Number(j.tech_bonus) || 0) + (Number(j.tech_travel) || 0)
+        + helpersTotal(j.id, jobHelpers)
+        + (Number(j.transport_cost) || 0) + (Number(j.other_cost) || 0);
+      return sum + Math.max(0, Math.round(cost - (Number(j.report_paid) || 0)));
+    }, 0);
+}
+
+// Доля гарантийных возвратов по сотрудникам — самая честная оценка качества,
+// какая возможна на этих данных.
+//
+// Возврат приписывается тому, кто делал ИСХОДНУЮ заявку, а не тому, кто поехал
+// переделывать. И период берётся по дате исходной заявки: иначе работа июля,
+// за которой вернулись в августе, попадёт в августовскую статистику чужого
+// человека.
+export function guaranteeStats(jobs = [], { inPeriod = () => true } = {}) {
+  const byId = new Map(jobs.map((j) => [String(j.id), j]));
+  const stats = new Map();
+  const bump = (techId, field) => {
+    const key = String(techId || "");
+    const cur = stats.get(key) || { techId, done: 0, returns: 0 };
+    cur[field] += 1;
+    stats.set(key, cur);
+  };
+  for (const j of jobs) {
+    if (j.status !== "done") continue;
+    if (!j.repeat_of) {
+      if (inPeriod(j.scheduled_date)) bump(j.assigned_to, "done");
+      continue;
+    }
+    const origin = byId.get(String(j.repeat_of));
+    if (origin && inPeriod(origin.scheduled_date)) bump(origin.assigned_to, "returns");
+  }
+  return [...stats.values()]
+    .map((s) => ({ ...s, rate: s.done ? Math.round(s.returns / s.done * 100) : 0 }))
+    .sort((a, b) => b.rate - a.rate || b.returns - a.returns);
+}
+
 // --- экономика заявки ----------------------------------------------------
 
-export function jobEconomics(job, { chemicals = [], purchases = [], qrFeeRate = 0.0095, helpers = 0 } = {}) {
+export function jobEconomics(job, { chemicals = [], purchases = [], qrFeeRate = 0.0095, helpers = 0, guaranteeCost = 0 } = {}) {
   const revenue = Number(job?.report_paid) || 0;
   const chemicalsCost = Math.round(jobChemCost(job, chemicals, purchases));
   const qrFee = Math.round((Number(job?.report_qr) || 0) * qrFeeRate);
@@ -163,10 +242,12 @@ export function jobEconomics(job, { chemicals = [], purchases = [], qrFeeRate = 
   const techExtras = (Number(job?.tech_bonus) || 0) + (Number(job?.tech_travel) || 0) + (Number(helpers) || 0);
   const transport = Number(job?.transport_cost) || 0;
   const other = Number(job?.other_cost) || 0;
-  const profit = Math.round(revenue - chemicalsCost - qrFee - partnersCost - techExtras - transport - other);
+  // Гарантийные возвраты — такая же затрата исходной заявки, как препараты.
+  const guarantee = Math.max(0, Math.round(Number(guaranteeCost) || 0));
+  const profit = Math.round(revenue - chemicalsCost - qrFee - partnersCost - techExtras - transport - other - guarantee);
   return {
     revenue, chemicals: chemicalsCost, qrFee, partners: partnersCost,
-    techExtras, transport, other, profit,
+    techExtras, transport, other, guarantee, profit,
     margin: revenue > 0 ? Math.round(profit / revenue * 100) : 0,
   };
 }
@@ -343,8 +424,8 @@ export function allocationPerJob(jobs = [], { profiles = [], opex = [] } = {}) {
 // Прибыль заявки с учётом труда и постоянных расходов.
 // Прямая прибыль (jobEconomics) остаётся как была: по ней видно, окупает ли
 // заявка сама себя, а полная показывает, зарабатывает ли на ней компания.
-export function jobFullEconomics(job, { chemicals = [], purchases = [], qrFeeRate = 0.0095, labor = 0, overhead = 0, helpers = 0 } = {}) {
-  const base = jobEconomics(job, { chemicals, purchases, qrFeeRate, helpers });
+export function jobFullEconomics(job, { chemicals = [], purchases = [], qrFeeRate = 0.0095, labor = 0, overhead = 0, helpers = 0, guaranteeCost = 0 } = {}) {
+  const base = jobEconomics(job, { chemicals, purchases, qrFeeRate, helpers, guaranteeCost });
   const fullProfit = Math.round(base.profit - labor - overhead);
   return {
     ...base, labor, overhead, fullProfit,

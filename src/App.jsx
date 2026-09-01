@@ -10,11 +10,11 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -297,6 +297,7 @@ function Dashboard({ session, profile }) {
   const [jobHelpers, setJobHelpers] = useState([]);
   const [priceList, setPriceList] = useState([]);
   const [chemPurchases, setChemPurchases] = useState([]);
+  const [techDocs, setTechDocs] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -495,9 +496,10 @@ function Dashboard({ session, profile }) {
       supabase.from("job_helpers").select("*"),
       supabase.from("price_list").select("*").order("pest").order("area_from"),
       supabase.from("chemical_purchases").select("*").order("purchase_date", { ascending: false }),
+      supabase.from("tech_documents").select("*").order("expires_on", { ascending: true }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr, cpr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс", "Закуп препаратов"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr, cpr, tdr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс", "Закуп препаратов", "Допуски сотрудников"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     setReportChemsFailed(!!cr.error);
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
@@ -548,6 +550,7 @@ function Dashboard({ session, profile }) {
     setJobHelpers(jhr.data || []);
     setPriceList(plr.data || []);
     setChemPurchases(cpr.data || []);
+    setTechDocs(tdr.data || []);
     if (!useOfflineSnapshot && !jr.error) {
       try {
         const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
@@ -1099,6 +1102,23 @@ function Dashboard({ session, profile }) {
     await logAction("Склад", `Удалён препарат: ${chem.name}`);
     showToast("Препарат удалён"); load();
   }
+  async function saveTechDoc(payload) {
+    const row = { ...payload, created_by: session.user.id };
+    const { error } = payload.id
+      ? await supabase.from("tech_documents").update({ kind: row.kind, number: row.number, issued_on: row.issued_on, expires_on: row.expires_on, note: row.note }).eq("id", payload.id)
+      : await supabase.from("tech_documents").insert(row);
+    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+    await logAction("Допуски", `${techById(payload.tech_id)?.full_name || personName(payload.tech_id)} · ${TECH_DOC_KINDS[payload.kind] || payload.kind}${payload.expires_on ? ` до ${isoToRu(payload.expires_on)}` : ""}`);
+    setModal(null); showToast("Сохранено"); load(); return null;
+  }
+
+  async function removeTechDoc(doc) {
+    const { error } = await supabase.from("tech_documents").delete().eq("id", doc.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Допуски", `Удалён документ: ${personName(doc.tech_id)} · ${TECH_DOC_KINDS[doc.kind] || doc.kind}`);
+    showToast("Удалено"); load();
+  }
+
   async function addHandout(payload) {
     const { error } = await supabase.from("handouts").insert({ ...payload, created_by: session.user.id });
     if (error) { showToast("Ошибка: " + error.message); return; }
@@ -1119,7 +1139,10 @@ function Dashboard({ session, profile }) {
   }
   const partnerShareAmt = (job) => calc.partnerShareAmt(job, chemicals, chemPurchases);
   const executorShareAmt = (job) => calc.executorShareAmt(job);
-  const jobEconomics = (job) => calc.jobEconomics(job, { chemicals, purchases: chemPurchases, qrFeeRate, helpers: calc.helpersTotal(job.id, jobHelpers) });
+  // Затраты повторных выездов относим на исходную заявку: гарантийный выезд —
+  // это бесплатная работа, которой в её прибыли раньше не было.
+  const guaranteeCostOf = (job) => calc.guaranteeCostOf(job.id, { jobs, chemicals, purchases: chemPurchases, jobHelpers });
+  const jobEconomics = (job) => calc.jobEconomics(job, { chemicals, purchases: chemPurchases, qrFeeRate, helpers: calc.helpersTotal(job.id, jobHelpers), guaranteeCost: guaranteeCostOf(job) });
   function upsellFor(job) {
     const text = norm(`${job.pest || ""} ${job.address || ""} ${job.note || ""}`);
     if (/склад|цех|производ|общепит|кафе|ресторан/.test(text)) return "регулярное абонентское обслуживание и мониторинг объекта";
@@ -2105,6 +2128,11 @@ function Dashboard({ session, profile }) {
     });
   const upliftRows = techRows.filter((r) => r.markup !== null).sort((a, b) => b.markup - a.markup);
   const upliftTotals = techRows.reduce((s, r) => ({ quote: s.quote + r.v.quoteSum, paid: s.paid + r.v.paidOnQuote }), { quote: 0, paid: 0 });
+  // Доля возвратов по гарантии — оценка качества работы, а не скорости.
+  const guaranteeRows = calc.guaranteeStats(jobs, { inPeriod: inPeriodIso })
+    .filter((r) => r.done > 0 || r.returns > 0);
+  const guaranteeTotals = guaranteeRows.reduce((a, r) => ({ done: a.done + r.done, returns: a.returns + r.returns }), { done: 0, returns: 0 });
+
   const upliftPct = upliftTotals.quote > 0 ? Math.round((upliftTotals.paid - upliftTotals.quote) / upliftTotals.quote * 100) : 0;
 
   // ---- склад ----
@@ -2124,6 +2152,12 @@ function Dashboard({ session, profile }) {
     };
   });
   const lowCount = inventory.filter((i) => i.low).length;
+  // Допуски: считаем только по работающим сотрудникам — отключённые учётные
+  // записи не должны висеть в предупреждениях вечно.
+  const activeProfileIds = new Set(allProfiles.filter((p) => p.is_active !== false).map((p) => String(p.id)));
+  const docAlerts = calc.docsNeedingAttention(techDocs, { activeTechIds: activeProfileIds });
+  const docsExpired = docAlerts.filter((d) => d.state === "expired").length;
+  const docsSoon = docAlerts.filter((d) => d.state === "soon").length;
   const orderSoonCount = inventory.filter((i) => i.orderSoon).length;
   const totalStockValue = inventory.reduce((s, c) => s + c.stockValue, 0);
   const equipIssuedQty = (equipId) => equipHandouts.filter((h) => h.equipment_id === equipId && h.status === "with_tech").reduce((s, h) => s + (Number(h.qty) || 0), 0);
@@ -2209,7 +2243,7 @@ function Dashboard({ session, profile }) {
   const allocFor = calc.allocationPerJob(jobs, { profiles: allProfiles, opex });
   const completedEconomics = doneJobs.map((job) => {
     const { labor, overhead } = allocFor(job);
-    return { job, econ: calc.jobFullEconomics(job, { chemicals, purchases: chemPurchases, qrFeeRate, labor, overhead, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
+    return { job, econ: calc.jobFullEconomics(job, { chemicals, purchases: chemPurchases, guaranteeCost: guaranteeCostOf(job), qrFeeRate, labor, overhead, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
   });
   const totalJobProfit = completedEconomics.reduce((s, r) => s + r.econ.profit, 0);
   const totalFullProfit = completedEconomics.reduce((s, r) => s + r.econ.fullProfit, 0);
@@ -2264,6 +2298,10 @@ function Dashboard({ session, profile }) {
     // Предупреждение до того, как остаток стал критическим: по расходу видно,
     // что заказывать надо уже сейчас, иначе закупка пойдёт впопыхах.
     isAdmin && orderSoonCount ? { id: "stockorder", label: "Пора заказывать препараты", value: orderSoonCount, tab: "stock", tone: "warning" } : null,
+    // Просроченный допуск — надзорный риск: штраф и остановка работ, а не
+    // внутренний беспорядок. Поэтому красным и выше складских предупреждений.
+    docsExpired ? { id: "docsexpired", label: "Просрочены допуски сотрудников", value: docsExpired, tab: "team", tone: "danger" } : null,
+    docsSoon ? { id: "docssoon", label: "Допуски истекают в этом месяце", value: docsSoon, tab: "team", tone: "warning" } : null,
     isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
     isAdmin && dueFollowups.length ? { id: "client-followups", label: "Пора связаться с клиентами", value: dueFollowups.length, tab: "retention", tone: "warning" } : null,
     isAdmin && qualityPending.length ? { id: "quality", label: "Ждут контроля качества", value: qualityPending.length, tab: "retention", tone: "warning" } : null,
@@ -3510,6 +3548,32 @@ function Dashboard({ session, profile }) {
             </div>
 
             <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Возвраты по гарантии · {range.label}</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>
+                Повтор считается тому, кто делал исходную заявку, и в её период — иначе июльская работа попадёт в августовскую статистику другого человека.
+              </div>
+              {guaranteeRows.length === 0 && <div className="kd-muted">За период выполненных заявок нет.</div>}
+              {guaranteeRows.length > 0 && (
+                <>
+                  <div className="kd-row"><span>Всего заявок / из них с возвратом</span>
+                    <strong>{guaranteeTotals.done} / {guaranteeTotals.returns}{guaranteeTotals.done ? ` · ${Math.round(guaranteeTotals.returns / guaranteeTotals.done * 100)}%` : ""}</strong>
+                  </div>
+                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr" }}>
+                    <span>Сотрудник</span><span>Заявок</span><span>Возвратов</span><span>Доля</span>
+                  </div>
+                  {guaranteeRows.map((r) => (
+                    <div className="kd-ledgerrow" key={String(r.techId)} style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr" }}>
+                      <span className="kd-ledgername">{techById(r.techId)?.full_name || personName(r.techId) || "не назначен"}</span>
+                      <span>{r.done}</span>
+                      <span>{r.returns}</span>
+                      <strong style={{ color: r.rate >= 15 ? "var(--rust)" : r.rate >= 8 ? "var(--amber)" : "var(--primary)" }}>{r.rate}%</strong>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Поднятие цены · {range.label}</div>
               <div className="kd-row"><span>Изначально (сумма макс. цен)</span><strong>{fmt(upliftTotals.quote)} ₸</strong></div>
               <div className="kd-row"><span>Итого получено</span><strong>{fmt(upliftTotals.paid)} ₸</strong></div>
@@ -3939,6 +4003,39 @@ function Dashboard({ session, profile }) {
                 })}
               </div>
             </div>}
+            {canAccess("action.team_manage") && <div className="kd-card">
+              <div className="kd-section" style={{ marginTop: 0 }}>Допуски и документы{docAlerts.length ? ` · ${docAlerts.length}` : ""}</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>
+                Медкнижка, санминимум, инструктаж по ТБ. Напоминаем за месяц до конца срока: сотрудник с просроченной медкнижкой на объекте — это штраф и остановка работ.
+              </div>
+              {allProfiles.filter((p) => p.is_active !== false).map((p) => {
+                const docs = techDocs.filter((d) => String(d.tech_id) === String(p.id));
+                return (
+                  <div className="kd-ledgerrow" key={p.id} style={{ gridTemplateColumns: "180px 1fr auto", alignItems: "start" }}>
+                    <span className="kd-ledgername">{p.full_name || "Без имени"}</span>
+                    <span style={{ textAlign: "left", minWidth: 0 }}>
+                      {docs.length === 0 && <em className="kd-muted" style={{ fontStyle: "normal" }}>документов нет</em>}
+                      {docs.map((d) => {
+                        const st = calc.docStatus(d);
+                        const color = st.state === "expired" ? "var(--rust)" : st.state === "soon" ? "var(--amber)" : "var(--muted)";
+                        return (
+                          <button key={d.id} className="kd-doc-chip" style={{ borderColor: `${color}55`, color }}
+                            onClick={() => setModal({ kind: "techDoc", tech: p, doc: d })}
+                            title={d.note || "Открыть документ"}>
+                            {TECH_DOC_KINDS[d.kind] || d.kind}
+                            {d.expires_on && <em> · {st.state === "expired" ? `просрочен ${-st.daysLeft} дн.` : st.state === "soon" ? `осталось ${st.daysLeft} дн.` : `до ${isoToRu(d.expires_on)}`}</em>}
+                            {!d.expires_on && <em> · бессрочно</em>}
+                          </button>
+                        );
+                      })}
+                    </span>
+                    <span>
+                      <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "techDoc", tech: p, doc: null })}><Plus size={13} />Документ</button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>}
             <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>Отчёты за период</div>
               <DateFilterBar filter={teamRepFilter} onChange={setTeamRepFilter} hide={["tomorrow"]} />
@@ -4219,6 +4316,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
+      {modal?.kind === "techDoc" && <TechDocModal tech={modal.tech} doc={modal.doc} onClose={() => setModal(null)} onSave={saveTechDoc} />}
       {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} existing={modal.expense} accounts={accounts} onClose={() => setModal(null)} onSave={(payload) => (modal.expense ? payExistingExpense(modal.tech, modal.expense, payload) : savePayrollPayment(modal.tech, payload))} />}
       {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}

@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor } from "./calc";
-import { AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -1070,6 +1070,50 @@ function StockInModal({ chem, purchases = [], onClose, onSave }) {
           ))}
         </details>
       )}
+    </ModalShell>
+  );
+}
+
+function TechDocModal({ tech, doc = null, onClose, onSave }) {
+  const [kind, setKind] = useState(doc?.kind || "medbook");
+  const [number, setNumber] = useState(doc?.number || "");
+  const [issued, setIssued] = useState(doc?.issued_on || "");
+  const [expires, setExpires] = useState(doc?.expires_on || "");
+  const [note, setNote] = useState(doc?.note || "");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  // Срок в прошлом — не ошибка ввода: так заводят уже просроченный документ,
+  // чтобы он сразу попал в список на продление. Но сказать об этом стоит.
+  const past = expires && expires < new Date().toISOString().slice(0, 10);
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave({
+      id: doc?.id, tech_id: tech.id, kind,
+      number: number.trim() || null, issued_on: issued || null,
+      expires_on: expires || null, note: note.trim() || null,
+    });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={`${doc ? "Документ" : "Новый документ"} — ${tech.full_name || "сотрудник"}`} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <Field label="Что за документ">
+        <select value={kind} onChange={(e) => setKind(e.target.value)}>
+          {Object.entries(TECH_DOC_KINDS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </Field>
+      <Field label="Номер или серия"><input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="если есть" /></Field>
+      <div className="kd-grid2">
+        <Field label="Выдан"><input type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></Field>
+        <Field label="Действует до"><input type="date" value={expires} onChange={(e) => setExpires(e.target.value)} /></Field>
+      </div>
+      {past && <div className="kd-hint" style={{ marginBottom: 10 }}>Срок уже истёк — документ попадёт в список на продление сразу после сохранения.</div>}
+      {!expires && <div className="kd-hint" style={{ marginBottom: 10 }}>Без даты окончания документ считается бессрочным и о нём не напомнят.</div>}
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="где хранится оригинал, кем выдан" /></Field>
     </ModalShell>
   );
 }
@@ -2575,6 +2619,11 @@ function JobEconomicsModal({ job, economics, onClose, onSave }) {
     <div className="kd-row"><span>Комиссия QR</span><strong className="kd-neg">− {fmt(economics.qrFee)} ₸</strong></div>
     <div className="kd-row"><span>Партнёры / исполнители</span><strong className="kd-neg">− {fmt(economics.partners)} ₸</strong></div>
     <div className="kd-row"><span>Бонус и дорожные сотруднику</span><strong className="kd-neg">− {fmt(economics.techExtras)} ₸</strong></div>
+    {economics.guarantee > 0 && (
+      <div className="kd-row" title="Повторный выезд по гарантии — бесплатная работа: препараты, бензин, день дезинфектора. Эти затраты относятся к этой заявке.">
+        <span>Гарантийные выезды</span><strong className="kd-neg">− {fmt(economics.guarantee)} ₸</strong>
+      </div>
+    )}
     <div className="kd-grid2" style={{ marginTop: 14 }}>
       <Field label="Транспорт / топливо (₸)"><input value={transport} onChange={(e) => setTransport(e.target.value)} inputMode="numeric" placeholder="1000" /></Field>
       <Field label="Другие расходы (₸)"><input value={other} onChange={(e) => setOther(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
@@ -2802,4 +2851,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };

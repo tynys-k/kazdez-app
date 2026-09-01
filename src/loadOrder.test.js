@@ -27,7 +27,7 @@ const EXPECTED = [
   ["mtr","mkt_topups"], ["dofr","tech_days_off"], ["fur","client_followups"], ["qcr","quality_checks"],
   ["cor","service_contracts"], ["cer","client_events"], ["pfr","client_public_feedback"], ["jpr","job_proofs"],
   ["car","cash_adjustments"], ["iar","inventory_adjustments"], ["errr","deferred"], ["jhr","job_helpers"],
-  ["plr","price_list"], ["cpr","chemical_purchases"],
+  ["plr","price_list"], ["cpr","chemical_purchases"], ["tdr","tech_documents"],
 ];
 
 function readLoadOrder() {

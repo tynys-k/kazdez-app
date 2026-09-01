@@ -5,6 +5,7 @@ import {
   clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats, dayLoad,
   priceFor,
   turnoverReport, chemPriceOn, chemForecast, supplierPrices,
+  docStatus, docsNeedingAttention, guaranteeCostOf, guaranteeStats,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -792,5 +793,97 @@ describe("цены поставщиков", () => {
   it("приходы без поставщика не теряются", () => {
     const rows = supplierPrices("c1", [{ chemical_id: "c1", purchase_date: "2026-06-01", price_per_liter: 10000 }]);
     expect(rows[0].supplier).toBe("поставщик не указан");
+  });
+});
+
+describe("допуски сотрудников", () => {
+  const today = "2026-09-01";
+
+  it("различает действующий, истекающий и просроченный", () => {
+    expect(docStatus({ expires_on: "2026-12-31" }, today).state).toBe("ok");
+    expect(docStatus({ expires_on: "2026-09-20" }, today).state).toBe("soon");
+    expect(docStatus({ expires_on: "2026-08-25" }, today).state).toBe("expired");
+    expect(docStatus({ expires_on: "2026-08-25" }, today).daysLeft).toBe(-7);
+  });
+
+  it("документ без срока считается бессрочным, а не просроченным", () => {
+    // иначе половина списка горит красным и на предупреждения перестают смотреть
+    expect(docStatus({ expires_on: null }, today).state).toBe("nolimit");
+  });
+
+  it("последний день срока ещё действует", () => {
+    expect(docStatus({ expires_on: today }, today).state).toBe("soon");
+    expect(docStatus({ expires_on: today }, today).daysLeft).toBe(0);
+  });
+
+  it("в список внимания попадают просроченные и истекающие, горящие первыми", () => {
+    const docs = [
+      { id: "a", tech_id: "t1", expires_on: "2026-12-31" },
+      { id: "b", tech_id: "t1", expires_on: "2026-09-20" },
+      { id: "c", tech_id: "t1", expires_on: "2026-08-01" },
+      { id: "d", tech_id: "t1", expires_on: null },
+    ];
+    const rows = docsNeedingAttention(docs, { todayIso: today });
+    expect(rows.map((r) => r.doc.id)).toEqual(["c", "b"]);
+  });
+
+  it("документы отключённых сотрудников не висят в предупреждениях", () => {
+    const docs = [
+      { id: "a", tech_id: "t1", expires_on: "2026-08-01" },
+      { id: "b", tech_id: "уволен", expires_on: "2026-08-01" },
+    ];
+    const rows = docsNeedingAttention(docs, { todayIso: today, activeTechIds: new Set(["t1"]) });
+    expect(rows.map((r) => r.doc.id)).toEqual(["a"]);
+  });
+});
+
+describe("гарантийные возвраты", () => {
+  const chem = { id: "c1", name: "Дельта", unit_kind: "volume", price_per_liter: 10000 };
+  const original = { id: "j1", status: "done", assigned_to: "t1", scheduled_date: "2026-08-05", report_paid: 30000, chemicals: [] };
+
+  it("затраты бесплатного повтора ложатся на исходную заявку", () => {
+    const repeat = {
+      id: "j2", repeat_of: "j1", status: "done", assigned_to: "t1", scheduled_date: "2026-08-20",
+      report_paid: 0, tech_travel: 2000, transport_cost: 1500,
+      chemicals: [{ chemical_id: "c1", amount: 100 }],
+    };
+    // 100 мл по 10 ₸ = 1000, плюс дорожные 2000 и транспорт 1500
+    expect(guaranteeCostOf("j1", { jobs: [original, repeat], chemicals: [chem] })).toBe(4500);
+  });
+
+  it("платный повтор стоит компании только разницу и не уходит в минус", () => {
+    const paidBack = { id: "j3", repeat_of: "j1", status: "done", scheduled_date: "2026-08-20", report_paid: 3000, tech_travel: 2000, chemicals: [] };
+    expect(guaranteeCostOf("j1", { jobs: [original, paidBack], chemicals: [chem] })).toBe(0);
+  });
+
+  it("невыполненный повтор ещё ничего не стоил", () => {
+    const planned = { id: "j4", repeat_of: "j1", status: "new", tech_travel: 2000, chemicals: [] };
+    expect(guaranteeCostOf("j1", { jobs: [original, planned], chemicals: [chem] })).toBe(0);
+  });
+
+  it("возврат приписывается тому, кто делал исходную заявку", () => {
+    const jobs = [
+      original,
+      { id: "j5", status: "done", assigned_to: "t2", scheduled_date: "2026-08-06" },
+      // переделывал другой человек — но виноват не он
+      { id: "j6", repeat_of: "j1", status: "done", assigned_to: "t2", scheduled_date: "2026-08-20" },
+    ];
+    const rows = guaranteeStats(jobs);
+    const t1 = rows.find((r) => r.techId === "t1");
+    const t2 = rows.find((r) => r.techId === "t2");
+    expect(t1).toMatchObject({ done: 1, returns: 1, rate: 100 });
+    expect(t2).toMatchObject({ done: 1, returns: 0, rate: 0 });
+  });
+
+  it("период считается по дате исходной заявки", () => {
+    const jobs = [
+      { id: "j1", status: "done", assigned_to: "t1", scheduled_date: "2026-07-20" },
+      { id: "j2", repeat_of: "j1", status: "done", assigned_to: "t1", scheduled_date: "2026-08-03" },
+    ];
+    // смотрим август: июльской заявки в нём нет, значит и возврата тоже
+    const august = guaranteeStats(jobs, { inPeriod: (d) => String(d).slice(0, 7) === "2026-08" });
+    expect(august).toEqual([]);
+    const july = guaranteeStats(jobs, { inPeriod: (d) => String(d).slice(0, 7) === "2026-07" });
+    expect(july[0]).toMatchObject({ done: 1, returns: 1 });
   });
 });

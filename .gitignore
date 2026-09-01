@@ -6,3 +6,7 @@ dist/
 .DS_Store
 graphify-out/
 .claude/settings.local.json
+
+# Дампы базы: содержат все данные клиентов, в репозиторий не попадают
+backups/
+supabase/.temp/
