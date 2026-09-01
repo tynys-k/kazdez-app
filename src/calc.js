@@ -178,6 +178,64 @@ export function executorShareAmt(job) {
   return Math.round((Number(job.report_paid) || 0) * (Number(job.executor_share_pct) || 0) / 100);
 }
 
+// --- ушедшие клиенты -----------------------------------------------------
+
+// Клиенты, которые обработались и больше не появлялись.
+//
+// Для дезинфекции это самый дешёвый источник заказов: человек уже платил,
+// адрес известен, сезон повторяется. В системе такого понятия не было — были
+// отменённые заявки, но это совсем другие люди.
+//
+// Кто НЕ считается ушедшим:
+//   — у кого есть незакрытая заявка: он не ушёл, он в работе;
+//   — кто приходил недавно: срок задаётся месяцами;
+//   — записи без телефона: писать всё равно некуда.
+//
+// Сортировка по выручке, а не по дате: сначала те, кого выгоднее вернуть.
+export function dormantClients(jobs = [], { months = 12, todayIso, phoneKeyOf, minRevenue = 0 } = {}) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const cutoff = (() => {
+    const d = new Date(`${today}T00:00:00`);
+    d.setMonth(d.getMonth() - months);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+
+  const byClient = new Map();
+  for (const job of jobs) {
+    const key = phoneKeyOf ? phoneKeyOf(job.client_phone) : String(job.client_phone || "");
+    if (!key) continue;
+    let c = byClient.get(key);
+    if (!c) {
+      c = { key, phone: job.client_phone, name: "", lastDone: null, jobs: 0, done: 0, revenue: 0, open: 0, pest: "", address: "" };
+      byClient.set(key, c);
+    }
+    const name = job.client_name || job.contact_name || "";
+    if (name && !c.name) c.name = name;
+    if (job.status === "canceled") continue;
+    c.jobs += 1;
+    if (job.status !== "done") { c.open += 1; continue; }
+    c.done += 1;
+    c.revenue += Number(job.report_paid) || 0;
+    const date = job.scheduled_date ? String(job.scheduled_date).slice(0, 10) : null;
+    if (date && (!c.lastDone || date > c.lastDone)) {
+      c.lastDone = date;
+      c.pest = job.pest || c.pest;
+      c.address = job.address || c.address;
+    }
+  }
+
+  return [...byClient.values()]
+    .filter((c) => c.done > 0 && c.open === 0 && c.lastDone && c.lastDone < cutoff && c.revenue >= minRevenue)
+    .map((c) => ({ ...c, monthsSince: Math.floor(monthsBetween(c.lastDone, today)) }))
+    .sort((a, b) => b.revenue - a.revenue || String(a.lastDone).localeCompare(String(b.lastDone)));
+}
+
+function monthsBetween(fromIso, toIso) {
+  const a = new Date(`${fromIso}T00:00:00`);
+  const b = new Date(`${toIso}T00:00:00`);
+  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) - (b.getDate() < a.getDate() ? 1 : 0);
+}
+
 // --- сравнение периодов --------------------------------------------------
 
 // Итоги периода: выручка, число выполненных заявок и средний чек.

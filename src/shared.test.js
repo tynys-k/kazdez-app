@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clientMemoFor, phoneKey, samePhone } from "./shared";
+import { clientMemoFor, phoneKey, samePhone, waLink, winbackMsg } from "./shared";
 
 describe("phoneKey", () => {
   it("склеивает записи одного номера в разных формах", () => {
@@ -50,5 +50,39 @@ describe("памятка клиенту", () => {
     const memo = clientMemoFor("Осы");
     expect(memo.before.length).toBeGreaterThan(0);
     expect(memo.after.length).toBeGreaterThan(0);
+  });
+});
+
+describe("ссылка в WhatsApp", () => {
+  it("приводит казахстанский номер через 8 к коду страны", () => {
+    expect(waLink("8 701 382 1617")).toBe("https://wa.me/77013821617");
+    expect(waLink("+7 701 382 1617")).toBe("https://wa.me/77013821617");
+  });
+
+  it("без номера ссылки нет", () => {
+    expect(waLink("")).toBeNull();
+    expect(waLink(null)).toBeNull();
+  });
+
+  it("текст уходит в ссылку закодированным", () => {
+    const link = waLink("87013821617", "Привет, это KazDez");
+    expect(link).toContain("?text=");
+    expect(link).not.toContain(" ");
+  });
+});
+
+describe("текст для возврата клиента", () => {
+  it("обращается по имени, если оно известно", () => {
+    expect(winbackMsg({ name: "Айгуль", monthsSince: 14, pest: "Тараканы" })).toContain("Айгуль, здравствуйте!");
+  });
+
+  it("без имени остаётся вежливым", () => {
+    const msg = winbackMsg({ monthsSince: 8 });
+    expect(msg).toContain("Здравствуйте!");
+    expect(msg).toContain("8 мес. назад");
+  });
+
+  it("год и больше не считает месяцами", () => {
+    expect(winbackMsg({ monthsSince: 20 })).toContain("больше года назад");
   });
 });

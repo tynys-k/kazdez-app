@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
@@ -325,6 +325,7 @@ function Dashboard({ session, profile }) {
   const [brandFilter, setBrandFilter] = useState("all");
   const [pOff, setPOff] = useState(0);
   const [daySort, setDaySort] = useState("order");     // order | revenue | count
+  const [dormantMonths, setDormantMonths] = useState(12);
   const [techSort, setTechSort] = useState("revenue"); // revenue | count | avg | markup
   const [pestSort, setPestSort] = useState("revenue"); // revenue | count | avg
   const [openWeeks, setOpenWeeks] = useState({});      // { [weekIdx]: true }
@@ -2173,6 +2174,9 @@ function Dashboard({ session, profile }) {
       stockValue: remaining * pricePerBase(c),
     };
   });
+  // Ушедшие клиенты: обработались и не появлялись дольше выбранного срока.
+  // Считается по ключу телефона, поэтому «+7 701 …» и «8 701 …» — один человек.
+  const dormant = calc.dormantClients(jobs, { months: dormantMonths, phoneKeyOf: phoneKey });
   const lowCount = inventory.filter((i) => i.low).length;
   // Допуски: считаем только по работающим сотрудникам — отключённые учётные
   // записи не должны висеть в предупреждениях вечно.
@@ -3316,6 +3320,39 @@ function Dashboard({ session, profile }) {
                 const phone = String(f.phone || "").replace(/\D/g, ""); const overdue = f.due_date && f.due_date < todayIso;
                 return <div key={f.id} className={overdue ? "overdue" : ""}><div><strong>{f.client_name || f.phone}</strong><span>{isoToRu(f.due_date)} · {({ lost: "возврат клиента", quality: "качество", review: "отзыв", upsell: "допродажа", contract: "абонент" })[f.kind] || f.kind}</span>{f.note && <small>{f.note}</small>}</div><div className="actions">{phone && <a className="kd-btn wa sm" href={`https://wa.me/${phone}`} target="_blank" rel="noreferrer"><MessageCircle size={14} />WhatsApp</a>}<button className="kd-btn ghost sm" onClick={() => setModal({ kind: "followup", followup: f })}>Изменить</button><button className="kd-btn primary sm" onClick={() => setFollowupDone(f)}>Готово</button></div></div>;
               })}</div>
+            </section>
+
+            <section className="kd-card">
+              <div className="kd-stage2head">
+                <div>
+                  <div className="kd-title">Не обращались дольше {dormantMonths} мес. · {dormant.length}</div>
+                  <div className="kd-muted">Уже платили, адрес известен, сезон повторяется — самый дешёвый источник заказов. Сверху те, кого выгоднее вернуть.</div>
+                </div>
+                <SortBar value={String(dormantMonths)} onChange={(v) => setDormantMonths(Number(v))}
+                  options={[["6", "6 мес."], ["9", "9 мес."], ["12", "год"], ["24", "2 года"]]} />
+              </div>
+              {dormant.length === 0 && <div className="kd-empty">Все клиенты обращались за последние {dormantMonths} мес. Либо срок слишком большой — попробуй короче.</div>}
+              <div className="kd-followlist">
+                {dormant.slice(0, 40).map((c) => {
+                  const link = waLink(c.phone, winbackMsg(c));
+                  return (
+                    <div key={c.key}>
+                      <div>
+                        <strong>{c.name || c.phone}</strong>
+                        <span>
+                          последняя обработка {isoToRu(c.lastDone)} · {c.monthsSince} мес. назад
+                          {c.pest ? ` · ${c.pest}` : ""} · заявок {c.done} на {fmt(c.revenue)} ₸
+                        </span>
+                      </div>
+                      <div className="kd-actions">
+                        {link && <a className="kd-btn primary sm" href={link} target="_blank" rel="noreferrer">Написать</a>}
+                        <button className="kd-btn ghost sm" onClick={() => copyText(winbackMsg(c), () => showToast("Текст скопирован"))}>Копировать текст</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {dormant.length > 40 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны первые 40 из {dormant.length} — по убыванию выручки.</div>}
             </section>
 
             <div className="kd-stage2grid">
