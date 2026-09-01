@@ -470,8 +470,11 @@ function Dashboard({ session, profile }) {
       // по паре сотрудник+препарат задаёт точку отсчёта (см. techLedger).
       supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
       Promise.resolve({ data: null, error: null }),
-      supabase.from("price_list").select("*").order("pest").order("area_from"),
+      // Порядок этих запросов обязан совпадать с порядком имён в разборе ниже:
+      // помощники (jhr), затем прайс (plr). Из-за перестановки доплаты помощникам
+      // читались как строки прайса и пропадали из зарплаты.
       supabase.from("job_helpers").select("*"),
+      supabase.from("price_list").select("*").order("pest").order("area_from"),
     ]);
     const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr] = responses;
     const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс"];
