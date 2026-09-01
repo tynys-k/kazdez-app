@@ -5,7 +5,7 @@ import {
   clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats, dayLoad,
   priceFor,
   turnoverReport, chemPriceOn, chemForecast, supplierPrices,
-  docStatus, docsNeedingAttention, guaranteeCostOf, guaranteeStats,
+  docStatus, docsNeedingAttention, guaranteeCostOf, guaranteeStats, dormantClients,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -885,5 +885,54 @@ describe("гарантийные возвраты", () => {
     expect(august).toEqual([]);
     const july = guaranteeStats(jobs, { inPeriod: (d) => String(d).slice(0, 7) === "2026-07" });
     expect(july[0]).toMatchObject({ done: 1, returns: 1 });
+  });
+});
+
+describe("ушедшие клиенты", () => {
+  const key = (p) => String(p || "").replace(/\D/g, "").slice(-10);
+  const today = "2026-09-01";
+
+  it("находит тех, кто обработался и не появлялся дольше срока", () => {
+    const jobs = [
+      { id: "1", client_phone: "+7 701 111 1111", client_name: "Айгуль", status: "done", scheduled_date: "2025-06-10", report_paid: 30000, pest: "Тараканы" },
+      { id: "2", client_phone: "+7 702 222 2222", status: "done", scheduled_date: "2026-08-10", report_paid: 40000 },
+    ];
+    const rows = dormantClients(jobs, { months: 12, todayIso: today, phoneKeyOf: key });
+    expect(rows.map((r) => r.name)).toEqual(["Айгуль"]);
+    expect(rows[0].monthsSince).toBe(14);
+  });
+
+  it("клиент с незакрытой заявкой не ушёл — он в работе", () => {
+    const jobs = [
+      { client_phone: "7011111111", status: "done", scheduled_date: "2024-01-10", report_paid: 30000 },
+      { client_phone: "7011111111", status: "new", scheduled_date: null },
+    ];
+    expect(dormantClients(jobs, { months: 12, todayIso: today, phoneKeyOf: key })).toEqual([]);
+  });
+
+  it("две формы одного номера — один клиент", () => {
+    const jobs = [
+      { client_phone: "+7 701 111 1111", status: "done", scheduled_date: "2024-01-10", report_paid: 30000 },
+      { client_phone: "8 701 111 1111", status: "done", scheduled_date: "2024-05-10", report_paid: 20000 },
+    ];
+    const rows = dormantClients(jobs, { months: 12, todayIso: today, phoneKeyOf: key });
+    expect(rows.length).toBe(1);
+    expect(rows[0].revenue).toBe(50000);
+    // срок считается от последней обработки, а не от первой
+    expect(rows[0].lastDone).toBe("2024-05-10");
+  });
+
+  it("отменённые заявки не делают человека клиентом", () => {
+    const jobs = [{ client_phone: "7011111111", status: "canceled", scheduled_date: "2024-01-10" }];
+    expect(dormantClients(jobs, { months: 12, todayIso: today, phoneKeyOf: key })).toEqual([]);
+  });
+
+  it("сверху те, кого выгоднее вернуть", () => {
+    const jobs = [
+      { client_phone: "7011111111", status: "done", scheduled_date: "2024-01-10", report_paid: 10000 },
+      { client_phone: "7022222222", status: "done", scheduled_date: "2024-02-10", report_paid: 90000 },
+    ];
+    const rows = dormantClients(jobs, { months: 12, todayIso: today, phoneKeyOf: key });
+    expect(rows.map((r) => r.revenue)).toEqual([90000, 10000]);
   });
 });
