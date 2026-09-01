@@ -12,6 +12,7 @@ import {
 // ----------------------------- helpers -----------------------------
 import { ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
+import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -3928,25 +3929,9 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
-        {!loading && tab === "materials" && (
-          <div className="kd-list">
-            <div className="kd-title" style={{ fontSize: 18, marginBottom: 4 }}>Материалы компании</div>
-            <div className="kd-muted" style={{ marginBottom: 8 }}>Маркетинг и техника безопасности.{isAdmin ? " Ссылки меняются в Настройках → «Ссылки на Google Диск»." : ""}</div>
-            {DRIVE_LINKS.filter((l) => l.place === "materials").map((l) => (
-              <DriveLinkCard key={l.key} link={l} url={settings[l.key]} isAdmin={isAdmin} />
-            ))}
-          </div>
-        )}
+        {!loading && tab === "materials" && <MaterialsTab settings={settings} isAdmin={isAdmin} />}
 
-        {!loading && tab === "knowledge" && (
-          <div className="kd-list">
-            <div className="kd-title" style={{ fontSize: 18, marginBottom: 4 }}>База знаний</div>
-            <div className="kd-muted" style={{ marginBottom: 8 }}>Обучение: скрипты продаж и разговора с клиентами.{isAdmin ? " Ссылки меняются в Настройках → «Ссылки на Google Диск»." : ""}</div>
-            {DRIVE_LINKS.filter((l) => l.place === "knowledge").map((l) => (
-              <DriveLinkCard key={l.key} link={l} url={settings[l.key]} isAdmin={isAdmin} />
-            ))}
-          </div>
-        )}
+        {!loading && tab === "knowledge" && <KnowledgeTab settings={settings} isAdmin={isAdmin} />}
 
         {!loading && tab === "docs" && (() => {
           const total = docs.reduce((s, d) => s + (Number(d.amount) || 0), 0);
@@ -3993,22 +3978,7 @@ function Dashboard({ session, profile }) {
           );
         })()}
 
-        {!loading && tab === "journal" && isAdmin && (
-          <div className="kd-card" style={{ marginBottom: 14 }}>
-            <div className="kd-section" style={{ marginTop: 0 }}>Сбои приложения{clientErrors.length ? ` · ${clientErrors.length}` : ""}</div>
-            {clientErrors.length === 0 && <div className="kd-muted">Сбоев не зафиксировано. Здесь появятся ошибки, которые раньше просто мелькали сообщением и исчезали.</div>}
-            {clientErrors.slice(0, 30).map((e) => (
-              <div className="kd-ledgerrow" key={e.id} style={{ gridTemplateColumns: "150px 1fr" }}>
-                <span className="kd-muted" style={{ textAlign: "left" }}>{fmtTs(e.occurred_at)}<br />{e.user_name || "—"}</span>
-                <span style={{ textAlign: "left", minWidth: 0 }}>
-                  <strong style={{ display: "block", color: e.kind === "crash" ? "var(--rust)" : "var(--ink)" }}>{e.message}</strong>
-                  <span className="kd-muted">{e.kind === "crash" ? "падение интерфейса" : e.place || "—"}</span>
-                </span>
-              </div>
-            ))}
-            {clientErrors.length > 30 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны последние 30 из {clientErrors.length}.</div>}
-          </div>
-        )}
+        {!loading && tab === "journal" && isAdmin && <ErrorsPanel errors={clientErrors} />}
 
         {!loading && tab === "journal" && (
           <div className="kd-card">
@@ -4025,23 +3995,7 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
-        {!loading && tab === "trash" && (
-          <div className="kd-list">
-            {trash.length === 0 && <div className="kd-empty">Корзина пуста. Удалённые заявки можно восстановить отсюда.</div>}
-            {trash.map((row) => (
-              <div key={row.id} className="kd-card">
-                <div className="kd-card-head"><div className="kd-pest">{row.job.pest}</div><span className="kd-muted">удалено {fmtTs(row.deleted_at)}</span></div>
-                <div className="kd-addr"><AddressText text={row.job.address} /></div>
-                <div className="kd-card-foot"><span className="kd-muted">Удалил: {row.deleted_by}</span>
-                  {row.job.report_paid != null && <span className="kd-muted">Было оплачено: {fmt(row.job.report_paid)} ₸</span>}</div>
-                <div className="kd-actions">
-                  <button className="kd-btn primary sm" onClick={() => restore(row)}>Восстановить</button>
-                  <button className="kd-btn ghost danger sm" onClick={() => purge(row)}>Удалить навсегда</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {!loading && tab === "trash" && <TrashTab trash={trash} onRestore={restore} onPurge={purge} />}
       </main>
       </div>
 
