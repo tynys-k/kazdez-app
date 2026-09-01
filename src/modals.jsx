@@ -1024,12 +1024,20 @@ function AddChemModal({ onClose, onSave }) {
   );
 }
 
-function StockInModal({ chem, onClose, onSave }) {
+function StockInModal({ chem, purchases = [], onClose, onSave }) {
   const [qty, setQty] = useState(""); const [price, setPrice] = useState(""); const [saving, setSaving] = useState(false);
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [supplier, setSupplier] = useState("");
   const u = chemUnit(chem.unit_kind);
+  // История нужна прямо здесь: перед тем как оформить приход, видно, у кого
+  // и почём брали раньше.
+  const hist = [...purchases].sort((a, b) => String(b.purchase_date).localeCompare(String(a.purchase_date)));
+  const prev = hist.find((p) => p.price_per_liter != null);
+  const diff = price && prev?.price_per_liter ? Number(price) - Number(prev.price_per_liter) : 0;
   async function save() {
     setSaving(true);
-    await onSave(chem, (Number(qty) || 0) * (u.factor || 1000), price ? Number(price) : null);
+    await onSave(chem, (Number(qty) || 0) * (u.factor || 1000), price ? Number(price) : null,
+      { purchase_date: date, supplier: supplier.trim() || null });
     setSaving(false);
   }
   return (
@@ -1039,7 +1047,29 @@ function StockInModal({ chem, onClose, onSave }) {
     </>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>Текущая цена: {fmt(chem.price_per_liter)} ₸/{u.big}</div>
       <Field label={`Докуплено (${u.big})`}><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
-      <Field label={`Новая цена за ${u.big} (если изменилась)`}><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="оставь пустым, если та же" /></Field>
+      <Field label={`Цена за ${u.big} в этом приходе`}><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="оставь пустым, если та же" /></Field>
+      {diff !== 0 && (
+        <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10, color: diff > 0 ? "var(--rust)" : "var(--green)" }}>
+          {diff > 0 ? "Дороже" : "Дешевле"} прошлого закупа на {fmt(Math.abs(diff))} ₸/{u.big}
+        </div>
+      )}
+      <Field label="Дата прихода"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      <Field label="Поставщик"><input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="у кого купили" /></Field>
+      <div className="kd-muted" style={{ marginTop: 4 }}>
+        Заявки считаются по цене на свою дату — задним числом прошлые отчёты уже не поедут.
+      </div>
+      {hist.length > 0 && (
+        <details className="kd-more" style={{ marginTop: 10 }}>
+          <summary>История закупа · {hist.length}</summary>
+          {hist.slice(0, 12).map((p) => (
+            <div className="kd-ledgerrow" key={p.id} style={{ gridTemplateColumns: "92px 1fr auto" }}>
+              <span className="kd-muted" style={{ textAlign: "left" }}>{isoToRu(p.purchase_date)}</span>
+              <span style={{ textAlign: "left" }}>{p.supplier || <em className="kd-muted" style={{ fontStyle: "normal" }}>поставщик не указан</em>}</span>
+              <strong>{p.price_per_liter != null ? `${fmt(p.price_per_liter)} ₸/${u.big}` : "—"}</strong>
+            </div>
+          ))}
+        </details>
+      )}
     </ModalShell>
   );
 }

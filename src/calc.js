@@ -9,7 +9,7 @@
 // Поведение сохранено ОДИН В ОДИН. Это перенос, а не переделка: любое
 // расхождение с прежними числами — ошибка, а не улучшение.
 
-import { lineAmount, norm, pricePerBase } from "./shared";
+import { chemUnit, lineAmount, norm, pricePerBase } from "./shared";
 
 // --- препараты по заявке -------------------------------------------------
 
@@ -20,10 +20,40 @@ export function lineChem(line, chemicals = []) {
   return chemicals.find((c) => norm(c.name) === norm(line.name));
 }
 
-// Себестоимость препаратов, потраченных на заявке.
-export function jobChemCost(job, chemicals = []) {
+// Цена препарата на конкретную дату.
+//
+// price_per_liter в карточке препарата — это ТЕКУЩАЯ цена: каждый приход её
+// перезаписывает. Считать по ней себестоимость старой заявки нельзя — прибыль
+// закрытого месяца начинает меняться задним числом от того, что сегодня
+// препарат привезли дороже. Поэтому берём цену из истории приходов: последний
+// приход на дату заявки или раньше.
+//
+// Если истории нет (препарат заведён до появления таблицы приходов, или дата
+// заявки не указана) — возвращаемся к текущей цене. Это прежнее поведение:
+// хуже, чем история, но не хуже, чем было.
+export function chemPriceOn(chem, dateIso, purchases = []) {
+  if (!chem) return 0;
+  if (dateIso) {
+    let best = null;
+    for (const p of purchases) {
+      if (String(p.chemical_id) !== String(chem.id)) continue;
+      if (!p.purchase_date || p.purchase_date > dateIso) continue;
+      if (p.price_per_liter == null) continue;
+      // Два прихода одним днём: берём тот, что записан позже.
+      const newer = !best || p.purchase_date > best.purchase_date
+        || (p.purchase_date === best.purchase_date && String(p.created_at || "") > String(best.created_at || ""));
+      if (newer) best = p;
+    }
+    if (best) return Number(best.price_per_liter) / (chemUnit(chem.unit_kind).factor || 1000);
+  }
+  return pricePerBase(chem);
+}
+
+// Себестоимость препаратов, потраченных на заявке, — по ценам на дату заявки.
+export function jobChemCost(job, chemicals = [], purchases = []) {
+  const on = job?.scheduled_date || null;
   return (job?.chemicals || []).reduce(
-    (sum, line) => sum + lineAmount(line) * pricePerBase(lineChem(line, chemicals)),
+    (sum, line) => sum + lineAmount(line) * chemPriceOn(lineChem(line, chemicals), on, purchases),
     0,
   );
 }
@@ -33,11 +63,11 @@ export function jobChemCost(job, chemicals = []) {
 // Обычная заявка: партнёру процент от суммы.
 // Совместная работа: процент от прибыли, а если препараты наши — партнёр
 // компенсирует свою долю их стоимости, поэтому она вычитается.
-export function partnerShareAmt(job, chemicals = []) {
+export function partnerShareAmt(job, chemicals = [], purchases = []) {
   if (!job?.partner_id || job.status !== "done") return 0;
   const paid = Number(job.report_paid) || 0;
   if (!job.joint_work) return Math.round(paid * (Number(job.partner_share) || 0) / 100);
-  const cost = jobChemCost(job, chemicals);
+  const cost = jobChemCost(job, chemicals, purchases);
   const profitShare = (paid - cost) * (Number(job.partner_share) || 0) / 100;
   const costOwed = job.joint_supplier === "us" ? cost * (Number(job.joint_cost_share) || 0) / 100 : 0;
   return Math.round(profitShare - costOwed);
@@ -51,11 +81,11 @@ export function executorShareAmt(job) {
 
 // --- экономика заявки ----------------------------------------------------
 
-export function jobEconomics(job, { chemicals = [], qrFeeRate = 0.0095, helpers = 0 } = {}) {
+export function jobEconomics(job, { chemicals = [], purchases = [], qrFeeRate = 0.0095, helpers = 0 } = {}) {
   const revenue = Number(job?.report_paid) || 0;
-  const chemicalsCost = Math.round(jobChemCost(job, chemicals));
+  const chemicalsCost = Math.round(jobChemCost(job, chemicals, purchases));
   const qrFee = Math.round((Number(job?.report_qr) || 0) * qrFeeRate);
-  const partnersCost = Math.max(0, partnerShareAmt(job, chemicals)) + executorShareAmt(job);
+  const partnersCost = Math.max(0, partnerShareAmt(job, chemicals, purchases)) + executorShareAmt(job);
   // Бонусы помощников — такие же прямые затраты, как бонус основного исполнителя.
   const techExtras = (Number(job?.tech_bonus) || 0) + (Number(job?.tech_travel) || 0) + (Number(helpers) || 0);
   const transport = Number(job?.transport_cost) || 0;
@@ -240,8 +270,8 @@ export function allocationPerJob(jobs = [], { profiles = [], opex = [] } = {}) {
 // Прибыль заявки с учётом труда и постоянных расходов.
 // Прямая прибыль (jobEconomics) остаётся как была: по ней видно, окупает ли
 // заявка сама себя, а полная показывает, зарабатывает ли на ней компания.
-export function jobFullEconomics(job, { chemicals = [], qrFeeRate = 0.0095, labor = 0, overhead = 0, helpers = 0 } = {}) {
-  const base = jobEconomics(job, { chemicals, qrFeeRate, helpers });
+export function jobFullEconomics(job, { chemicals = [], purchases = [], qrFeeRate = 0.0095, labor = 0, overhead = 0, helpers = 0 } = {}) {
+  const base = jobEconomics(job, { chemicals, purchases, qrFeeRate, helpers });
   const fullProfit = Math.round(base.profit - labor - overhead);
   return {
     ...base, labor, overhead, fullProfit,

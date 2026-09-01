@@ -278,6 +278,7 @@ function Dashboard({ session, profile }) {
   const [clientErrors, setClientErrors] = useState([]);
   const [jobHelpers, setJobHelpers] = useState([]);
   const [priceList, setPriceList] = useState([]);
+  const [chemPurchases, setChemPurchases] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -475,9 +476,10 @@ function Dashboard({ session, profile }) {
       // читались как строки прайса и пропадали из зарплаты.
       supabase.from("job_helpers").select("*"),
       supabase.from("price_list").select("*").order("pest").order("area_from"),
+      supabase.from("chemical_purchases").select("*").order("purchase_date", { ascending: false }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr, cpr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс", "Закуп препаратов"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     setReportChemsFailed(!!cr.error);
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
@@ -527,6 +529,7 @@ function Dashboard({ session, profile }) {
     setInventoryAdjustments(iar.data || []);
     setJobHelpers(jhr.data || []);
     setPriceList(plr.data || []);
+    setChemPurchases(cpr.data || []);
     if (!useOfflineSnapshot && !jr.error) {
       try {
         const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
@@ -707,7 +710,7 @@ function Dashboard({ session, profile }) {
   }
   const chemById = (id) => chemicals.find((x) => x.id === id);
   const lineChem = (l) => calc.lineChem(l, chemicals);
-  const jobChemCost = (job) => calc.jobChemCost(job, chemicals);
+  const jobChemCost = (job) => calc.jobChemCost(job, chemicals, chemPurchases);
   // Закрытие периода. Пока месяц открыт, цифры в нём можно править — и отчёт,
   // который смотрели вчера, сегодня покажет другое. Дата в настройках делает
   // прошлое неизменяемым: чтобы что-то исправить, придётся сознательно сдвинуть
@@ -1053,12 +1056,24 @@ function Dashboard({ session, profile }) {
     await logAction("Склад", `Новый препарат: ${c.name} (${fmtAmount(c.purchased_ml, c.unit_kind)})`);
     setModal(null); showToast("Препарат добавлен"); load();
   }
-  async function stockIn(chem, addMl, newPrice) {
+  async function stockIn(chem, addMl, newPrice, extra = {}) {
     const patch = { purchased_ml: (Number(chem.purchased_ml) || 0) + addMl };
     if (newPrice != null) patch.price_per_liter = newPrice;
     const { error } = await supabase.from("chemicals").update(patch).eq("id", chem.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
-    await logAction("Склад", `Приход: ${chem.name} +${fmtAmount(addMl, chem.unit_kind)}`);
+    // Карточка препарата хранит только текущую цену, и каждый приход её
+    // затирает. Поэтому приход записываем отдельной строкой: себестоимость
+    // старых заявок должна считаться по цене того дня, а не сегодняшней.
+    const price = newPrice != null ? newPrice : (Number(chem.price_per_liter) || null);
+    const { error: pError } = await supabase.from("chemical_purchases").insert({
+      chemical_id: chem.id,
+      purchase_date: extra.purchase_date || new Date().toISOString().slice(0, 10),
+      amount: addMl, price_per_liter: price,
+      supplier: extra.supplier || null, created_by: session.user.id,
+    });
+    if (pError) showToast("Приход оформлен, но в историю закупа не попал: " + pError.message);
+    const supplierNote = extra.supplier ? ` · ${extra.supplier}` : "";
+    await logAction("Склад", `Приход: ${chem.name} +${fmtAmount(addMl, chem.unit_kind)}${price != null ? ` по ${fmt(price)} ₸` : ""}${supplierNote}`);
     setModal(null); showToast("Приход оформлен"); load();
   }
   async function removeChem(chem) {
@@ -1084,9 +1099,9 @@ function Dashboard({ session, profile }) {
     if (job.brand === "partner" || job.partner_id || job.partner_name) return `Партнёр · ${partnerNameOf(job)}`;
     return "KazDez";
   }
-  const partnerShareAmt = (job) => calc.partnerShareAmt(job, chemicals);
+  const partnerShareAmt = (job) => calc.partnerShareAmt(job, chemicals, chemPurchases);
   const executorShareAmt = (job) => calc.executorShareAmt(job);
-  const jobEconomics = (job) => calc.jobEconomics(job, { chemicals, qrFeeRate, helpers: calc.helpersTotal(job.id, jobHelpers) });
+  const jobEconomics = (job) => calc.jobEconomics(job, { chemicals, purchases: chemPurchases, qrFeeRate, helpers: calc.helpersTotal(job.id, jobHelpers) });
   function upsellFor(job) {
     const text = norm(`${job.pest || ""} ${job.address || ""} ${job.note || ""}`);
     if (/склад|цех|производ|общепит|кафе|ресторан/.test(text)) return "регулярное абонентское обслуживание и мониторинг объекта";
@@ -2118,7 +2133,7 @@ function Dashboard({ session, profile }) {
   const allocFor = calc.allocationPerJob(jobs, { profiles: allProfiles, opex });
   const completedEconomics = doneJobs.map((job) => {
     const { labor, overhead } = allocFor(job);
-    return { job, econ: calc.jobFullEconomics(job, { chemicals, qrFeeRate, labor, overhead, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
+    return { job, econ: calc.jobFullEconomics(job, { chemicals, purchases: chemPurchases, qrFeeRate, labor, overhead, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
   });
   const totalJobProfit = completedEconomics.reduce((s, r) => s + r.econ.profit, 0);
   const totalFullProfit = completedEconomics.reduce((s, r) => s + r.econ.fullProfit, 0);
@@ -4086,7 +4101,7 @@ function Dashboard({ session, profile }) {
         onClose={() => setModal(null)}
         onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : canEditJobs ? { kind: "edit", job: j } : { kind: "details", job: j })} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
-      {modal?.kind === "stockin" && <StockInModal chem={modal.chem} onClose={() => setModal(null)} onSave={stockIn} />}
+      {modal?.kind === "stockin" && <StockInModal chem={modal.chem} purchases={chemPurchases.filter((p) => String(p.chemical_id) === String(modal.chem.id))} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
