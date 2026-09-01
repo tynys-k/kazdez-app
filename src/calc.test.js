@@ -4,6 +4,7 @@ import {
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
   clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats, dayLoad,
   priceFor,
+  turnoverReport,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -624,5 +625,56 @@ describe("прайс", () => {
   it("дыра в прайсе честно возвращает пусто, а не соседнюю цену", () => {
     const holed = [{ pest: "Клопы", area_from: 0, area_to: 40, price: 25000 }];
     expect(priceFor("Клопы", 100, holed)).toBeNull();
+  });
+});
+
+describe("оборот для отчётности", () => {
+  const j = (over) => ({ status: "done", scheduled_date: "2026-08-10", report_cash: 0, report_qr: 0, report_transfer: 0, brand: "KazDez", ...over });
+
+  it("разделяет наличные и официальные поступления", () => {
+    const r = turnoverReport([
+      j({ report_cash: 30000 }),
+      j({ report_qr: 20000 }),
+    ]);
+    expect(r.cash).toBe(30000);
+    expect(r.official).toBe(20000);
+    expect(r.total).toBe(50000);
+    expect(r.officialShare).toBe(40);
+  });
+
+  it("неоплаченное перечисление в оборот не идёт — денег ещё нет", () => {
+    const r = turnoverReport([
+      j({ report_transfer: 100000, transfer_paid: false }),
+      j({ report_transfer: 50000, transfer_paid: true }),
+    ]);
+    expect(r.transfer).toBe(50000);
+    expect(r.transferPending).toBe(100000);
+    expect(r.total).toBe(50000);
+  });
+
+  it("разбивка по юрлицу считает и заявки, и суммы", () => {
+    const r = turnoverReport([
+      j({ brand: "KazDez", report_cash: 10000 }),
+      j({ brand: "Sanitex", report_qr: 40000 }),
+      j({ brand: "Sanitex", report_cash: 5000 }),
+    ]);
+    const san = r.byBrand.find((b) => b.brand === "Sanitex");
+    expect(san.jobs).toBe(2);
+    expect(san.total).toBe(45000);
+    expect(r.byBrand[0].brand).toBe("Sanitex"); // сортировка по обороту
+  });
+
+  it("невыполненные заявки и чужой период не считаются", () => {
+    const r = turnoverReport([
+      j({ status: "new", report_cash: 99999 }),
+      j({ scheduled_date: "2026-07-01", report_cash: 88888 }),
+      j({ report_cash: 1000 }),
+    ], { inPeriod: (d) => String(d).startsWith("2026-08") });
+    expect(r.total).toBe(1000);
+    expect(r.jobs).toBe(1);
+  });
+
+  it("пустой период не делит на ноль", () => {
+    expect(turnoverReport([]).officialShare).toBe(0);
   });
 });
