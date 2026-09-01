@@ -2093,9 +2093,20 @@ function Dashboard({ session, profile }) {
   const inventory = chemicals.map((c) => {
     const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => (x.chemical_id ? x.chemical_id === c.id : norm(x.name) === norm(c.name))).reduce((a, x) => a + lineAmount(x), 0), 0);
     const remaining = (Number(c.purchased_ml) || 0) - used;
-    return { ...c, used, remaining, low: remaining <= (Number(c.min_ml) || 0), stockValue: remaining * pricePerBase(c) };
+    // Прогноз считается по расходу за последние три месяца, а не за всю
+    // историю: иначе препарат, полгода пролежавший без дела, выглядит
+    // расходуемым по капле ровно перед сезоном.
+    const forecast = calc.chemForecast(c, { jobs, remaining });
+    const suppliers = calc.supplierPrices(c.id, chemPurchases);
+    return {
+      ...c, used, remaining, forecast, suppliers,
+      low: remaining <= (Number(c.min_ml) || 0),
+      orderSoon: forecast?.daysLeft != null && forecast.daysLeft <= 14,
+      stockValue: remaining * pricePerBase(c),
+    };
   });
   const lowCount = inventory.filter((i) => i.low).length;
+  const orderSoonCount = inventory.filter((i) => i.orderSoon).length;
   const totalStockValue = inventory.reduce((s, c) => s + c.stockValue, 0);
   const equipIssuedQty = (equipId) => equipHandouts.filter((h) => h.equipment_id === equipId && h.status === "with_tech").reduce((s, h) => s + (Number(h.qty) || 0), 0);
   const totalEquipValue = equipment.reduce((s, e) => s + equipIssuedQty(e.id) * (Number(e.price) || 0), 0);
@@ -2232,6 +2243,9 @@ function Dashboard({ session, profile }) {
     leadSla.lateReaction ? { id: "lead-sla", label: `Лиды без ответа дольше ${leadSla.reactionHours} ч`, value: leadSla.lateReaction, tab: "leads", tone: "danger" } : null,
     pendingDeposits.length ? { id: "cash", label: "Наличка ждёт подтверждения", value: pendingDeposits.length, tab: "cash", tone: "warning" } : null,
     isAdmin && lowCount ? { id: "stock", label: "Заканчиваются препараты", value: lowCount, tab: "stock", tone: "danger" } : null,
+    // Предупреждение до того, как остаток стал критическим: по расходу видно,
+    // что заказывать надо уже сейчас, иначе закупка пойдёт впопыхах.
+    isAdmin && orderSoonCount ? { id: "stockorder", label: "Пора заказывать препараты", value: orderSoonCount, tab: "stock", tone: "warning" } : null,
     isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
     isAdmin && dueFollowups.length ? { id: "client-followups", label: "Пора связаться с клиентами", value: dueFollowups.length, tab: "retention", tone: "warning" } : null,
     isAdmin && qualityPending.length ? { id: "quality", label: "Ждут контроля качества", value: qualityPending.length, tab: "retention", tone: "warning" } : null,
@@ -3799,7 +3813,7 @@ function Dashboard({ session, profile }) {
             {inventory.map((c) => (
               <div key={c.id} className={`kd-card ${c.low ? "low" : ""}`}>
                 <div className="kd-card-head">
-                  <div className="kd-pest">{c.name}{c.low && <span className="kd-lowtag">мало</span>}</div>
+                  <div className="kd-pest">{c.name}{c.low && <span className="kd-lowtag">мало</span>}{c.orderSoon && !c.low && <span className="kd-lowtag">пора заказывать</span>}</div>
                   <span className="kd-muted">{fmt(c.price_per_liter)} ₸/{chemUnit(c.unit_kind).big}</span>
                 </div>
                 <div className="kd-stockgrid">
@@ -3807,7 +3821,41 @@ function Dashboard({ session, profile }) {
                   <div><span>Ушло</span><strong>{fmtAmount(c.used, c.unit_kind)}</strong></div>
                   <div><span>Остаток</span><strong style={{ color: c.low ? "#B42318" : "var(--primary)" }}>{fmtAmount(c.remaining, c.unit_kind)}</strong></div>
                   <div><span>Стоимость остатка</span><strong>{fmt(c.stockValue)} ₸</strong></div>
+                  <div title={c.forecast?.basedOnDays ? `По расходу за последние ${c.forecast.basedOnDays} дн.` : ""}>
+                    <span>Расход в месяц</span>
+                    <strong>{c.forecast?.perMonth ? fmtAmount(Math.round(c.forecast.perMonth), c.unit_kind) : "—"}</strong>
+                  </div>
+                  <div>
+                    <span>Хватит на</span>
+                    <strong style={{ color: c.orderSoon ? "var(--rust)" : undefined }}>
+                      {c.forecast?.daysLeft != null ? `${c.forecast.daysLeft} дн.` : "—"}
+                    </strong>
+                  </div>
                 </div>
+                {c.forecast?.orderByIso && (
+                  <div className="kd-muted" style={{ marginTop: 6, color: c.orderSoon ? "var(--rust)" : undefined }}>
+                    Заказать до {isoToRu(c.forecast.orderByIso)} — с запасом недели на доставку.
+                  </div>
+                )}
+                {!c.forecast?.daysLeft && !c.forecast?.perMonth && (
+                  <div className="kd-muted" style={{ marginTop: 6 }}>Расхода за последние три месяца нет — срок жизни остатка посчитать не из чего.</div>
+                )}
+                {c.suppliers.length > 0 && (
+                  <details className="kd-more" style={{ marginTop: 8 }}>
+                    <summary>Поставщики · {c.suppliers.length}{c.suppliers.length > 1 ? ` · дешевле всех ${c.suppliers[0].supplier}` : ""}</summary>
+                    <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1fr 110px 110px 90px" }}>
+                      <span>Поставщик</span><span>Последняя цена</span><span>Разброс</span><span>Приходов</span>
+                    </div>
+                    {c.suppliers.map((sp) => (
+                      <div className="kd-ledgerrow" key={sp.supplier} style={{ gridTemplateColumns: "1fr 110px 110px 90px" }}>
+                        <span style={{ textAlign: "left" }}>{sp.supplier}<em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>с {isoToRu(sp.lastDate)}</em></span>
+                        <strong>{fmt(sp.lastPrice)} ₸</strong>
+                        <span className="kd-muted">{sp.minPrice === sp.maxPrice ? "—" : `${fmt(sp.minPrice)}–${fmt(sp.maxPrice)}`}</span>
+                        <span className="kd-muted">{sp.count} · {fmtAmount(sp.amount, c.unit_kind)}</span>
+                      </div>
+                    ))}
+                  </details>
+                )}
                 {isAdmin && (
                   <div className="kd-actions">
                     <button className="kd-btn primary sm" onClick={() => setModal({ kind: "stockin", chem: c })}>+ Приход</button>

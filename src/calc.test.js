@@ -4,7 +4,7 @@ import {
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
   clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats, dayLoad,
   priceFor,
-  turnoverReport, chemPriceOn,
+  turnoverReport, chemPriceOn, chemForecast, supplierPrices,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -722,5 +722,75 @@ describe("цена препарата на дату", () => {
     const june = jobEconomics(job, { chemicals: [chem], purchases });
     expect(june.chemicals).toBe(1000);
     expect(june.profit).toBe(29000);
+  });
+});
+
+describe("прогноз закупа", () => {
+  const chem = { id: "c1", name: "Дельта", unit_kind: "volume" };
+  // 90 дней ровно: 4 заявки по 1000 мл, расход виден с первого дня окна
+  const jobs = [
+    { status: "done", scheduled_date: "2026-06-05", chemicals: [{ chemical_id: "c1", amount: 1000 }] },
+    { status: "done", scheduled_date: "2026-07-05", chemicals: [{ chemical_id: "c1", amount: 1000 }] },
+    { status: "done", scheduled_date: "2026-08-05", chemicals: [{ chemical_id: "c1", amount: 1000 }] },
+    { status: "done", scheduled_date: "2026-08-25", chemicals: [{ chemical_id: "c1", amount: 1000 }] },
+  ];
+
+  it("считает расход в месяц и на сколько хватит остатка", () => {
+    const f = chemForecast(chem, { jobs, remaining: 4000, todayIso: "2026-09-01" });
+    // 4000 мл за 89 дней с первой заявки → около 1348 мл в месяц
+    expect(f.used).toBe(4000);
+    expect(Math.round(f.perMonth)).toBe(1348);
+    expect(f.daysLeft).toBe(89);
+    expect(f.orderByIso).toBe("2026-11-22"); // за неделю до конца остатка
+  });
+
+  it("отменённые заявки и чужие препараты в расход не идут", () => {
+    const noise = [
+      ...jobs,
+      { status: "canceled", scheduled_date: "2026-08-20", chemicals: [{ chemical_id: "c1", amount: 5000 }] },
+      { status: "done", scheduled_date: "2026-08-20", chemicals: [{ chemical_id: "c2", amount: 5000 }] },
+    ];
+    expect(chemForecast(chem, { jobs: noise, remaining: 0, todayIso: "2026-09-01" }).used).toBe(4000);
+  });
+
+  it("старый расход за пределами окна не учитывается", () => {
+    const old = [{ status: "done", scheduled_date: "2025-01-01", chemicals: [{ chemical_id: "c1", amount: 9000 }] }];
+    const f = chemForecast(chem, { jobs: old, remaining: 1000, todayIso: "2026-09-01" });
+    expect(f.used).toBe(0);
+    expect(f.perMonth).toBe(0);
+    // без расхода срок жизни остатка неизвестен — это честнее, чем «хватит навсегда»
+    expect(f.daysLeft).toBeNull();
+    expect(f.orderByIso).toBeNull();
+  });
+
+  it("новый препарат не выглядит экономным из-за короткой истории", () => {
+    const fresh = [{ status: "done", scheduled_date: "2026-08-30", chemicals: [{ chemical_id: "c1", amount: 300 }] }];
+    const f = chemForecast(chem, { jobs: fresh, remaining: 300, todayIso: "2026-09-01" });
+    // 300 мл за 3 дня, а не за 90 — иначе прогноз занижен в тридцать раз
+    expect(f.basedOnDays).toBe(3);
+    expect(f.daysLeft).toBe(3);
+  });
+});
+
+describe("цены поставщиков", () => {
+  const purchases = [
+    { chemical_id: "c1", supplier: "Химснаб", purchase_date: "2026-06-01", price_per_liter: 12000, amount: 5000 },
+    { chemical_id: "c1", supplier: "Химснаб", purchase_date: "2026-08-01", price_per_liter: 14000, amount: 5000 },
+    { chemical_id: "c1", supplier: "АгроЛига", purchase_date: "2026-07-15", price_per_liter: 11000, amount: 3000 },
+    { chemical_id: "c2", supplier: "Химснаб", purchase_date: "2026-08-01", price_per_liter: 99000, amount: 1000 },
+  ];
+
+  it("сводит поставщиков по последней цене, дешёвый первым", () => {
+    const rows = supplierPrices("c1", purchases);
+    expect(rows.map((r) => r.supplier)).toEqual(["АгроЛига", "Химснаб"]);
+    expect(rows[1].lastPrice).toBe(14000);
+    expect(rows[1].minPrice).toBe(12000);
+    expect(rows[1].count).toBe(2);
+    expect(rows[1].amount).toBe(10000);
+  });
+
+  it("приходы без поставщика не теряются", () => {
+    const rows = supplierPrices("c1", [{ chemical_id: "c1", purchase_date: "2026-06-01", price_per_liter: 10000 }]);
+    expect(rows[0].supplier).toBe("поставщик не указан");
   });
 });

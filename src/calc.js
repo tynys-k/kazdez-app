@@ -58,6 +58,79 @@ export function jobChemCost(job, chemicals = [], purchases = []) {
   );
 }
 
+// --- закуп: поставщики и прогноз -----------------------------------------
+
+const ISO_DAY = 86400000;
+const isoShift = (iso, days) => {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const isoDiffDays = (from, to) => Math.round((new Date(`${to}T00:00:00`) - new Date(`${from}T00:00:00`)) / ISO_DAY);
+
+// Сколько препарата ушло по заявкам за отрезок времени.
+function chemUsedBetween(chem, jobs, fromIso, toIso) {
+  let used = 0;
+  let firstIso = null;
+  for (const j of jobs) {
+    if (j.status !== "done" || !j.scheduled_date) continue;
+    const d = String(j.scheduled_date).slice(0, 10);
+    if (d < fromIso || d > toIso) continue;
+    const amount = (j.chemicals || [])
+      .filter((x) => (x.chemical_id ? String(x.chemical_id) === String(chem.id) : norm(x.name) === norm(chem.name)))
+      .reduce((a, x) => a + lineAmount(x), 0);
+    if (amount > 0) {
+      used += amount;
+      if (!firstIso || d < firstIso) firstIso = d;
+    }
+  }
+  return { used, firstIso };
+}
+
+// Прогноз по препарату: сколько уходит в месяц и на сколько хватит остатка.
+//
+// Считаем по фактическому расходу за последние windowDays дней, а не за всю
+// историю: препарат мог полгода пролежать без дела, и среднее занизится ровно
+// перед сезоном. Если препарат в ходу меньше окна, делим на реальный срок —
+// иначе новинка выглядит так, будто почти не расходуется.
+//
+// leadDays — запас на доставку: дата «заказать до» отсчитывается назад от дня,
+// когда остаток кончится.
+export function chemForecast(chem, { jobs = [], remaining = 0, todayIso, windowDays = 90, leadDays = 7 } = {}) {
+  if (!chem) return null;
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const { used, firstIso } = chemUsedBetween(chem, jobs, isoShift(today, -windowDays), today);
+  const spanDays = firstIso ? Math.max(1, isoDiffDays(firstIso, today) + 1) : windowDays;
+  const basedOnDays = Math.min(windowDays, spanDays);
+  const perDay = used > 0 ? used / basedOnDays : 0;
+  const left = Math.max(0, Number(remaining) || 0);
+  const daysLeft = perDay > 0 ? Math.floor(left / perDay) : null;
+  return {
+    used, basedOnDays, perDay, perMonth: perDay * 30, daysLeft,
+    orderByIso: daysLeft == null ? null : isoShift(today, Math.max(0, daysLeft - leadDays)),
+  };
+}
+
+// Кто сколько просит за препарат. Первым идёт самый дешёвый по последней цене —
+// именно этот порядок нужен, когда решаешь, у кого брать в следующий раз.
+export function supplierPrices(chemId, purchases = []) {
+  const by = new Map();
+  for (const p of purchases) {
+    if (String(p.chemical_id) !== String(chemId) || p.price_per_liter == null) continue;
+    const key = (p.supplier || "").trim() || "поставщик не указан";
+    const price = Number(p.price_per_liter);
+    const date = String(p.purchase_date || "");
+    const cur = by.get(key) || { supplier: key, count: 0, amount: 0, minPrice: price, maxPrice: price, lastPrice: null, lastDate: "" };
+    cur.count += 1;
+    cur.amount += Number(p.amount) || 0;
+    cur.minPrice = Math.min(cur.minPrice, price);
+    cur.maxPrice = Math.max(cur.maxPrice, price);
+    if (date >= cur.lastDate) { cur.lastDate = date; cur.lastPrice = price; }
+    by.set(key, cur);
+  }
+  return [...by.values()].sort((a, b) => (a.lastPrice ?? Infinity) - (b.lastPrice ?? Infinity));
+}
+
 // --- доли партнёров ------------------------------------------------------
 
 // Обычная заявка: партнёру процент от суммы.
