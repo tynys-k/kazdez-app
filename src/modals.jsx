@@ -1257,17 +1257,26 @@ function ExpenseModal({ tech, onClose, onSave }) {
 
 // Выплата зарплаты с проведением по кассе: в отличие от ExpenseModal здесь
 // обязателен счёт — по нему создаётся расходное движение, и остаток уменьшается.
-function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, onSave }) {
+function PayrollPayModal({ tech, owed, existing = null, accounts = [], period = null, paidRows = [], onClose, onSave }) {
   const [type, setType] = useState(existing?.type || "salary");
   const [amount, setAmount] = useState(existing ? String(existing.amount ?? "") : (owed > 0 ? String(owed) : ""));
-  const [payDate, setPayDate] = useState(existing?.expense_date || new Date().toISOString().slice(0, 10));
+  // Дата по умолчанию обязана попадать в показанный период. Иначе выплата за
+  // август уходит сентябрьским числом, в августовской таблице не появляется,
+  // и человек жмёт кнопку повторно, задваивая деньги.
+  const today = new Date().toISOString().slice(0, 10);
+  const withinPeriod = (iso) => !period || (iso >= period.startIso && iso <= period.endIso);
+  const [payDate, setPayDate] = useState(existing?.expense_date || (withinPeriod(today) ? today : period.endIso));
   const [accountId, setAccountId] = useState(existing?.account_id || accounts[0]?.id || "");
   const [note, setNote] = useState(existing?.note || "");
   const [saving, setSaving] = useState(false);
   // Причину отказа показываем прямо в окне и не закрываем его: всплывающее
   // сообщение легко пропустить, и тогда кажется, что кнопка просто не работает.
   const [problem, setProblem] = useState("");
-  const ok = Number(amount) > 0 && payDate && accountId;
+  // Повтор той же суммы тем же днём — почти всегда случайное второе нажатие.
+  const [dupOk, setDupOk] = useState(false);
+  const outside = payDate && !withinPeriod(payDate);
+  const duplicate = !existing && paidRows.some((r) => r.expense_date === payDate && Number(r.amount) === Number(amount));
+  const ok = Number(amount) > 0 && payDate && accountId && (!duplicate || dupOk);
   async function save() {
     setSaving(true); setProblem("");
     const failed = await onSave({ tech_id: tech.id, type, amount: Number(amount) || 0, expense_date: payDate, account_id: accountId, note: note.trim() || null });
@@ -1280,6 +1289,19 @@ function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, 
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Выплатить"}</button>
     </>}>
       {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      {duplicate && (
+        <div className="kd-err" style={{ marginBottom: 12 }}>
+          Такая выплата уже записана: {fmt(amount)} ₸ этим же днём. Скорее всего кнопка нажата повторно.
+          <label style={{ display: "block", marginTop: 6, fontWeight: 500 }}>
+            <input type="checkbox" checked={dupOk} onChange={(e) => setDupOk(e.target.checked)} /> Да, это отдельная вторая выплата
+          </label>
+        </div>
+      )}
+      {outside && !duplicate && (
+        <div className="kd-hint" style={{ marginBottom: 12 }}>
+          Дата выплаты вне периода «{period.label}» — в этой таблице она не появится, ищи её в своём периоде.
+        </div>
+      )}
       <div className="kd-row" style={{ marginBottom: 12 }}><span>{existing ? "Начислено ранее, ещё не проведено" : "К выплате за период"}</span><strong>{fmt(owed)} ₸</strong></div>
       <div className="kd-grid2">
         <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="0" /></Field>

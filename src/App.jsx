@@ -1223,7 +1223,11 @@ function Dashboard({ session, profile }) {
       try {
         await logAction("Выплата", `${tech.full_name || "?"} · ${EXPENSE_TYPES[payload.type] || payload.type} · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
       } catch { /* журнал не должен мешать выплате */ }
-      setModal(null); showToast("Выплата проведена"); load(); return null;
+      setModal(null); load();
+      showToast(inPeriodIso(payload.expense_date)
+        ? "Выплата проведена"
+        : `Выплата проведена, но её дата вне периода «${range.label}» — в этой таблице она не появится.`);
+      return null;
     } catch (e) {
       return payoutCrash(e, "Зарплата · выплата");
     }
@@ -1985,6 +1989,16 @@ function Dashboard({ session, profile }) {
   // заявкам периода. Выплачено = проведённые tech_expenses периода. Разница — долг.
   // Оклад намеренно не делим на недели: это месячная величина, дробить её некорректно.
   const payrollSalaryCounts = pMode === "month";
+  // Окну выплаты нужны границы показанного периода: дата по умолчанию должна
+  // попадать именно в него. Выплата за август, проставленная сегодняшним
+  // сентябрьским числом, в августовской таблице не появляется — и человек
+  // жмёт кнопку снова и снова, задваивая выплаты.
+  const payrollPeriod = pMode === "all" ? null : {
+    label: range.label,
+    startIso: isoOf(new Date(range.start)),
+    endIso: isoOf(new Date(range.end - 86400000)),
+  };
+
   const payrollRows = techs.map((t) => {
     const jobsOf = jobs.filter((j) => j.assigned_to === t.id && j.status === "done" && inPeriodIso(j.scheduled_date));
     const ownBonus = jobsOf.reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
@@ -4156,7 +4170,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
-      {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} existing={modal.expense} accounts={accounts} onClose={() => setModal(null)} onSave={(payload) => (modal.expense ? payExistingExpense(modal.tech, modal.expense, payload) : savePayrollPayment(modal.tech, payload))} />}
+      {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} existing={modal.expense} accounts={accounts} period={payrollPeriod} paidRows={expenses.filter((e) => e.tech_id === modal.tech.id && e.status === "paid")} onClose={() => setModal(null)} onSave={(payload) => (modal.expense ? payExistingExpense(modal.tech, modal.expense, payload) : savePayrollPayment(modal.tech, payload))} />}
       {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
       {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
