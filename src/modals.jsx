@@ -1264,10 +1264,14 @@ function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, 
   const [accountId, setAccountId] = useState(existing?.account_id || accounts[0]?.id || "");
   const [note, setNote] = useState(existing?.note || "");
   const [saving, setSaving] = useState(false);
+  // Причину отказа показываем прямо в окне и не закрываем его: всплывающее
+  // сообщение легко пропустить, и тогда кажется, что кнопка просто не работает.
+  const [problem, setProblem] = useState("");
   const ok = Number(amount) > 0 && payDate && accountId;
   async function save() {
-    setSaving(true);
-    await onSave({ tech_id: tech.id, type, amount: Number(amount) || 0, expense_date: payDate, account_id: accountId, note: note.trim() || null });
+    setSaving(true); setProblem("");
+    const failed = await onSave({ tech_id: tech.id, type, amount: Number(amount) || 0, expense_date: payDate, account_id: accountId, note: note.trim() || null });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Выплата не прошла.");
     setSaving(false);
   }
   return (
@@ -1275,6 +1279,7 @@ function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, 
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Выплатить"}</button>
     </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-row" style={{ marginBottom: 12 }}><span>{existing ? "Начислено ранее, ещё не проведено" : "К выплате за период"}</span><strong>{fmt(owed)} ₸</strong></div>
       <div className="kd-grid2">
         <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
@@ -1291,6 +1296,11 @@ function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, 
       </div>
       {accounts.length === 0 && <div className="kd-hint">Счетов пока нет — заведи их в разделе «Счета и расходы», иначе выплату некуда провести.</div>}
       <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за август / аванс" /></Field>
+      {!ok && !problem && (
+        <div className="kd-muted" style={{ marginTop: 8 }}>
+          Кнопка станет активной, когда заполнены сумма, дата и счёт{!accountId ? " — счёт сейчас не выбран" : ""}.
+        </div>
+      )}
       <div className="kd-muted" style={{ marginTop: 8 }}>Сумма спишется с выбранного счёта — остаток в разделе «Счета и расходы» уменьшится.</div>
     </ModalShell>
   );

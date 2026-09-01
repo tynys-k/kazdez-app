@@ -1174,32 +1174,45 @@ function Dashboard({ session, profile }) {
     if (error) showToast("Выплата записана, но по кассе не провелась: " + error.message);
   }
   // Новая выплата из раздела «Зарплата».
+  // Ошибка базы в лицо пользователю мало что говорит. Самый частый случай —
+  // не выполнена миграция, и тогда надо назвать файл, а не код PostgREST.
+  function payoutProblem(error) {
+    const msg = error?.message || "неизвестная ошибка";
+    if (/account_id|paid_at|salary_monthly|schema cache/i.test(msg)) {
+      return `В базе нет колонок для выплат. Выполни supabase/2026-09-01_payroll_columns.sql в Supabase → SQL Editor. Ответ базы: ${msg}`;
+    }
+    if (/permission|row-level security|policy/i.test(msg)) {
+      return `Недостаточно прав на запись выплаты. Ответ базы: ${msg}`;
+    }
+    return msg;
+  }
+
   async function savePayrollPayment(tech, payload) {
-    if (blockedByClosedPeriod(payload.expense_date)) return false;
+    if (blockedByClosedPeriod(payload.expense_date)) return "Период закрыт — выплату этой датой провести нельзя. Дату закрытия можно сдвинуть в Настройках.";
     const { data: created, error } = await supabase.from("tech_expenses").insert({
       tech_id: payload.tech_id, type: payload.type, amount: payload.amount,
       expense_date: payload.expense_date, account_id: payload.account_id || null,
       paid_at: payload.expense_date, status: "paid", note: payload.note,
       created_by: session.user.id,
     }).select().single();
-    if (error) { showToast("Ошибка: " + error.message); return false; }
+    if (error) { showToast("Ошибка: " + error.message); return payoutProblem(error); }
     await postPayoutToCash(created, tech);
     await logAction("Выплата", `${tech.full_name || "?"} · ${EXPENSE_TYPES[payload.type] || payload.type} · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
-    setModal(null); showToast("Выплата проведена"); load(); return true;
+    setModal(null); showToast("Выплата проведена"); load(); return null;
   }
   // Старое начисление, заведённое до того, как выплаты стали проводиться по кассе.
   // Проводим ту же запись, а не создаём новую — иначе сумма задвоится в отчётах.
   async function payExistingExpense(tech, expense, payload) {
-    if (blockedByClosedPeriod(payload.expense_date) || blockedByClosedPeriod(expense.expense_date)) return false;
+    if (blockedByClosedPeriod(payload.expense_date) || blockedByClosedPeriod(expense.expense_date)) return "Период закрыт — выплату этой датой провести нельзя. Дату закрытия можно сдвинуть в Настройках.";
     const { data: updated, error } = await supabase.from("tech_expenses").update({
       status: "paid", account_id: payload.account_id || null,
       expense_date: payload.expense_date, paid_at: payload.expense_date,
       amount: payload.amount, type: payload.type, note: payload.note,
     }).eq("id", expense.id).select().single();
-    if (error) { showToast("Ошибка: " + error.message); return false; }
+    if (error) { showToast("Ошибка: " + error.message); return payoutProblem(error); }
     await postPayoutToCash(updated, tech);
     await logAction("Выплата", `${tech?.full_name || "?"} · проведено по кассе · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
-    setModal(null); showToast("Выплата проведена"); load(); return true;
+    setModal(null); showToast("Выплата проведена"); load(); return null;
   }
   async function removeExpense(e) {
     if (blockedByClosedPeriod(e.expense_date)) return;
