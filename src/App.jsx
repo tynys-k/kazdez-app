@@ -400,6 +400,22 @@ function Dashboard({ session, profile }) {
       if (from > 100000) return { data: all, error: null }; // защита от бесконечного цикла
     }
   }
+  // Журнал действий, корзина и журнал сбоев — самые длинные таблицы в базе и
+  // при этом нужны только в двух разделах. Раньше они тянулись при каждом
+  // открытии приложения вместе со всем остальным.
+  const [journalLoaded, setJournalLoaded] = useState(false);
+  async function loadJournalData(force = false) {
+    if (journalLoaded && !force) return;
+    setJournalLoaded(true);
+    const [a, t, e] = await Promise.all([
+      supabase.from("audit_log").select("*").order("ts", { ascending: false }).limit(500),
+      supabase.from("trash").select("*").order("deleted_at", { ascending: false }).limit(300),
+      supabase.from("client_errors").select("*").order("occurred_at", { ascending: false }).limit(200),
+    ]);
+    if (a.data) setAudit(a.data);
+    if (t.data) setTrash(t.data);
+    if (e.data) setClientErrors(e.data);
+  }
   async function load() {
     setLoading(true);
     try {
@@ -407,8 +423,11 @@ function Dashboard({ session, profile }) {
       fetchAllRows("jobs"),
       fetchAllRows("report_chemicals"),
       supabase.from("chemicals").select("*"),
-      supabase.from("audit_log").select("*").order("ts", { ascending: false }),
-      supabase.from("trash").select("*").order("deleted_at", { ascending: false }),
+      // Журнал, корзина и сбои нужны только в своих разделах. Позицию в массиве
+      // сохраняем заглушкой, чтобы не сдвигать разбор остальных сорока ответов,
+      // а данные подтягиваем при открытии раздела — см. loadJournalData.
+      Promise.resolve({ data: null, error: null }),
+      Promise.resolve({ data: null, error: null }),
       // cash_opening_balance / cash_opening_date — база ревизии кассы: от них считается «на руках»
       // (см. techOpening ниже). salary_monthly — оклад для вкладки «Зарплата».
       // Поле, забытое в этом select, читается как undefined и молча ломает расчёт — так уже было с ревизией.
@@ -449,7 +468,7 @@ function Dashboard({ session, profile }) {
       // Ревизии и движения препаратов у сотрудников. Последняя запись kind="revision"
       // по паре сотрудник+препарат задаёт точку отсчёта (см. techLedger).
       supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
-      supabase.from("client_errors").select("*").order("occurred_at", { ascending: false }).limit(200),
+      Promise.resolve({ data: null, error: null }),
       supabase.from("price_list").select("*").order("pest").order("area_from"),
       supabase.from("job_helpers").select("*"),
     ]);
@@ -466,8 +485,6 @@ function Dashboard({ session, profile }) {
     const currentProfiles = useOfflineSnapshot ? (offlineSnapshot.profiles || []) : (pr.data || []);
     setJobs(currentJobs);
     setChemicals(currentChemicals);
-    setAudit(ar.data || []);
-    setTrash(tr.data || []);
     setTechs(currentProfiles.filter((p) => p.role === "tech"));
     setAllProfiles(currentProfiles);
     setHandouts(hr.data || []);
@@ -504,7 +521,6 @@ function Dashboard({ session, profile }) {
     setJobProofs(jpr.data || []);
     setCashAdjustments(car.data || []);
     setInventoryAdjustments(iar.data || []);
-    setClientErrors(errr.data || []);
     setJobHelpers(jhr.data || []);
     setPriceList(plr.data || []);
     if (!useOfflineSnapshot && !jr.error) {
@@ -526,6 +542,9 @@ function Dashboard({ session, profile }) {
     }
   }
   useEffect(() => { load(); }, []);
+  // Журнал и корзина подтягиваются при первом заходе в раздел, а не при
+  // каждом открытии приложения.
+  useEffect(() => { if (tab === "journal" || tab === "trash") loadJournalData(); }, [tab]);
   // Тревоги в колокольчике считаются из уже загруженных данных, поэтому
   // раз в пять минут просто обновляем их — отдельного запроса за уведомлениями
   // больше нет.
@@ -1596,6 +1615,9 @@ function Dashboard({ session, profile }) {
   }
 
   async function exportExcel() {
+    // В выгрузке есть листы «Журнал» и «Корзина»: если раздел не открывали,
+    // данных ещё нет и листы уехали бы пустыми.
+    await loadJournalData();
     try {
       const wb = new ExcelJS.Workbook();
       wb.creator = "KazDez"; wb.created = new Date();
