@@ -2619,6 +2619,11 @@ function JobEconomicsModal({ job, economics, onClose, onSave }) {
     <div className="kd-row"><span>Комиссия QR</span><strong className="kd-neg">− {fmt(economics.qrFee)} ₸</strong></div>
     <div className="kd-row"><span>Партнёры / исполнители</span><strong className="kd-neg">− {fmt(economics.partners)} ₸</strong></div>
     <div className="kd-row"><span>Бонус и дорожные сотруднику</span><strong className="kd-neg">− {fmt(economics.techExtras)} ₸</strong></div>
+    {economics.guarantee > 0 && (
+      <div className="kd-row" title="Повторный выезд по гарантии — бесплатная работа: препараты, бензин, день дезинфектора. Эти затраты относятся к этой заявке.">
+        <span>Гарантийные выезды</span><strong className="kd-neg">− {fmt(economics.guarantee)} ₸</strong>
+      </div>
+    )}
     <div className="kd-grid2" style={{ marginTop: 14 }}>
       <Field label="Транспорт / топливо (₸)"><input value={transport} onChange={(e) => setTransport(e.target.value)} inputMode="numeric" placeholder="1000" /></Field>
       <Field label="Другие расходы (₸)"><input value={other} onChange={(e) => setOther(e.target.value)} inputMode="numeric" placeholder="0" /></Field>

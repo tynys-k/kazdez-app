@@ -1121,7 +1121,10 @@ function Dashboard({ session, profile }) {
   }
   const partnerShareAmt = (job) => calc.partnerShareAmt(job, chemicals, chemPurchases);
   const executorShareAmt = (job) => calc.executorShareAmt(job);
-  const jobEconomics = (job) => calc.jobEconomics(job, { chemicals, purchases: chemPurchases, qrFeeRate, helpers: calc.helpersTotal(job.id, jobHelpers) });
+  // Затраты повторных выездов относим на исходную заявку: гарантийный выезд —
+  // это бесплатная работа, которой в её прибыли раньше не было.
+  const guaranteeCostOf = (job) => calc.guaranteeCostOf(job.id, { jobs, chemicals, purchases: chemPurchases, jobHelpers });
+  const jobEconomics = (job) => calc.jobEconomics(job, { chemicals, purchases: chemPurchases, qrFeeRate, helpers: calc.helpersTotal(job.id, jobHelpers), guaranteeCost: guaranteeCostOf(job) });
   function upsellFor(job) {
     const text = norm(`${job.pest || ""} ${job.address || ""} ${job.note || ""}`);
     if (/склад|цех|производ|общепит|кафе|ресторан/.test(text)) return "регулярное абонентское обслуживание и мониторинг объекта";
@@ -2107,6 +2110,11 @@ function Dashboard({ session, profile }) {
     });
   const upliftRows = techRows.filter((r) => r.markup !== null).sort((a, b) => b.markup - a.markup);
   const upliftTotals = techRows.reduce((s, r) => ({ quote: s.quote + r.v.quoteSum, paid: s.paid + r.v.paidOnQuote }), { quote: 0, paid: 0 });
+  // Доля возвратов по гарантии — оценка качества работы, а не скорости.
+  const guaranteeRows = calc.guaranteeStats(jobs, { inPeriod: inPeriodIso })
+    .filter((r) => r.done > 0 || r.returns > 0);
+  const guaranteeTotals = guaranteeRows.reduce((a, r) => ({ done: a.done + r.done, returns: a.returns + r.returns }), { done: 0, returns: 0 });
+
   const upliftPct = upliftTotals.quote > 0 ? Math.round((upliftTotals.paid - upliftTotals.quote) / upliftTotals.quote * 100) : 0;
 
   // ---- склад ----
@@ -2217,7 +2225,7 @@ function Dashboard({ session, profile }) {
   const allocFor = calc.allocationPerJob(jobs, { profiles: allProfiles, opex });
   const completedEconomics = doneJobs.map((job) => {
     const { labor, overhead } = allocFor(job);
-    return { job, econ: calc.jobFullEconomics(job, { chemicals, purchases: chemPurchases, qrFeeRate, labor, overhead, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
+    return { job, econ: calc.jobFullEconomics(job, { chemicals, purchases: chemPurchases, guaranteeCost: guaranteeCostOf(job), qrFeeRate, labor, overhead, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
   });
   const totalJobProfit = completedEconomics.reduce((s, r) => s + r.econ.profit, 0);
   const totalFullProfit = completedEconomics.reduce((s, r) => s + r.econ.fullProfit, 0);
@@ -3519,6 +3527,32 @@ function Dashboard({ session, profile }) {
                   <strong style={{ color: "#0E7C66" }}>{fmt(profit)} ₸</strong>
                 </div>
               ))}
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Возвраты по гарантии · {range.label}</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>
+                Повтор считается тому, кто делал исходную заявку, и в её период — иначе июльская работа попадёт в августовскую статистику другого человека.
+              </div>
+              {guaranteeRows.length === 0 && <div className="kd-muted">За период выполненных заявок нет.</div>}
+              {guaranteeRows.length > 0 && (
+                <>
+                  <div className="kd-row"><span>Всего заявок / из них с возвратом</span>
+                    <strong>{guaranteeTotals.done} / {guaranteeTotals.returns}{guaranteeTotals.done ? ` · ${Math.round(guaranteeTotals.returns / guaranteeTotals.done * 100)}%` : ""}</strong>
+                  </div>
+                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr" }}>
+                    <span>Сотрудник</span><span>Заявок</span><span>Возвратов</span><span>Доля</span>
+                  </div>
+                  {guaranteeRows.map((r) => (
+                    <div className="kd-ledgerrow" key={String(r.techId)} style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr" }}>
+                      <span className="kd-ledgername">{techById(r.techId)?.full_name || personName(r.techId) || "не назначен"}</span>
+                      <span>{r.done}</span>
+                      <span>{r.returns}</span>
+                      <strong style={{ color: r.rate >= 15 ? "var(--rust)" : r.rate >= 8 ? "var(--amber)" : "var(--primary)" }}>{r.rate}%</strong>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
 
             <div className="kd-card" style={{ marginTop: 14 }}>
