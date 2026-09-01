@@ -58,6 +58,32 @@ export function jobChemCost(job, chemicals = [], purchases = []) {
   );
 }
 
+// --- допуски сотрудников -------------------------------------------------
+
+// Состояние документа на дату: действует, скоро истекает или просрочен.
+//
+// Документ без срока считаем бессрочным, а не просроченным: у части бумаг
+// срока действительно нет, и подсвечивать их красным — значит приучить
+// смотреть мимо предупреждений.
+export function docStatus(doc, todayIso, soonDays = 30) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  if (!doc?.expires_on) return { state: "nolimit", daysLeft: null };
+  const daysLeft = Math.round((new Date(`${String(doc.expires_on).slice(0, 10)}T00:00:00`) - new Date(`${today}T00:00:00`)) / 86400000);
+  if (daysLeft < 0) return { state: "expired", daysLeft };
+  if (daysLeft <= soonDays) return { state: "soon", daysLeft };
+  return { state: "ok", daysLeft };
+}
+
+// Документы, требующие внимания: просроченные и истекающие в ближайший месяц.
+// Отсортированы по сроку — первым то, что горит сильнее.
+export function docsNeedingAttention(docs = [], { todayIso, soonDays = 30, activeTechIds = null } = {}) {
+  return docs
+    .filter((d) => (activeTechIds ? activeTechIds.has(String(d.tech_id)) : true))
+    .map((d) => ({ doc: d, ...docStatus(d, todayIso, soonDays) }))
+    .filter((r) => r.state === "expired" || r.state === "soon")
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
 // --- закуп: поставщики и прогноз -----------------------------------------
 
 const ISO_DAY = 86400000;
