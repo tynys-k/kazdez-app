@@ -348,6 +348,31 @@ function DriveLinkCard({ link, url, isAdmin }) {
     </a>
   );
 }
+// Текст для возврата ушедшего клиента. Пишется от лица компании, коротко и
+// без давления: человек уже платил, ему достаточно напоминания и повода.
+function winbackMsg(client, header) {
+  const brand = header || "KazDez";
+  const when = client?.monthsSince >= 12
+    ? "больше года назад"
+    : client?.monthsSince > 0 ? `${client.monthsSince} мес. назад` : "недавно";
+  const lines = [
+    `${client?.name ? `${client.name}, здравствуйте!` : "Здравствуйте!"} Это ${brand}.`,
+    `Мы делали у вас обработку ${when}${client?.pest ? ` (${client.pest.toLowerCase()})` : ""}.`,
+    "Сейчас как раз сезон, когда насекомые возвращаются. Если снова беспокоят — подскажем, что делать, и подберём удобное время.",
+    "Для повторной обработки у нас действует сниженная цена.",
+  ];
+  return lines.join("\n");
+}
+
+// Ссылка на переписку в WhatsApp с готовым текстом.
+function waLink(phone, text) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return null;
+  // казахстанские номера пишут и через 8, и через +7 — для wa.me нужен код страны
+  const normalized = digits.length === 11 && digits.startsWith("8") ? `7${digits.slice(1)}` : digits;
+  return `https://wa.me/${normalized}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
+}
+
 function buildMsg(job, header) {
   const brand = header || "KazDez";
   const line1 = job.type === "Осмотр" ? "Осмотр объекта" : `${job.type || "Первичная"} обработка`;
@@ -385,4 +410,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  TECH_DOC_KINDS, clientMemoFor, winbackMsg, waLink, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
