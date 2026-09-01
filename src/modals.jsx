@@ -1593,7 +1593,12 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
                 onBlur={(e) => { const v = e.target.value.trim(); if (v !== (settings[l.key] || "")) onSaveSetting(l.key, v || null); }} />
             </div>
           ))}
-          <div className="kd-muted">Сохраняется при выходе из поля.</div>
+          <div className="kd-field">
+            <span>⭐ Страница отзывов</span>
+            <input defaultValue={settings.review_link || ""} placeholder="https://2gis.kz/... или ссылка на Карты"
+              onBlur={(e) => { const v = e.target.value.trim(); if (v !== (settings.review_link || "")) onSaveSetting("review_link", v || null); }} />
+          </div>
+          <div className="kd-muted">Ссылка подставляется в просьбу об отзыве довольным клиентам. Сохраняется при выходе из поля.</div>
         </SettingsSection>
 
         <SettingsSection title="Стадии воронки" subtitle={`${leadStages.length} стадий · CRM «Клиенты»`} open={openSection === "leadstages"} onToggle={() => toggle("leadstages")}>
