@@ -1815,6 +1815,14 @@ function Dashboard({ session, profile }) {
   const range = periodRange(pMode, pOff);
   // Возвращаемость и ценность клиента. Считается по ключу телефона, поэтому
   // «+7 701 …» и «8 701 …» больше не идут за двух разных людей.
+  // Попадает ли дата в выбранный период. Объявлено здесь, ДО первого
+  // использования: раньше объявление стояло на сотню строк ниже, и обращение
+  // к нему сверху роняло весь интерфейс при каждой отрисовке.
+  const inPeriodIso = (iso) => {
+    if (pMode === "all") return true;
+    const dt = parseIso(iso);
+    return !!dt && dt.getTime() >= range.start && dt.getTime() < range.end;
+  };
   // Оборот для отчётности: что фактически получено и каким способом.
   const turnover = calc.turnoverReport(jobs, {
     inPeriod: inPeriodIso,
@@ -1912,11 +1920,6 @@ function Dashboard({ session, profile }) {
   // заявкам периода. Выплачено = проведённые tech_expenses периода. Разница — долг.
   // Оклад намеренно не делим на недели: это месячная величина, дробить её некорректно.
   const payrollSalaryCounts = pMode === "month";
-  const inPeriodIso = (iso) => {
-    if (pMode === "all") return true;
-    const dt = parseIso(iso);
-    return !!dt && dt.getTime() >= range.start && dt.getTime() < range.end;
-  };
   const payrollRows = techs.map((t) => {
     const jobsOf = jobs.filter((j) => j.assigned_to === t.id && j.status === "done" && inPeriodIso(j.scheduled_date));
     const ownBonus = jobsOf.reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
