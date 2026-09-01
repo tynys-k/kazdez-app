@@ -37,6 +37,46 @@ const TECH_DOC_KINDS = {
   other: "Другое",
 };
 
+// Памятка клиенту: что сделать до обработки и чего не делать после.
+//
+// Результат обработки зависит от клиента не меньше, чем от препарата: помыл
+// полы на следующий день — обработка насмарку, и мы едем по гарантии за свой
+// счёт. Памятка на публичной странице заявки дешевле любого такого выезда.
+//
+// Текст общий для всех работ, плюс уточнения по виду вредителя. Ключи должны
+// совпадать с тем, что пишется в jobs.pest, поэтому сверка идёт по вхождению
+// слова, а не по точному равенству.
+const CLIENT_MEMO_COMMON = {
+  before: [
+    "Уберите со столов и открытых поверхностей продукты, посуду и детские вещи.",
+    "Обеспечьте доступ к плинтусам, задним стенкам мебели и местам под раковиной.",
+    "Уведите из помещения детей, животных и аквариумных рыб (аквариум накройте и отключите компрессор).",
+    "Снимите постельное бельё, если обрабатываются спальные места.",
+  ],
+  after: [
+    "Не входите в помещение в течение времени, которое назовёт мастер, затем хорошо проветрите.",
+    "Влажную уборку полов и плинтусов делайте не раньше чем через две недели — именно там работает препарат.",
+    "Столы, подоконники и места приготовления еды протрите содовым раствором сразу после проветривания.",
+    "Единичные насекомые в первые дни — это нормально: препарат действует не мгновенно.",
+  ],
+};
+
+const CLIENT_MEMO_BY_PEST = [
+  { match: ["клоп"], before: ["Отодвиньте кровати и диваны от стен, освободите доступ к каркасу."], after: ["Не переставляйте мебель обратно к стенам до конца обработки помещения."] },
+  { match: ["таракан"], before: ["Перекройте доступ к воде: вытрите раковины и ванну насухо."], after: ["Не оставляйте открытую воду и крошки — иначе насекомым не нужна приманка."] },
+  { match: ["грызун", "крыс", "мыш"], before: ["Уберите доступный корм и мусор, закройте пищевые отходы."], after: ["Не трогайте приманочные станции и не подпускайте к ним детей и животных."] },
+  { match: ["комар", "клещ", "муравь"], before: ["Скосите высокую траву и уберите с участка игрушки и посуду животных."], after: ["Не поливайте обработанный участок и не косите траву несколько дней."] },
+];
+
+const clientMemoFor = (pest) => {
+  const key = String(pest || "").toLowerCase();
+  const extra = CLIENT_MEMO_BY_PEST.find((m) => m.match.some((w) => key.includes(w)));
+  return {
+    before: [...CLIENT_MEMO_COMMON.before, ...(extra?.before || [])],
+    after: [...CLIENT_MEMO_COMMON.after, ...(extra?.after || [])],
+  };
+};
+
 const REPEAT_POLICIES = [
   { code: "half", label: "50% (стандарт)" },
   { code: "free", label: "Бесплатно" },
@@ -345,4 +385,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  TECH_DOC_KINDS, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };

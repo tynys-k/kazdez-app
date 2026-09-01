@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { TECH_DOC_KINDS, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
@@ -169,6 +169,8 @@ function PublicJobPage({ token }) {
   if (!job) return <div className="kd-public"><div className="kd-public-card kd-public-state"><AlertTriangle size={28} /><h1>Заявка не найдена</h1><p>{error}</p></div></div>;
   const stageKey = job.job_status === "done" ? "done" : job.job_status === "canceled" ? "canceled" : (WORK_STAGE[job.work_stage] ? job.work_stage : "new");
   const stage = WORK_STAGE[stageKey];
+  // Памятка подбирается по виду вредителя: общая часть плюс уточнения.
+  const memo = clientMemoFor(job.pest);
   const steps = ["confirmed", "assigned", "en_route", "on_site", "done"];
   const stageStep = stage.step;
   return (
@@ -203,6 +205,22 @@ function PublicJobPage({ token }) {
         </section>
 
         {job.address && <a className="kd-btn primary wide kd-public-map" href={yandexMapUrl(job.address)} target="_blank" rel="noreferrer"><Navigation size={17} />Открыть маршрут в Яндекс Картах</a>}
+
+        <section className="kd-public-memo">
+          <h2>Памятка</h2>
+          <p>От этого напрямую зависит результат — и то, придётся ли вызывать нас повторно.</p>
+          <div className="kd-public-memo-cols">
+            <div>
+              <h3>До обработки</h3>
+              <ul>{memo.before.map((line) => <li key={line}>{line}</li>)}</ul>
+            </div>
+            <div>
+              <h3>После обработки</h3>
+              <ul>{memo.after.map((line) => <li key={line}>{line}</li>)}</ul>
+            </div>
+          </div>
+          <p className="kd-public-memo-note">Если через две недели насекомые остались — позвоните нам: пока действует гарантия, выезд бесплатный.</p>
+        </section>
 
         {stageKey === "done" && <section className="kd-public-feedback">
           <div className="kd-title">Как прошла работа?</div>

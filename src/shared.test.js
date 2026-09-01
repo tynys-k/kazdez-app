@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { phoneKey, samePhone } from "./shared";
+import { clientMemoFor, phoneKey, samePhone } from "./shared";
 
 describe("phoneKey", () => {
   it("склеивает записи одного номера в разных формах", () => {
@@ -28,5 +28,27 @@ describe("phoneKey", () => {
 
   it("международная запись с длинным кодом тоже сходится", () => {
     expect(samePhone("007 701 382 1617", "7013821617")).toBe(true);
+  });
+});
+
+describe("памятка клиенту", () => {
+  it("общая часть есть всегда", () => {
+    const memo = clientMemoFor("");
+    expect(memo.before.length).toBeGreaterThan(0);
+    expect(memo.after.join(" ")).toContain("две недели");
+  });
+
+  it("добавляет уточнения по виду вредителя", () => {
+    // в базе пишут по-разному: «Клопы», «клоп постельный»
+    expect(clientMemoFor("Клопы").before.join(" ")).toContain("кровати");
+    expect(clientMemoFor("клоп постельный").before.join(" ")).toContain("кровати");
+    expect(clientMemoFor("Тараканы").after.join(" ")).toContain("крошки");
+    expect(clientMemoFor("Мыши").after.join(" ")).toContain("приманочные");
+  });
+
+  it("незнакомый вредитель не ломает памятку", () => {
+    const memo = clientMemoFor("Осы");
+    expect(memo.before.length).toBeGreaterThan(0);
+    expect(memo.after.length).toBeGreaterThan(0);
   });
 });
