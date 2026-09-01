@@ -178,6 +178,41 @@ export function executorShareAmt(job) {
   return Math.round((Number(job.report_paid) || 0) * (Number(job.executor_share_pct) || 0) / 100);
 }
 
+// --- сравнение периодов --------------------------------------------------
+
+// Итоги периода: выручка, число выполненных заявок и средний чек.
+//
+// Считается по тем же правилам, что и основной свод: отменённые не в счёт,
+// фильтр по бренду тот же, выручка — только по выполненным.
+export function periodTotals(jobs = [], { inRange = () => true, brandFilter = "all" } = {}) {
+  let revenue = 0, done = 0, total = 0;
+  for (const j of jobs) {
+    if (j.status === "canceled") continue;
+    const isPartner = j.brand === "partner";
+    if (brandFilter === "ours" && isPartner) continue;
+    if (brandFilter === "partner" && !isPartner) continue;
+    if (!inRange(j.scheduled_date)) continue;
+    total += 1;
+    if (j.status !== "done") continue;
+    done += 1;
+    revenue += Number(j.report_paid) || 0;
+  }
+  return { revenue, done, jobs: total, avg: done ? Math.round(revenue / done) : 0 };
+}
+
+// Насколько показатель изменился к прошлому периоду, в процентах.
+//
+// Если в прошлом периоде было ноль, возвращаем null: «рост на 100%» от нуля
+// ничего не значит и только сбивает. Честнее сказать, что сравнивать не с чем.
+export function comparePeriods(now, before) {
+  const pct = (a, b) => (b > 0 ? Math.round((a - b) / b * 100) : null);
+  return {
+    revenue: pct(now?.revenue || 0, before?.revenue || 0),
+    done: pct(now?.done || 0, before?.done || 0),
+    avg: pct(now?.avg || 0, before?.avg || 0),
+  };
+}
+
 // --- гарантийные возвраты ------------------------------------------------
 
 // Чистая стоимость повторных выездов по заявке.
