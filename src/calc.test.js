@@ -4,7 +4,7 @@ import {
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
   clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats, dayLoad,
   priceFor,
-  turnoverReport,
+  turnoverReport, chemPriceOn,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -676,5 +676,51 @@ describe("оборот для отчётности", () => {
 
   it("пустой период не делит на ноль", () => {
     expect(turnoverReport([]).officialShare).toBe(0);
+  });
+});
+
+describe("цена препарата на дату", () => {
+  const chem = { id: "c1", name: "Дельта", unit_kind: "volume", price_per_liter: 20000 };
+  const purchases = [
+    { id: "p1", chemical_id: "c1", purchase_date: "2026-06-01", price_per_liter: 10000 },
+    { id: "p2", chemical_id: "c1", purchase_date: "2026-08-01", price_per_liter: 20000 },
+  ];
+
+  it("берёт цену последнего прихода на дату заявки, а не сегодняшнюю", () => {
+    // июньская заявка не должна дорожать от августовского закупа
+    expect(chemPriceOn(chem, "2026-06-15", purchases)).toBe(10);
+    expect(chemPriceOn(chem, "2026-08-15", purchases)).toBe(20);
+  });
+
+  it("до первого прихода и без истории — текущая цена из карточки", () => {
+    expect(chemPriceOn(chem, "2026-05-01", purchases)).toBe(20);
+    expect(chemPriceOn(chem, "2026-06-15", [])).toBe(20);
+    expect(chemPriceOn(chem, null, purchases)).toBe(20);
+  });
+
+  it("два прихода одним днём: считает по тому, что записан позже", () => {
+    const sameDay = [
+      { id: "a", chemical_id: "c1", purchase_date: "2026-07-01", price_per_liter: 11000, created_at: "2026-07-01T08:00:00Z" },
+      { id: "b", chemical_id: "c1", purchase_date: "2026-07-01", price_per_liter: 13000, created_at: "2026-07-01T17:00:00Z" },
+    ];
+    expect(chemPriceOn(chem, "2026-07-10", sameDay)).toBe(13);
+  });
+
+  it("себестоимость заявки считается по цене её дня", () => {
+    const job = { scheduled_date: "2026-06-15", chemicals: [{ chemical_id: "c1", amount: 100 }] };
+    // 100 мл по 10 000 ₸/л = 1000 ₸, а не 2000 ₸ по нынешней цене
+    expect(jobChemCost(job, [chem], purchases)).toBe(1000);
+    // без истории поведение прежнее
+    expect(jobChemCost(job, [chem])).toBe(2000);
+  });
+
+  it("прибыль июньской заявки не меняется от августовского подорожания", () => {
+    const job = {
+      scheduled_date: "2026-06-15", status: "done", report_paid: 30000,
+      chemicals: [{ chemical_id: "c1", amount: 100 }],
+    };
+    const june = jobEconomics(job, { chemicals: [chem], purchases });
+    expect(june.chemicals).toBe(1000);
+    expect(june.profit).toBe(29000);
   });
 });
