@@ -2359,6 +2359,9 @@ function Dashboard({ session, profile }) {
           {canAccess("action.settings") && <button className="kd-tab" onClick={() => { setModal({ kind: "settings" }); setSideOpen(false); }}><Settings size={17} /><span className="kd-tab-lbl">Настройки</span></button>}
           <button className="kd-tab" onClick={() => supabase.auth.signOut()}><LogOut size={17} /><span className="kd-tab-lbl">Выйти</span></button>
         </div>
+        <div className="kd-buildstamp" title="Версия открытого сейчас кода. Если она не меняется после обновления — браузер держит старую версию, помогает Ctrl+Shift+R.">
+          сборка {typeof __BUILD_STAMP__ === "string" ? __BUILD_STAMP__ : "—"}
+        </div>
       </aside>
 
       <div className="kd-mainwrap">
