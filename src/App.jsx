@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
@@ -2156,6 +2156,10 @@ function Dashboard({ session, profile }) {
     return `${sign}${value}% к ${prevRange.label} (${fmt(prevValue)})`;
   };
 
+  // Оценки клиентов: кто и на чём получает низкие. Период — по дате заявки.
+  const feedbackRating = calc.feedbackStats(publicFeedback, jobs, { inPeriod: inPeriodIso });
+  const happy = calc.happyClients(publicFeedback, jobs, { days: 7 });
+
   const upliftPct = upliftTotals.quote > 0 ? Math.round((upliftTotals.paid - upliftTotals.quote) / upliftTotals.quote * 100) : 0;
 
   // ---- склад ----
@@ -3322,6 +3326,72 @@ function Dashboard({ session, profile }) {
               })}</div>
             </section>
 
+            {recentLowFeedback.length > 0 && (
+              <section className="kd-card">
+                <div className="kd-stage2head">
+                  <div>
+                    <div className="kd-title">Низкие оценки · {recentLowFeedback.length}</div>
+                    <div className="kd-muted">Оценка 3 и ниже за последние 14 дней. Пока не перезвонили — это не разобранная жалоба.</div>
+                  </div>
+                </div>
+                <div className="kd-followlist">
+                  {recentLowFeedback.map((f) => {
+                    const job = jobs.find((j) => String(j.id) === String(f.job_id));
+                    const planned = openFollowups.some((x) => String(x.job_id) === String(f.job_id));
+                    return (
+                      <div key={f.id}>
+                        <div>
+                          <strong>{f.rating}/5 · {job?.contact_name || job?.client_phone || "клиент"}</strong>
+                          <span>
+                            {isoToRu(String(f.created_at).slice(0, 10))}
+                            {job?.pest ? ` · ${job.pest}` : ""}
+                            {job?.assigned_to ? ` · ${techById(job.assigned_to)?.full_name || ""}` : ""}
+                            {f.comment ? ` · «${f.comment}»` : ""}
+                          </span>
+                        </div>
+                        <div className="kd-actions">
+                          {planned
+                            ? <span className="kd-muted">звонок запланирован</span>
+                            : canEditJobs && job && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "followup", job, defaultKind: "quality" })}>Запланировать звонок</button>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {happy.length > 0 && (
+              <section className="kd-card">
+                <div className="kd-stage2head">
+                  <div>
+                    <div className="kd-title">Довольные клиенты · {happy.length}</div>
+                    <div className="kd-muted">Оценка 4–5 за последнюю неделю. Просьба об отзыве на картах прямо приводит новых клиентов — и уместна, пока впечатление свежее.</div>
+                  </div>
+                </div>
+                <div className="kd-followlist">
+                  {happy.map(({ feedback: f, job }) => {
+                    const name = job.contact_name || job.client_name || "";
+                    const text = reviewRequestMsg(name, settings.review_link || "");
+                    const link = waLink(job.client_phone, text);
+                    return (
+                      <div key={f.id}>
+                        <div>
+                          <strong>{f.rating}/5 · {name || job.client_phone}</strong>
+                          <span>{isoToRu(String(f.created_at).slice(0, 10))}{job.pest ? ` · ${job.pest}` : ""}</span>
+                        </div>
+                        <div className="kd-actions">
+                          {link && <a className="kd-btn primary sm" href={link} target="_blank" rel="noreferrer">Попросить отзыв</a>}
+                          <button className="kd-btn ghost sm" onClick={() => copyText(text, () => showToast("Текст скопирован"))}>Копировать</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {!settings.review_link && <div className="kd-muted" style={{ marginTop: 8 }}>Ссылку на страницу отзывов (2ГИС или Карты) можно вписать в Настройках — тогда она подставится в текст.</div>}
+              </section>
+            )}
+
             <section className="kd-card">
               <div className="kd-stage2head">
                 <div>
@@ -3628,6 +3698,38 @@ function Dashboard({ session, profile }) {
                   <strong style={{ color: "#0E7C66" }}>{fmt(profit)} ₸</strong>
                 </div>
               ))}
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Оценки клиентов · {range.label}</div>
+              {feedbackRating.total === 0 && <div className="kd-muted">За период клиенты не оставляли оценок.</div>}
+              {feedbackRating.total > 0 && (
+                <>
+                  <div className="kd-row">
+                    <span>Средняя оценка</span>
+                    <span className="kd-twoval"><em>{feedbackRating.total} оценок{feedbackRating.low ? ` · низких ${feedbackRating.low}` : ""}</em>
+                      <strong style={{ color: feedbackRating.avg >= 4.5 ? "var(--primary)" : feedbackRating.avg >= 4 ? "var(--amber)" : "var(--rust)" }}>{feedbackRating.avg}</strong>
+                    </span>
+                  </div>
+                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr 1fr 1fr" }}><span>Сотрудник</span><span>Оценок</span><span>Средняя</span></div>
+                  {feedbackRating.byTech.map((r) => (
+                    <div className="kd-ledgerrow" key={String(r.techId)} style={{ gridTemplateColumns: "1.6fr 1fr 1fr" }}>
+                      <span className="kd-ledgername">{techById(r.techId)?.full_name || personName(r.techId) || "не назначен"}</span>
+                      <span className="kd-muted">{r.count}{r.low ? ` · низких ${r.low}` : ""}</span>
+                      <strong style={{ color: r.avg >= 4.5 ? "var(--primary)" : r.avg >= 4 ? "var(--amber)" : "var(--rust)" }}>{r.avg}</strong>
+                    </div>
+                  ))}
+                  <div className="kd-section" style={{ marginTop: 12 }}>По видам работ</div>
+                  {feedbackRating.byPest.map((r) => (
+                    <div className="kd-row" key={r.pest}><span>{r.pest}</span>
+                      <span className="kd-twoval"><em>{r.count} оценок</em><strong>{r.avg}</strong></span>
+                    </div>
+                  ))}
+                  <div className="kd-muted" style={{ marginTop: 8 }}>
+                    Средняя по двум-трём отзывам ничего не значит — поэтому рядом всегда стоит их количество.
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="kd-card" style={{ marginTop: 14 }}>

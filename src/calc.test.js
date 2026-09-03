@@ -6,7 +6,7 @@ import {
   priceFor,
   turnoverReport, chemPriceOn, chemForecast, supplierPrices,
   docStatus, docsNeedingAttention, guaranteeCostOf, guaranteeStats, dormantClients,
-  periodTotals, comparePeriods,
+  periodTotals, comparePeriods, feedbackStats, happyClients,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -984,5 +984,61 @@ describe("сравнение периодов", () => {
 
   it("падение показывается отрицательным числом", () => {
     expect(comparePeriods({ revenue: 30000 }, { revenue: 60000 }).revenue).toBe(-50);
+  });
+});
+
+describe("оценки клиентов", () => {
+  const jobs = [
+    { id: "j1", assigned_to: "t1", pest: "Тараканы", scheduled_date: "2026-08-05" },
+    { id: "j2", assigned_to: "t1", pest: "Клопы", scheduled_date: "2026-08-10" },
+    { id: "j3", assigned_to: "t2", pest: "Тараканы", scheduled_date: "2026-08-12" },
+    { id: "j4", assigned_to: "t2", pest: "Клопы", scheduled_date: "2026-07-01" },
+  ];
+  const feedback = [
+    { id: "f1", job_id: "j1", rating: 5, created_at: "2026-08-06T10:00:00Z" },
+    { id: "f2", job_id: "j2", rating: 2, created_at: "2026-08-11T10:00:00Z" },
+    { id: "f3", job_id: "j3", rating: 5, created_at: "2026-08-13T10:00:00Z" },
+    { id: "f4", job_id: "j4", rating: 1, created_at: "2026-07-02T10:00:00Z" },
+  ];
+  const august = (iso) => String(iso).slice(0, 7) === "2026-08";
+
+  it("считает среднюю и число низких оценок за период", () => {
+    const st = feedbackStats(feedback, jobs, { inPeriod: august });
+    expect(st.total).toBe(3);
+    expect(st.avg).toBe(4);
+    expect(st.low).toBe(1);
+  });
+
+  it("худшие идут первыми — иначе список бесполезен", () => {
+    const st = feedbackStats(feedback, jobs, { inPeriod: august });
+    expect(st.byTech[0].techId).toBe("t1");
+    expect(st.byTech[0].avg).toBe(3.5);
+  });
+
+  it("рядом со средней всегда есть количество оценок", () => {
+    const st = feedbackStats(feedback, jobs, { inPeriod: august });
+    // «5,0» по одному отзыву — не достижение, и это должно быть видно
+    expect(st.byTech.find((r) => r.techId === "t2")).toMatchObject({ avg: 5, count: 1 });
+  });
+
+  it("оценка без заявки или без рейтинга не считается", () => {
+    const noise = [...feedback, { id: "x", job_id: "нет", rating: 5 }, { id: "y", job_id: "j1", rating: 0 }];
+    expect(feedbackStats(noise, jobs, { inPeriod: august }).total).toBe(3);
+  });
+
+  it("довольные за последние дни — для просьбы об отзыве, свежие первыми", () => {
+    const rows = happyClients(feedback, jobs, { todayIso: "2026-08-14", days: 10 });
+    expect(rows.map((r) => r.feedback.id)).toEqual(["f3", "f1"]);
+  });
+
+  it("за пределами окна просить отзыв уже поздно", () => {
+    // f1 оставлен 6 августа — в семь дней от 14-го он не попадает
+    const rows = happyClients(feedback, jobs, { todayIso: "2026-08-14", days: 7 });
+    expect(rows.map((r) => r.feedback.id)).toEqual(["f3"]);
+  });
+
+  it("недовольных в этот список не зовут", () => {
+    const rows = happyClients(feedback, jobs, { todayIso: "2026-08-14", days: 30 });
+    expect(rows.every((r) => r.feedback.rating >= 4)).toBe(true);
   });
 });

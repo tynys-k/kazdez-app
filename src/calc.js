@@ -236,6 +236,68 @@ function monthsBetween(fromIso, toIso) {
   return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) - (b.getDate() < a.getDate() ? 1 : 0);
 }
 
+// --- оценки клиентов -----------------------------------------------------
+
+// Средняя оценка по сотрудникам и по видам работ.
+//
+// Оценки клиент ставит на публичной странице заявки — это уже собирается.
+// Не хватало ответа на вопрос, кто и на чём получает низкие оценки.
+//
+// Средняя по трём отзывам ничего не значит, поэтому вместе со средней всегда
+// возвращаем их количество: показывать «5,0» по одному отзыву как достижение
+// нечестно.
+export function feedbackStats(feedback = [], jobs = [], { inPeriod = () => true } = {}) {
+  const jobById = new Map(jobs.map((j) => [String(j.id), j]));
+  const byTech = new Map();
+  const byPest = new Map();
+  let sum = 0, n = 0, low = 0;
+
+  for (const f of feedback) {
+    const rating = Number(f.rating) || 0;
+    if (!rating) continue;
+    const job = jobById.get(String(f.job_id || ""));
+    if (!job || !inPeriod(job.scheduled_date)) continue;
+    sum += rating; n += 1;
+    if (rating <= 3) low += 1;
+
+    const techKey = String(job.assigned_to || "");
+    const t = byTech.get(techKey) || { techId: job.assigned_to, sum: 0, count: 0, low: 0 };
+    t.sum += rating; t.count += 1; if (rating <= 3) t.low += 1;
+    byTech.set(techKey, t);
+
+    const pestKey = (job.pest || "—").trim() || "—";
+    const p = byPest.get(pestKey) || { pest: pestKey, sum: 0, count: 0, low: 0 };
+    p.sum += rating; p.count += 1; if (rating <= 3) p.low += 1;
+    byPest.set(pestKey, p);
+  }
+
+  const finish = (rows) => rows
+    .map((r) => ({ ...r, avg: r.count ? Math.round(r.sum / r.count * 10) / 10 : 0 }))
+    .sort((a, b) => a.avg - b.avg || b.count - a.count);
+
+  return {
+    total: n,
+    avg: n ? Math.round(sum / n * 10) / 10 : 0,
+    low,
+    byTech: finish([...byTech.values()]),
+    byPest: finish([...byPest.values()]),
+  };
+}
+
+// Довольные клиенты за последние дни — тех, кто поставил 4 или 5, есть смысл
+// просить оставить отзыв на картах. Это прямо приводит новых клиентов.
+export function happyClients(feedback = [], jobs = [], { todayIso, days = 7, minRating = 4 } = {}) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const from = new Date(`${today}T00:00:00`);
+  from.setDate(from.getDate() - days);
+  const jobById = new Map(jobs.map((j) => [String(j.id), j]));
+  return feedback
+    .filter((f) => (Number(f.rating) || 0) >= minRating && f.created_at && new Date(f.created_at) >= from)
+    .map((f) => ({ feedback: f, job: jobById.get(String(f.job_id || "")) }))
+    .filter((r) => r.job)
+    .sort((a, b) => String(b.feedback.created_at).localeCompare(String(a.feedback.created_at)));
+}
+
 // --- сравнение периодов --------------------------------------------------
 
 // Итоги периода: выручка, число выполненных заявок и средний чек.
