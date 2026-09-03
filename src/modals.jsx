@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor } from "./calc";
-import { TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -1070,6 +1070,52 @@ function StockInModal({ chem, purchases = [], onClose, onSave }) {
           ))}
         </details>
       )}
+    </ModalShell>
+  );
+}
+
+function TrainingModal({ person, record = null, onClose, onSave }) {
+  const [topic, setTopic] = useState(record?.topic || TRAINING_TOPICS[0]);
+  const [passed, setPassed] = useState(record?.passed_on || new Date().toISOString().slice(0, 10));
+  const [score, setScore] = useState(record?.score != null ? String(record.score) : "");
+  const [next, setNext] = useState(record?.next_check_on || "");
+  const [note, setNote] = useState(record?.note || "");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  const badScore = score !== "" && (Number(score) < 0 || Number(score) > 100 || Number.isNaN(Number(score)));
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave({
+      id: record?.id, person_id: person.id, topic,
+      passed_on: passed || null,
+      // пусто — значит «прошёл без оценки», а не ноль баллов
+      score: score === "" ? null : Number(score),
+      next_check_on: next || null, note: note.trim() || null,
+    });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={`${record ? "Обучение" : "Отметить обучение"} — ${person.full_name || "сотрудник"}`} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving || badScore} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <Field label="Тема">
+        <select value={topic} onChange={(e) => setTopic(e.target.value)}>
+          {TRAINING_TOPICS.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </Field>
+      <div className="kd-grid2">
+        <Field label="Пройдено"><input type="date" value={passed} onChange={(e) => setPassed(e.target.value)} /></Field>
+        <Field label="Перепроверить"><input type="date" value={next} onChange={(e) => setNext(e.target.value)} /></Field>
+      </div>
+      <Field label="Балл (0–100, можно оставить пустым)">
+        <input value={score} onChange={(e) => setScore(e.target.value)} inputMode="numeric" placeholder="без оценки" />
+      </Field>
+      {badScore && <div className="kd-err" style={{ marginBottom: 10 }}>Балл должен быть числом от 0 до 100.</div>}
+      {!next && <div className="kd-hint" style={{ marginBottom: 10 }}>Без даты перепроверки о теме не напомнят.</div>}
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="что разобрали, что осталось" /></Field>
     </ModalShell>
   );
 }
@@ -2851,4 +2897,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
