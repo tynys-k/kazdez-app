@@ -1074,6 +1074,42 @@ function StockInModal({ chem, purchases = [], onClose, onSave }) {
   );
 }
 
+function PlanModal({ monthKey, label, target = null, onClose, onSave }) {
+  const [revenue, setRevenue] = useState(target?.revenue != null ? String(target.revenue) : "");
+  const [jobsN, setJobsN] = useState(target?.jobs != null ? String(target.jobs) : "");
+  const [saving, setSaving] = useState(false);
+  const rev = Number(revenue) || 0;
+  const cnt = Number(jobsN) || 0;
+  // Чек не спрашиваем: он полностью определяется выручкой и числом заявок,
+  // и заданный отдельно противоречил бы им при первой же правке.
+  const avg = cnt > 0 ? Math.round(rev / cnt) : 0;
+  const ok = rev > 0 && cnt > 0;
+  async function save(clear) {
+    setSaving(true);
+    await onSave(monthKey, clear ? null : { revenue: rev, jobs: cnt, avg });
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={`План на ${label}`} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      {target && <button className="kd-btn ghost danger" disabled={saving} onClick={() => save(true)}>Снять план</button>}
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={() => save(false)}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>
+        Цель на месяц. Без неё все показатели отвечают только на «сколько получилось» и ни один — на «сколько должно было».
+      </div>
+      <div className="kd-grid2">
+        <Field label="Выручка за месяц (₸)"><input value={revenue} onChange={(e) => setRevenue(e.target.value)} inputMode="numeric" placeholder="3000000" /></Field>
+        <Field label="Выполненных заявок"><input value={jobsN} onChange={(e) => setJobsN(e.target.value)} inputMode="numeric" placeholder="80" /></Field>
+      </div>
+      <div className="kd-row"><span>Средний чек по плану</span><strong>{avg ? `${fmt(avg)} ₸` : "—"}</strong></div>
+      <div className="kd-muted" style={{ marginTop: 8 }}>
+        Чек считается сам: выручка ÷ заявки. Отдельно заданный, он противоречил бы им при первой же правке.
+      </div>
+    </ModalShell>
+  );
+}
+
 function TechDocModal({ tech, doc = null, onClose, onSave }) {
   const [kind, setKind] = useState(doc?.kind || "medbook");
   const [number, setNumber] = useState(doc?.number || "");
@@ -1593,7 +1629,12 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
                 onBlur={(e) => { const v = e.target.value.trim(); if (v !== (settings[l.key] || "")) onSaveSetting(l.key, v || null); }} />
             </div>
           ))}
-          <div className="kd-muted">Сохраняется при выходе из поля.</div>
+          <div className="kd-field">
+            <span>⭐ Страница отзывов</span>
+            <input defaultValue={settings.review_link || ""} placeholder="https://2gis.kz/... или ссылка на Карты"
+              onBlur={(e) => { const v = e.target.value.trim(); if (v !== (settings.review_link || "")) onSaveSetting("review_link", v || null); }} />
+          </div>
+          <div className="kd-muted">Ссылка подставляется в просьбу об отзыве довольным клиентам. Сохраняется при выходе из поля.</div>
         </SettingsSection>
 
         <SettingsSection title="Стадии воронки" subtitle={`${leadStages.length} стадий · CRM «Клиенты»`} open={openSection === "leadstages"} onToggle={() => toggle("leadstages")}>
@@ -2851,4 +2892,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };

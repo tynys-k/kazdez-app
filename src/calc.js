@@ -236,6 +236,116 @@ function monthsBetween(fromIso, toIso) {
   return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) - (b.getDate() < a.getDate() ? 1 : 0);
 }
 
+// --- оценки клиентов -----------------------------------------------------
+
+// Средняя оценка по сотрудникам и по видам работ.
+//
+// Оценки клиент ставит на публичной странице заявки — это уже собирается.
+// Не хватало ответа на вопрос, кто и на чём получает низкие оценки.
+//
+// Средняя по трём отзывам ничего не значит, поэтому вместе со средней всегда
+// возвращаем их количество: показывать «5,0» по одному отзыву как достижение
+// нечестно.
+export function feedbackStats(feedback = [], jobs = [], { inPeriod = () => true } = {}) {
+  const jobById = new Map(jobs.map((j) => [String(j.id), j]));
+  const byTech = new Map();
+  const byPest = new Map();
+  let sum = 0, n = 0, low = 0;
+
+  for (const f of feedback) {
+    const rating = Number(f.rating) || 0;
+    if (!rating) continue;
+    const job = jobById.get(String(f.job_id || ""));
+    if (!job || !inPeriod(job.scheduled_date)) continue;
+    sum += rating; n += 1;
+    if (rating <= 3) low += 1;
+
+    const techKey = String(job.assigned_to || "");
+    const t = byTech.get(techKey) || { techId: job.assigned_to, sum: 0, count: 0, low: 0 };
+    t.sum += rating; t.count += 1; if (rating <= 3) t.low += 1;
+    byTech.set(techKey, t);
+
+    const pestKey = (job.pest || "—").trim() || "—";
+    const p = byPest.get(pestKey) || { pest: pestKey, sum: 0, count: 0, low: 0 };
+    p.sum += rating; p.count += 1; if (rating <= 3) p.low += 1;
+    byPest.set(pestKey, p);
+  }
+
+  const finish = (rows) => rows
+    .map((r) => ({ ...r, avg: r.count ? Math.round(r.sum / r.count * 10) / 10 : 0 }))
+    .sort((a, b) => a.avg - b.avg || b.count - a.count);
+
+  return {
+    total: n,
+    avg: n ? Math.round(sum / n * 10) / 10 : 0,
+    low,
+    byTech: finish([...byTech.values()]),
+    byPest: finish([...byPest.values()]),
+  };
+}
+
+// Довольные клиенты за последние дни — тех, кто поставил 4 или 5, есть смысл
+// просить оставить отзыв на картах. Это прямо приводит новых клиентов.
+export function happyClients(feedback = [], jobs = [], { todayIso, days = 7, minRating = 4 } = {}) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const from = new Date(`${today}T00:00:00`);
+  from.setDate(from.getDate() - days);
+  const jobById = new Map(jobs.map((j) => [String(j.id), j]));
+  return feedback
+    .filter((f) => (Number(f.rating) || 0) >= minRating && f.created_at && new Date(f.created_at) >= from)
+    .map((f) => ({ feedback: f, job: jobById.get(String(f.job_id || "")) }))
+    .filter((r) => r.job)
+    .sort((a, b) => String(b.feedback.created_at).localeCompare(String(a.feedback.created_at)));
+}
+
+// --- план на месяц -------------------------------------------------------
+
+// Насколько выполнен план и успеваем ли по темпу.
+//
+// Все показатели отвечали на «сколько получилось» и ни один — на «сколько
+// должно было». Без этого цифры описывают прошлое, но не управляют будущим.
+//
+// Главное здесь не процент выполнения, а темп: 60% плана к 20 числа — это
+// провал, а к 8 числу — опережение. Поэтому рядом с фактом всегда считается,
+// сколько должно быть на сегодня.
+export function planProgress(target, actual, { monthKey, todayIso } = {}) {
+  const t = Number(target) || 0;
+  const a = Number(actual) || 0;
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const key = String(monthKey || today.slice(0, 7));
+  const [y, m] = key.split("-").map(Number);
+  if (!y || !m) return null;
+
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const nowKey = today.slice(0, 7);
+  // Прошедший месяц закончился целиком, будущий ещё не начинался.
+  const daysPassed = key === nowKey ? Number(today.slice(8, 10)) : (key < nowKey ? daysInMonth : 0);
+  const daysLeft = Math.max(0, daysInMonth - daysPassed);
+  const expected = Math.round(t * daysPassed / daysInMonth);
+
+  return {
+    target: t, actual: a, daysInMonth, daysPassed, daysLeft, expected,
+    // без плана процент считать не от чего — это null, а не ноль
+    pct: t > 0 ? Math.round(a / t * 100) : null,
+    gap: Math.round(a - expected),
+    // сколько нужно делать в оставшиеся дни, чтобы закрыть план
+    perDayNeeded: t > a && daysLeft > 0 ? Math.round((t - a) / daysLeft) : 0,
+  };
+}
+
+// Планы хранятся одной записью в настройках: {"2026-09": {revenue, jobs, avg}}.
+// Отдельная таблица тут ничего не добавляет — записей несколько штук в год.
+export function parseTargets(raw) {
+  if (!raw) return {};
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    // испорченная запись не должна ронять весь раздел денег
+    return {};
+  }
+}
+
 // --- абоненты против разовых ---------------------------------------------
 
 // Сравнение абонентских заявок с разовыми.
