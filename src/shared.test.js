@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clientMemoFor, phoneKey, samePhone, waLink, winbackMsg } from "./shared";
+import { clientMemoFor, monthLabel, phoneKey, samePhone, waLink, winbackMsg } from "./shared";
 
 describe("phoneKey", () => {
   it("склеивает записи одного номера в разных формах", () => {
@@ -84,5 +84,17 @@ describe("текст для возврата клиента", () => {
 
   it("год и больше не считает месяцами", () => {
     expect(winbackMsg({ monthsSince: 20 })).toContain("больше года назад");
+  });
+});
+
+describe("подпись месяца", () => {
+  it("показывает год — иначе два августа подряд не различить", () => {
+    expect(monthLabel("2026-08")).toBe("авг 26");
+    expect(monthLabel("2025-08")).toBe("авг 25");
+  });
+
+  it("мусор возвращает как есть, а не падает", () => {
+    expect(monthLabel("")).toBe("");
+    expect(monthLabel("что-то")).toBe("что-то");
   });
 });

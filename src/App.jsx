@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { monthLabel, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
@@ -2182,6 +2182,12 @@ function Dashboard({ session, profile }) {
     { key: "avg", label: "Средний чек", money: true, target: planTarget?.avg, actual: totalsNow.avg },
   ].map((r) => ({ ...r, progress: calc.planProgress(r.target, r.actual, { monthKey: planMonthKey }) })) : [];
 
+  // Сезонность: 24 месяца назад, с оглядкой на тот же месяц год назад.
+  const season = calc.seasonality(jobs, { monthsBack: 24, brandFilter });
+  const seasonMax = Math.max(1, ...season.map((r) => r.revenue));
+  // Абоненты против разовых за выбранный период.
+  const subsVsOne = calc.subscriptionComparison(jobs, { inPeriod: inPeriodIso, phoneKeyOf: phoneKey });
+
   const upliftPct = upliftTotals.quote > 0 ? Math.round((upliftTotals.paid - upliftTotals.quote) / upliftTotals.quote * 100) : 0;
 
   // ---- склад ----
@@ -3788,6 +3794,50 @@ function Dashboard({ session, profile }) {
                   ))}
                   <div className="kd-muted" style={{ marginTop: 8 }}>
                     Средняя по двум-трём отзывам ничего не значит — поэтому рядом всегда стоит их количество.
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Сезонность · два года по месяцам</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>
+                Сравнение с предыдущим месяцем здесь ничего не говорит: разница между июлем и августом — это сезон, а не работа компании. Поэтому справа стоит тот же месяц год назад.
+              </div>
+              <div className="kd-seasonlist">
+                {season.map((r) => (
+                  <div className="kd-seasonrow" key={r.month}>
+                    <span className="kd-muted">{monthLabel(r.month)}</span>
+                    <span className="kd-seasonbar"><i style={{ width: `${Math.round(r.revenue / seasonMax * 100)}%` }} /></span>
+                    <strong>{r.revenue ? fmt(r.revenue) : "—"}</strong>
+                    <span className="kd-muted">{r.done || ""}</span>
+                    <span className={r.yoy == null ? "kd-muted" : r.yoy >= 0 ? "kd-delta-up" : "kd-delta-down"}>
+                      {r.yoy == null ? (r.revenue ? "год назад данных нет" : "") : `${r.yoy > 0 ? "+" : ""}${r.yoy}% к ${monthLabel(r.prevYear.month)}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Абоненты против разовых · {range.label}</div>
+              {subsVsOne.subscription.done === 0 && subsVsOne.oneOff.done === 0 && <div className="kd-muted">За период выполненных заявок нет.</div>}
+              {(subsVsOne.subscription.done > 0 || subsVsOne.oneOff.done > 0) && (
+                <>
+                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 1fr 1fr" }}>
+                    <span> </span><span>Заявок</span><span>Выручка</span><span>Чек</span><span>С клиента</span>
+                  </div>
+                  {[subsVsOne.subscription, subsVsOne.oneOff].map((r) => (
+                    <div className="kd-ledgerrow" key={r.label} style={{ gridTemplateColumns: "1.2fr 1fr 1fr 1fr 1fr" }}>
+                      <span className="kd-ledgername">{r.label}<em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{r.clients} клиентов · {r.jobsPerClient} заявки на клиента</em></span>
+                      <span>{r.done}</span>
+                      <span>{fmt(r.revenue)} ₸</span>
+                      <span>{fmt(r.avg)} ₸</span>
+                      <strong>{fmt(r.perClient)} ₸</strong>
+                    </div>
+                  ))}
+                  <div className="kd-muted" style={{ marginTop: 8 }}>
+                    Смотреть надо на последнюю колонку, а не на чек. У абонента чек ниже, но он приходит сам, не стоит рекламы и даёт несколько заявок в год.
                   </div>
                 </>
               )}

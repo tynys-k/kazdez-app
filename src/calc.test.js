@@ -7,6 +7,7 @@ import {
   turnoverReport, chemPriceOn, chemForecast, supplierPrices,
   docStatus, docsNeedingAttention, guaranteeCostOf, guaranteeStats, dormantClients,
   periodTotals, comparePeriods, feedbackStats, happyClients,
+  seasonality, subscriptionComparison,
   planProgress, parseTargets,
 } from "./calc";
 
@@ -1096,5 +1097,73 @@ describe("хранение планов", () => {
   it("испорченная запись не роняет раздел денег", () => {
     expect(parseTargets("{это не json")).toEqual({});
     expect(parseTargets(null)).toEqual({});
+  });
+});
+
+describe("сезонность", () => {
+  const jobs = [
+    { status: "done", scheduled_date: "2025-08-10", report_paid: 100000 },
+    { status: "done", scheduled_date: "2026-08-10", report_paid: 150000 },
+    { status: "done", scheduled_date: "2026-08-20", report_paid: 50000 },
+    { status: "canceled", scheduled_date: "2026-08-21", report_paid: 999999 },
+  ];
+
+  it("сравнивает месяц с тем же месяцем год назад, а не с предыдущим", () => {
+    const rows = seasonality(jobs, { monthsBack: 24, todayIso: "2026-08-15" });
+    const aug26 = rows.find((r) => r.month === "2026-08");
+    expect(aug26.revenue).toBe(200000);
+    expect(aug26.done).toBe(2);
+    expect(aug26.prevYear.month).toBe("2025-08");
+    expect(aug26.yoy).toBe(100);
+  });
+
+  it("месяцы без заявок остаются в списке пустыми", () => {
+    const rows = seasonality(jobs, { monthsBack: 24, todayIso: "2026-08-15" });
+    expect(rows.length).toBe(24);
+    // провал в середине графика — тоже факт, прятать его нельзя
+    expect(rows.find((r) => r.month === "2026-03")).toMatchObject({ revenue: 0, done: 0 });
+  });
+
+  it("без данных за прошлый год сравнения нет — это null, а не ноль", () => {
+    const rows = seasonality(jobs, { monthsBack: 24, todayIso: "2026-08-15" });
+    expect(rows.find((r) => r.month === "2025-08").yoy).toBeNull();
+  });
+
+  it("отменённые в сезонность не попадают", () => {
+    const rows = seasonality(jobs, { monthsBack: 24, todayIso: "2026-08-15" });
+    expect(rows.find((r) => r.month === "2026-08").revenue).toBe(200000);
+  });
+});
+
+describe("абоненты против разовых", () => {
+  const key = (p) => String(p || "").replace(/\D/g, "").slice(-10);
+  const jobs = [
+    // абонент: два выезда, чек ниже
+    { status: "done", scheduled_date: "2026-08-05", report_paid: 20000, service_contract_id: "c1", client_phone: "7011111111" },
+    { status: "done", scheduled_date: "2026-08-20", report_paid: 20000, service_contract_id: "c1", client_phone: "7011111111" },
+    // разовый: один выезд, чек выше
+    { status: "done", scheduled_date: "2026-08-07", report_paid: 35000, client_phone: "7022222222" },
+    { status: "new", scheduled_date: "2026-08-09", client_phone: "7033333333" },
+  ];
+  const august = (iso) => String(iso).slice(0, 7) === "2026-08";
+
+  it("у абонента чек ниже, а выручка с клиента выше — ради этого всё и считается", () => {
+    const { subscription, oneOff } = subscriptionComparison(jobs, { inPeriod: august, phoneKeyOf: key });
+    expect(subscription.avg).toBe(20000);
+    expect(oneOff.avg).toBe(35000);
+    expect(subscription.perClient).toBe(40000);
+    expect(oneOff.perClient).toBe(35000);
+  });
+
+  it("клиенты считаются по телефону, а не по числу заявок", () => {
+    const { subscription } = subscriptionComparison(jobs, { inPeriod: august, phoneKeyOf: key });
+    expect(subscription.clients).toBe(1);
+    expect(subscription.done).toBe(2);
+    expect(subscription.jobsPerClient).toBe(2);
+  });
+
+  it("невыполненные заявки не считаются ни там, ни там", () => {
+    const { oneOff } = subscriptionComparison(jobs, { inPeriod: august, phoneKeyOf: key });
+    expect(oneOff.done).toBe(1);
   });
 });

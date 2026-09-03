@@ -346,6 +346,92 @@ export function parseTargets(raw) {
   }
 }
 
+// --- абоненты против разовых ---------------------------------------------
+
+// Сравнение абонентских заявок с разовыми.
+//
+// У абонента чек ниже — и на этом сравнение обычно заканчивается, хотя вывод
+// из него неверный. Абонент приходит сам, не стоит рекламы и даёт несколько
+// заявок в год, поэтому смотреть надо не на чек, а на выручку с клиента.
+//
+// Заявка считается абонентской по service_contract_id — так её и создаёт
+// раздел «Абоненты».
+export function subscriptionComparison(jobs = [], { inPeriod = () => true, phoneKeyOf } = {}) {
+  const make = () => ({ done: 0, revenue: 0, clients: new Set() });
+  const sub = make();
+  const one = make();
+
+  for (const j of jobs) {
+    if (j.status !== "done" || !inPeriod(j.scheduled_date)) continue;
+    const bucket = j.service_contract_id ? sub : one;
+    bucket.done += 1;
+    bucket.revenue += Number(j.report_paid) || 0;
+    const key = phoneKeyOf ? phoneKeyOf(j.client_phone) : String(j.client_phone || "");
+    if (key) bucket.clients.add(key);
+  }
+
+  const finish = (b, label) => ({
+    label,
+    done: b.done,
+    revenue: b.revenue,
+    clients: b.clients.size,
+    avg: b.done ? Math.round(b.revenue / b.done) : 0,
+    perClient: b.clients.size ? Math.round(b.revenue / b.clients.size) : 0,
+    jobsPerClient: b.clients.size ? Math.round(b.done / b.clients.size * 10) / 10 : 0,
+  });
+
+  return { subscription: finish(sub, "Абоненты"), oneOff: finish(one, "Разовые") };
+}
+
+// --- сезонность ----------------------------------------------------------
+
+// Выручка и заявки по месяцам, с оглядкой на тот же месяц год назад.
+//
+// В дезинфекции сезон решает всё, а сравнения «этот август против прошлого»
+// в системе не было — планировать закуп и найм не от чего. Сравнение с
+// предыдущим месяцем тут не помогает: разница между июлем и августом это
+// сезон, а не работа компании.
+//
+// Месяцы без единой заявки остаются в списке пустыми строками: провал в
+// середине графика — это тоже факт, и прятать его нельзя.
+export function seasonality(jobs = [], { monthsBack = 24, todayIso, brandFilter = "all" } = {}) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const [y, m] = today.split("-").map(Number);
+  const keys = [];
+  for (let i = monthsBack - 1; i >= 0; i -= 1) {
+    const d = new Date(y, m - 1 - i, 1);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+
+  const acc = new Map(keys.map((k) => [k, { month: k, revenue: 0, done: 0 }]));
+  for (const j of jobs) {
+    if (j.status !== "done" || !j.scheduled_date) continue;
+    const isPartner = j.brand === "partner";
+    if (brandFilter === "ours" && isPartner) continue;
+    if (brandFilter === "partner" && !isPartner) continue;
+    const key = String(j.scheduled_date).slice(0, 7);
+    const row = acc.get(key);
+    if (!row) continue;
+    row.done += 1;
+    row.revenue += Number(j.report_paid) || 0;
+  }
+
+  const byKey = new Map([...acc.values()].map((r) => [r.month, r]));
+  return keys.map((k) => {
+    const row = byKey.get(k);
+    const [ky, km] = k.split("-");
+    const prevKey = `${Number(ky) - 1}-${km}`;
+    const prev = byKey.get(prevKey) || null;
+    const avg = row.done ? Math.round(row.revenue / row.done) : 0;
+    return {
+      ...row, avg,
+      prevYear: prev ? { ...prev, avg: prev.done ? Math.round(prev.revenue / prev.done) : 0 } : null,
+      // null, а не ноль: год назад данных может просто не быть, и это другое
+      yoy: prev && prev.revenue > 0 ? Math.round((row.revenue - prev.revenue) / prev.revenue * 100) : null,
+    };
+  });
+}
+
 // --- сравнение периодов --------------------------------------------------
 
 // Итоги периода: выручка, число выполненных заявок и средний чек.
