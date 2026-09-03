@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor } from "./calc";
-import { TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -1105,6 +1105,53 @@ function PlanModal({ monthKey, label, target = null, onClose, onSave }) {
       <div className="kd-row"><span>Средний чек по плану</span><strong>{avg ? `${fmt(avg)} ₸` : "—"}</strong></div>
       <div className="kd-muted" style={{ marginTop: 8 }}>
         Чек считается сам: выручка ÷ заявки. Отдельно заданный, он противоречил бы им при первой же правке.
+      </div>
+    </ModalShell>
+  );
+}
+
+function PeopleEventModal({ person, record = null, onClose, onSave }) {
+  const [kind, setKind] = useState(record?.kind || "salary");
+  const [date, setDate] = useState(record?.happened_on || new Date().toISOString().slice(0, 10));
+  const [amount, setAmount] = useState(record?.amount != null ? String(record.amount) : "");
+  const [note, setNote] = useState(record?.note || "");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  // Сумма нужна не всем событиям: у перевода или увольнения её просто нет.
+  const needsAmount = kind === "salary" || kind === "award" || kind === "penalty";
+  const ok = !!date && (!needsAmount || Number(amount) > 0);
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave({
+      id: record?.id, person_id: person.id, kind, happened_on: date,
+      amount: needsAmount ? Number(amount) || 0 : null,
+      note: note.trim() || null,
+    });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={`${record ? "Запись" : "Новая запись"} — ${person.full_name || "сотрудник"}`} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <div className="kd-grid2">
+        <Field label="Что произошло">
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            {Object.entries(EMPLOYEE_EVENTS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </Field>
+        <Field label="Дата"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      </div>
+      {needsAmount && (
+        <Field label={kind === "salary" ? "Новый оклад (₸)" : "Сумма (₸)"}>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="150000" />
+        </Field>
+      )}
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за что, по чьему решению" /></Field>
+      <div className="kd-muted" style={{ marginTop: 8 }}>
+        Изменения оклада записываются сюда автоматически при правке карточки сотрудника. Руками сюда вносят приём, переводы, премии и взыскания.
       </div>
     </ModalShell>
   );
@@ -2938,4 +2985,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };

@@ -10,28 +10,57 @@
 // отдельно и осторожно, а не заодно.
 
 import React from "react";
-import { AddressText, DRIVE_LINKS, DriveLinkCard, fmt, fmtTs } from "./shared";
+import { AddressText, DRIVE_LINKS, DriveLinkCard, fmt, fmtTs, isoToRu } from "./shared";
+import { lastAcknowledgement } from "./calc";
 
-export function MaterialsTab({ settings, isAdmin }) {
+// Отметка «ознакомлен» под материалом, с которым надо ознакомиться под подпись.
+//
+// Раньше ТБ и обучение были просто ссылками на Диск: кто открывал и кто
+// прочитал — нигде, а при несчастном случае подтвердить инструктаж нечем.
+// Отметку ставит сам человек за себя: чужая подпись ничего не подтверждает.
+function AckLine({ link, acks, myId, onAcknowledge }) {
+  const mine = lastAcknowledgement(acks, myId, link.key);
+  if (mine) {
+    return (
+      <div className="kd-ackline done">
+        Вы ознакомились {isoToRu(String(mine.acknowledged_at).slice(0, 10))}.
+        <button className="kd-btn ghost sm" onClick={() => onAcknowledge(link.key)}>Ознакомиться заново</button>
+      </div>
+    );
+  }
   return (
-    <div className="kd-list">
-      <div className="kd-title" style={{ fontSize: 18, marginBottom: 4 }}>Материалы компании</div>
-      <div className="kd-muted" style={{ marginBottom: 8 }}>Маркетинг и техника безопасности.{isAdmin ? " Ссылки меняются в Настройках." : ""}</div>
-      {DRIVE_LINKS.filter((l) => l.place === "materials").map((l) => (
-        <DriveLinkCard key={l.key} link={l} url={settings[l.key]} isAdmin={isAdmin} />
-      ))}
+    <div className="kd-ackline">
+      Отметка об ознакомлении не поставлена.
+      <button className="kd-btn primary sm" onClick={() => onAcknowledge(link.key)}>Я ознакомился</button>
     </div>
   );
 }
 
-export function KnowledgeTab({ settings, isAdmin }) {
+function LinkList({ place, settings, isAdmin, acks, myId, onAcknowledge }) {
+  return DRIVE_LINKS.filter((l) => l.place === place).map((l) => (
+    <div key={l.key}>
+      <DriveLinkCard link={l} url={settings[l.key]} isAdmin={isAdmin} />
+      {l.ack && onAcknowledge && <AckLine link={l} acks={acks} myId={myId} onAcknowledge={onAcknowledge} />}
+    </div>
+  ));
+}
+
+export function MaterialsTab({ settings, isAdmin, acks = [], myId, onAcknowledge }) {
+  return (
+    <div className="kd-list">
+      <div className="kd-title" style={{ fontSize: 18, marginBottom: 4 }}>Материалы компании</div>
+      <div className="kd-muted" style={{ marginBottom: 8 }}>Маркетинг и техника безопасности.{isAdmin ? " Ссылки меняются в Настройках." : ""}</div>
+      <LinkList place="materials" settings={settings} isAdmin={isAdmin} acks={acks} myId={myId} onAcknowledge={onAcknowledge} />
+    </div>
+  );
+}
+
+export function KnowledgeTab({ settings, isAdmin, acks = [], myId, onAcknowledge }) {
   return (
     <div className="kd-list">
       <div className="kd-title" style={{ fontSize: 18, marginBottom: 4 }}>База знаний</div>
       <div className="kd-muted" style={{ marginBottom: 8 }}>Обучение: скрипты продаж и разговора с клиентами.{isAdmin ? " Ссылки меняются в Настройках." : ""}</div>
-      {DRIVE_LINKS.filter((l) => l.place === "knowledge").map((l) => (
-        <DriveLinkCard key={l.key} link={l} url={settings[l.key]} isAdmin={isAdmin} />
-      ))}
+      <LinkList place="knowledge" settings={settings} isAdmin={isAdmin} acks={acks} myId={myId} onAcknowledge={onAcknowledge} />
     </div>
   );
 }
