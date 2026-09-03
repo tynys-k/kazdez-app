@@ -298,6 +298,54 @@ export function happyClients(feedback = [], jobs = [], { todayIso, days = 7, min
     .sort((a, b) => String(b.feedback.created_at).localeCompare(String(a.feedback.created_at)));
 }
 
+// --- план на месяц -------------------------------------------------------
+
+// Насколько выполнен план и успеваем ли по темпу.
+//
+// Все показатели отвечали на «сколько получилось» и ни один — на «сколько
+// должно было». Без этого цифры описывают прошлое, но не управляют будущим.
+//
+// Главное здесь не процент выполнения, а темп: 60% плана к 20 числа — это
+// провал, а к 8 числу — опережение. Поэтому рядом с фактом всегда считается,
+// сколько должно быть на сегодня.
+export function planProgress(target, actual, { monthKey, todayIso } = {}) {
+  const t = Number(target) || 0;
+  const a = Number(actual) || 0;
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const key = String(monthKey || today.slice(0, 7));
+  const [y, m] = key.split("-").map(Number);
+  if (!y || !m) return null;
+
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const nowKey = today.slice(0, 7);
+  // Прошедший месяц закончился целиком, будущий ещё не начинался.
+  const daysPassed = key === nowKey ? Number(today.slice(8, 10)) : (key < nowKey ? daysInMonth : 0);
+  const daysLeft = Math.max(0, daysInMonth - daysPassed);
+  const expected = Math.round(t * daysPassed / daysInMonth);
+
+  return {
+    target: t, actual: a, daysInMonth, daysPassed, daysLeft, expected,
+    // без плана процент считать не от чего — это null, а не ноль
+    pct: t > 0 ? Math.round(a / t * 100) : null,
+    gap: Math.round(a - expected),
+    // сколько нужно делать в оставшиеся дни, чтобы закрыть план
+    perDayNeeded: t > a && daysLeft > 0 ? Math.round((t - a) / daysLeft) : 0,
+  };
+}
+
+// Планы хранятся одной записью в настройках: {"2026-09": {revenue, jobs, avg}}.
+// Отдельная таблица тут ничего не добавляет — записей несколько штук в год.
+export function parseTargets(raw) {
+  if (!raw) return {};
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    // испорченная запись не должна ронять весь раздел денег
+    return {};
+  }
+}
+
 // --- сравнение периодов --------------------------------------------------
 
 // Итоги периода: выручка, число выполненных заявок и средний чек.

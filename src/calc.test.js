@@ -7,6 +7,7 @@ import {
   turnoverReport, chemPriceOn, chemForecast, supplierPrices,
   docStatus, docsNeedingAttention, guaranteeCostOf, guaranteeStats, dormantClients,
   periodTotals, comparePeriods, feedbackStats, happyClients,
+  planProgress, parseTargets,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -1040,5 +1041,60 @@ describe("оценки клиентов", () => {
   it("недовольных в этот список не зовут", () => {
     const rows = happyClients(feedback, jobs, { todayIso: "2026-08-14", days: 30 });
     expect(rows.every((r) => r.feedback.rating >= 4)).toBe(true);
+  });
+});
+
+describe("план на месяц", () => {
+  it("считает не только процент, но и темп на сегодня", () => {
+    // 15 из 30 дней прошло: на сегодня должно быть половина плана
+    const p = planProgress(3000000, 1200000, { monthKey: "2026-09", todayIso: "2026-09-15" });
+    expect(p.daysInMonth).toBe(30);
+    expect(p.daysPassed).toBe(15);
+    expect(p.expected).toBe(1500000);
+    expect(p.pct).toBe(40);
+    expect(p.gap).toBe(-300000);
+  });
+
+  it("60% к 8 числу — опережение, а не провал", () => {
+    const p = planProgress(1000000, 600000, { monthKey: "2026-09", todayIso: "2026-09-08" });
+    expect(p.gap).toBeGreaterThan(0);
+  });
+
+  it("прошедший месяц считается целиком", () => {
+    const p = planProgress(1000000, 900000, { monthKey: "2026-07", todayIso: "2026-09-15" });
+    expect(p.daysPassed).toBe(31);
+    expect(p.expected).toBe(1000000);
+    expect(p.daysLeft).toBe(0);
+  });
+
+  it("будущий месяц ещё не начинался", () => {
+    const p = planProgress(1000000, 0, { monthKey: "2026-12", todayIso: "2026-09-15" });
+    expect(p.daysPassed).toBe(0);
+    expect(p.expected).toBe(0);
+  });
+
+  it("без плана процент считать не от чего — это null, а не ноль", () => {
+    expect(planProgress(0, 500000, { monthKey: "2026-09", todayIso: "2026-09-15" }).pct).toBeNull();
+  });
+
+  it("подсказывает, сколько нужно в день до конца месяца", () => {
+    const p = planProgress(1000000, 400000, { monthKey: "2026-09", todayIso: "2026-09-20" });
+    expect(p.daysLeft).toBe(10);
+    expect(p.perDayNeeded).toBe(60000);
+  });
+
+  it("план перевыполнен — догонять уже нечего", () => {
+    expect(planProgress(1000000, 1200000, { monthKey: "2026-09", todayIso: "2026-09-20" }).perDayNeeded).toBe(0);
+  });
+});
+
+describe("хранение планов", () => {
+  it("читает планы из настроек", () => {
+    expect(parseTargets('{"2026-09":{"revenue":100}}')).toEqual({ "2026-09": { revenue: 100 } });
+  });
+
+  it("испорченная запись не роняет раздел денег", () => {
+    expect(parseTargets("{это не json")).toEqual({});
+    expect(parseTargets(null)).toEqual({});
   });
 });
