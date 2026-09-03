@@ -10,11 +10,11 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -299,6 +299,8 @@ function Dashboard({ session, profile }) {
   const [chemPurchases, setChemPurchases] = useState([]);
   const [techDocs, setTechDocs] = useState([]);
   const [training, setTraining] = useState([]);
+  const [safetyAcks, setSafetyAcks] = useState([]);
+  const [peopleEvents, setPeopleEvents] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -500,9 +502,11 @@ function Dashboard({ session, profile }) {
       supabase.from("chemical_purchases").select("*").order("purchase_date", { ascending: false }),
       supabase.from("tech_documents").select("*").order("expires_on", { ascending: true }),
       supabase.from("training_records").select("*").order("passed_on", { ascending: false }),
+      supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }),
+      supabase.from("employee_events").select("*").order("happened_on", { ascending: false }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr, cpr, tdr, trr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс", "Закуп препаратов", "Допуски сотрудников", "Обучение"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr, cpr, tdr, trr, sar, evr] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс", "Закуп препаратов", "Допуски сотрудников", "Обучение", "Инструктаж", "История сотрудников"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     setReportChemsFailed(!!cr.error);
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
@@ -555,6 +559,8 @@ function Dashboard({ session, profile }) {
     setChemPurchases(cpr.data || []);
     setTechDocs(tdr.data || []);
     setTraining(trr.data || []);
+    setSafetyAcks(sar.data || []);
+    setPeopleEvents(evr.data || []);
     if (!useOfflineSnapshot && !jr.error) {
       try {
         const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
@@ -1106,6 +1112,25 @@ function Dashboard({ session, profile }) {
     await logAction("Склад", `Удалён препарат: ${chem.name}`);
     showToast("Препарат удалён"); load();
   }
+  // Отметка об ознакомлении ставится только за себя — в этом весь смысл
+  // подтверждения, и база это же требует политикой.
+  async function acknowledgeDoc(docKey) {
+    const { error } = await supabase.from("safety_acknowledgements").insert({ person_id: session.user.id, doc_key: docKey });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Инструктаж", `Ознакомлен: ${DRIVE_LINKS.find((l) => l.key === docKey)?.label || docKey}`);
+    showToast("Отмечено"); load();
+  }
+
+  async function savePeopleEvent(payload) {
+    const row = { ...payload, created_by: session.user.id };
+    const { error } = payload.id
+      ? await supabase.from("employee_events").update({ kind: row.kind, happened_on: row.happened_on, amount: row.amount, note: row.note }).eq("id", payload.id)
+      : await supabase.from("employee_events").insert(row);
+    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+    await logAction("Кадры", `${personName(payload.person_id)} · ${EMPLOYEE_EVENTS[payload.kind] || payload.kind}${payload.amount != null ? ` · ${fmt(payload.amount)} ₸` : ""}`);
+    setModal(null); showToast("Сохранено"); load(); return null;
+  }
+
   async function saveTraining(payload) {
     const row = { ...payload, created_by: session.user.id };
     const { error } = payload.id
@@ -1324,6 +1349,17 @@ function Dashboard({ session, profile }) {
   async function editTechProfile(tech, payload) {
     const { error } = await supabase.from("profiles").update(payload).eq("id", tech.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
+    // Изменение оклада записываем в историю само: вручную это забывают, а
+    // через год вопрос «сколько он получал весной» остаётся без ответа.
+    const wasSalary = Number(tech.salary_monthly) || 0;
+    const nowSalary = Number(payload.salary_monthly) || 0;
+    if (nowSalary !== wasSalary) {
+      const { error: evError } = await supabase.from("employee_events").insert({
+        person_id: tech.id, kind: "salary", happened_on: new Date().toISOString().slice(0, 10),
+        amount: nowSalary, note: `Было ${fmt(wasSalary)} ₸`, created_by: session.user.id,
+      });
+      if (evError) showToast("Данные сохранены, но в историю запись не попала: " + evError.message);
+    }
     await logAction("Дезинфектор", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
     setModal(null); showToast("Сохранено"); load();
   }
@@ -4430,6 +4466,57 @@ function Dashboard({ session, profile }) {
               })}
             </div>}
             {canAccess("action.team_manage") && <div className="kd-card">
+              <div className="kd-section" style={{ marginTop: 0 }}>Инструктаж и материалы</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>
+                Кто подтвердил, что ознакомился. Отметку ставит сам человек в разделе с материалами — за него это сделать нельзя, иначе подпись ничего не подтверждает.
+              </div>
+              {DRIVE_LINKS.filter((l) => l.ack).map((l) => {
+                const pending = calc.notAcknowledged(allProfiles, safetyAcks, l.key);
+                return (
+                  <div className="kd-ledgerrow" key={l.key} style={{ gridTemplateColumns: "220px 1fr", alignItems: "start" }}>
+                    <span className="kd-ledgername">{l.emoji} {l.label}</span>
+                    <span style={{ textAlign: "left" }}>
+                      {pending.length === 0
+                        ? <em className="kd-muted" style={{ fontStyle: "normal", color: "var(--primary)" }}>ознакомились все</em>
+                        : <>
+                            <strong style={{ color: "var(--rust)" }}>не ознакомились: {pending.length}</strong>
+                            <em className="kd-muted" style={{ display: "block", fontStyle: "normal" }}>{pending.map((p) => p.full_name || "без имени").join(", ")}</em>
+                          </>}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>}
+            {canAccess("action.team_manage") && <div className="kd-card">
+              <div className="kd-section" style={{ marginTop: 0 }}>История сотрудников</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>
+                Приём, изменения оклада, переводы и взыскания. Изменение оклада записывается само — вручную это забывают.
+              </div>
+              {allProfiles.filter((p) => p.is_active !== false).map((p) => {
+                const hist = calc.employeeHistory(peopleEvents, p.id);
+                return (
+                  <details className="kd-more" key={p.id}>
+                    <summary>
+                      {p.full_name || "Без имени"}
+                      {hist.hired ? ` · с ${isoToRu(hist.hired)}` : " · дата приёма не указана"}
+                      {hist.lastSalary ? ` · оклад ${fmt(hist.lastSalary.amount)} ₸ с ${isoToRu(hist.lastSalary.happened_on)}` : ""}
+                      {` · записей ${hist.rows.length}`}
+                    </summary>
+                    {hist.rows.length === 0 && <div className="kd-muted">Записей нет.</div>}
+                    {hist.rows.map((e) => (
+                      <div className="kd-ledgerrow" key={e.id} style={{ gridTemplateColumns: "96px 160px 1fr auto" }}>
+                        <span className="kd-muted" style={{ textAlign: "left" }}>{isoToRu(e.happened_on)}</span>
+                        <span style={{ textAlign: "left" }}>{EMPLOYEE_EVENTS[e.kind] || e.kind}</span>
+                        <span className="kd-muted" style={{ textAlign: "left" }}>{e.note || ""}</span>
+                        <strong>{e.amount != null ? `${fmt(e.amount)} ₸` : ""}</strong>
+                      </div>
+                    ))}
+                    <button className="kd-btn ghost sm" style={{ marginTop: 8 }} onClick={() => setModal({ kind: "peopleEvent", person: p, record: null })}><Plus size={13} />Запись</button>
+                  </details>
+                );
+              })}
+            </div>}
+            {canAccess("action.team_manage") && <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>Обучение{trainingAlerts.length ? ` · перепроверить ${trainingAlerts.length}` : ""}</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>
                 Скрипты лежат на Диске, но факт обучения — здесь. Рядом стоит конверсия: без неё непонятно, кто провалился и по какой теме.
@@ -4625,9 +4712,9 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
-        {!loading && tab === "materials" && <MaterialsTab settings={settings} isAdmin={isAdmin} />}
+        {!loading && tab === "materials" && <MaterialsTab settings={settings} isAdmin={isAdmin} acks={safetyAcks} myId={session.user.id} onAcknowledge={acknowledgeDoc} />}
 
-        {!loading && tab === "knowledge" && <KnowledgeTab settings={settings} isAdmin={isAdmin} />}
+        {!loading && tab === "knowledge" && <KnowledgeTab settings={settings} isAdmin={isAdmin} acks={safetyAcks} myId={session.user.id} onAcknowledge={acknowledgeDoc} />}
 
         {!loading && tab === "docs" && (() => {
           const total = docs.reduce((s, d) => s + (Number(d.amount) || 0), 0);
@@ -4750,6 +4837,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
+      {modal?.kind === "peopleEvent" && <PeopleEventModal person={modal.person} record={modal.record} onClose={() => setModal(null)} onSave={savePeopleEvent} />}
       {modal?.kind === "training" && <TrainingModal person={modal.person} record={modal.record} onClose={() => setModal(null)} onSave={saveTraining} />}
       {modal?.kind === "techDoc" && <TechDocModal tech={modal.tech} doc={modal.doc} onClose={() => setModal(null)} onSave={saveTechDoc} />}
       {modal?.kind === "plan" && <PlanModal monthKey={modal.monthKey} label={modal.label} target={modal.target} onClose={() => setModal(null)} onSave={saveMonthlyPlan} />}

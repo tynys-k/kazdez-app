@@ -27,6 +27,18 @@ function fmtAmount(amount, kind) {
 }
 const lineAmount = (l) => Number(l.amount ?? l.ml) || 0;
 const pricePerBase = (chem) => (chem ? (Number(chem.price_per_liter) || 0) / (chemUnit(chem.unit_kind).factor || 1000) : 0);
+// Что бывает в истории сотрудника. Список закрытый: свободный вид события
+// превращает историю в переписку, по которой ничего не посчитать.
+const EMPLOYEE_EVENTS = {
+  hired: "Принят на работу",
+  salary: "Изменение оклада",
+  transfer: "Перевод / смена роли",
+  award: "Премия",
+  penalty: "Взыскание",
+  left: "Уволен",
+  other: "Другое",
+};
+
 // Темы обучения менеджеров. Список закрытый намеренно: свободный ввод темы
 // превращает отчёт в кашу, где «Возражения» и «работа с возражениями» — две
 // разные строки, и сравнить людей между собой уже нельзя.
@@ -111,8 +123,8 @@ const DRIVE_LINKS = [
   { key: "drive_tenders", label: "Тендеры", desc: "Документы по тендерам", emoji: "📁", place: "tenders" },
   { key: "drive_contracts", label: "Договоры", desc: "Договоры и приложения", emoji: "📄", place: "docs" },
   { key: "drive_marketing", label: "Маркетинг", desc: "Реклама, баннеры, макеты", emoji: "📣", place: "materials" },
-  { key: "drive_safety", label: "Техника безопасности", desc: "Инструкции по ТБ", emoji: "🦺", place: "materials" },
-  { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓", place: "knowledge" },
+  { key: "drive_safety", label: "Техника безопасности", desc: "Инструкции по ТБ", emoji: "🦺", place: "materials", ack: true },
+  { key: "drive_training", label: "Обучение", desc: "Скрипты продаж и разговора с клиентами", emoji: "🎓", place: "knowledge", ack: true },
   { key: "drive_kp", label: "КП клиентов", desc: "Папка со всеми коммерческими предложениями", emoji: "📑", place: "leads" },
 ];
 // Короткое честное имя раздела: используется в заголовке страницы и мобильной навигации.
@@ -444,4 +456,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  TECH_DOC_KINDS, TRAINING_TOPICS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  TECH_DOC_KINDS, TRAINING_TOPICS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };

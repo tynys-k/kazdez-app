@@ -10,6 +10,7 @@ import {
   seasonality, subscriptionComparison,
   planProgress, parseTargets,
   trainingSummary, trainingDue,
+  lastAcknowledgement, notAcknowledged, employeeHistory,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1266,5 +1267,59 @@ describe("партии препаратов", () => {
   it("партия без срока годности не попадает в предупреждения", () => {
     const chems = [{ id: "c2", name: "Гет" }];
     expect(expiringBatches(chems, purchases, { c2: 0 }, { todayIso: "2026-09-01" })).toEqual([]);
+  });
+});
+
+describe("отметки об инструктаже", () => {
+  const acks = [
+    { person_id: "p1", doc_key: "drive_safety", acknowledged_at: "2026-01-10T09:00:00Z" },
+    { person_id: "p1", doc_key: "drive_safety", acknowledged_at: "2026-07-10T09:00:00Z" },
+    { person_id: "p2", doc_key: "drive_training", acknowledged_at: "2026-05-01T09:00:00Z" },
+  ];
+
+  it("берёт свежую отметку, а не первую", () => {
+    // инструктаж проходят повторно — важна последняя дата
+    expect(lastAcknowledgement(acks, "p1", "drive_safety").acknowledged_at).toBe("2026-07-10T09:00:00Z");
+  });
+
+  it("отметка по другому материалу не считается", () => {
+    expect(lastAcknowledgement(acks, "p2", "drive_safety")).toBeNull();
+  });
+
+  it("показывает, кто ещё не ознакомился", () => {
+    const people = [{ id: "p1", full_name: "А" }, { id: "p2", full_name: "Б" }, { id: "p3", full_name: "В" }];
+    expect(notAcknowledged(people, acks, "drive_safety").map((p) => p.id)).toEqual(["p2", "p3"]);
+  });
+
+  it("отключённые сотрудники в списке не висят", () => {
+    const people = [{ id: "p2" }, { id: "p3", is_active: false }];
+    expect(notAcknowledged(people, acks, "drive_safety").map((p) => p.id)).toEqual(["p2"]);
+  });
+});
+
+describe("история сотрудника", () => {
+  const events = [
+    { id: "e1", person_id: "p1", kind: "hired", happened_on: "2024-03-01" },
+    { id: "e2", person_id: "p1", kind: "salary", happened_on: "2025-01-01", amount: 120000 },
+    { id: "e3", person_id: "p1", kind: "salary", happened_on: "2026-04-01", amount: 150000 },
+    { id: "e4", person_id: "p2", kind: "hired", happened_on: "2026-01-01" },
+  ];
+
+  it("последнее событие сверху", () => {
+    expect(employeeHistory(events, "p1").rows.map((e) => e.id)).toEqual(["e3", "e2", "e1"]);
+  });
+
+  it("дата приёма берётся из события, а не выдумывается", () => {
+    expect(employeeHistory(events, "p1").hired).toBe("2024-03-01");
+    // человека могли завести в системе через год после найма — без события даты нет
+    expect(employeeHistory([{ id: "x", person_id: "p3", kind: "salary", happened_on: "2026-01-01", amount: 1 }], "p3").hired).toBeNull();
+  });
+
+  it("текущий оклад — из последнего изменения", () => {
+    expect(employeeHistory(events, "p1").lastSalary).toMatchObject({ amount: 150000, happened_on: "2026-04-01" });
+  });
+
+  it("чужие события не попадают в историю", () => {
+    expect(employeeHistory(events, "p2").rows.map((e) => e.id)).toEqual(["e4"]);
   });
 });

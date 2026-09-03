@@ -84,6 +84,42 @@ export function docsNeedingAttention(docs = [], { todayIso, soonDays = 30, activ
     .sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
+// --- инструктаж и история сотрудника -------------------------------------
+
+// Кто и когда подтвердил, что ознакомился с материалом.
+//
+// Берём последнюю отметку по каждому материалу: инструктаж проходят
+// повторно, и важна свежая дата, а не первая в истории.
+export function lastAcknowledgement(acks = [], personId, docKey) {
+  let best = null;
+  for (const a of acks) {
+    if (String(a.person_id) !== String(personId) || a.doc_key !== docKey) continue;
+    if (!best || String(a.acknowledged_at) > String(best.acknowledged_at)) best = a;
+  }
+  return best;
+}
+
+// Кто ещё не ознакомился с материалом. Отключённые учётные записи не в счёт.
+export function notAcknowledged(profiles = [], acks = [], docKey) {
+  return profiles
+    .filter((p) => p.is_active !== false)
+    .filter((p) => !lastAcknowledgement(acks, p.id, docKey));
+}
+
+// История сотрудника в обратном порядке: последнее сверху.
+//
+// Дата приёма берётся из события «принят на работу», если оно заведено.
+// Выдумывать её из даты создания учётной записи нельзя: людей заводят в
+// системе и через год после найма.
+export function employeeHistory(events = [], personId) {
+  const rows = events
+    .filter((e) => String(e.person_id) === String(personId))
+    .sort((a, b) => String(b.happened_on).localeCompare(String(a.happened_on)));
+  const hired = rows.filter((e) => e.kind === "hired").map((e) => e.happened_on).sort()[0] || null;
+  const salaryChanges = rows.filter((e) => e.kind === "salary" && e.amount != null);
+  return { rows, hired, lastSalary: salaryChanges[0] || null, salaryChanges };
+}
+
 // --- обучение --------------------------------------------------------------
 
 // Сводка обучения по человеку: сколько тем пройдено, когда последняя и
