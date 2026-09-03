@@ -14,7 +14,7 @@ import { reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, AD
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -1248,6 +1248,16 @@ function Dashboard({ session, profile }) {
     return `Выплата не записалась: ${msg}. Проверь список выплат перед повторной попыткой — запись могла всё же пройти.`;
   }
 
+  async function saveMonthlyPlan(monthKey, values) {
+    const next = { ...calc.parseTargets(settings.monthly_targets) };
+    // Пустой план убираем целиком, иначе месяц остаётся с нулевыми целями и
+    // раздел показывает «0% выполнения» вместо «плана нет».
+    if (!values) delete next[monthKey]; else next[monthKey] = values;
+    await saveAppSetting("monthly_targets", JSON.stringify(next));
+    await logAction("План", values ? `${monthKey}: выручка ${fmt(values.revenue)} ₸, заявок ${values.jobs}` : `${monthKey}: план снят`);
+    setModal(null); showToast("План сохранён");
+  }
+
   async function savePayrollPayment(tech, payload) {
     if (blockedByClosedPeriod(payload.expense_date)) return "Период закрыт — выплату этой датой провести нельзя. Дату закрытия можно сдвинуть в Настройках.";
     try {
@@ -2159,6 +2169,18 @@ function Dashboard({ session, profile }) {
   // Оценки клиентов: кто и на чём получает низкие. Период — по дате заявки.
   const feedbackRating = calc.feedbackStats(publicFeedback, jobs, { inPeriod: inPeriodIso });
   const happy = calc.happyClients(publicFeedback, jobs, { days: 7 });
+
+  // План на месяц: цель по выручке, заявкам и чеку. Хранится в настройках
+  // одной записью — планов несколько штук в год, отдельная таблица тут
+  // ничего не добавляет.
+  const targets = calc.parseTargets(settings.monthly_targets);
+  const planMonthKey = pMode === "month" ? isoOf(new Date(range.start)).slice(0, 7) : null;
+  const planTarget = planMonthKey ? targets[planMonthKey] || null : null;
+  const planRows = planMonthKey ? [
+    { key: "revenue", label: "Выручка", money: true, target: planTarget?.revenue, actual: totalsNow.revenue },
+    { key: "jobs", label: "Выполненных заявок", money: false, target: planTarget?.jobs, actual: totalsNow.done },
+    { key: "avg", label: "Средний чек", money: true, target: planTarget?.avg, actual: totalsNow.avg },
+  ].map((r) => ({ ...r, progress: calc.planProgress(r.target, r.actual, { monthKey: planMonthKey }) })) : [];
 
   const upliftPct = upliftTotals.quote > 0 ? Math.round((upliftTotals.paid - upliftTotals.quote) / upliftTotals.quote * 100) : 0;
 
@@ -3511,6 +3533,45 @@ function Dashboard({ session, profile }) {
                 ))}
               </div>
             </div>
+            {pMode === "month" && (
+              <div className="kd-card" style={{ marginBottom: 14 }}>
+                <div className="kd-tabbar" style={{ marginBottom: 10 }}>
+                  <div>
+                    <div className="kd-section" style={{ margin: 0 }}>План на {range.label}</div>
+                    <div className="kd-muted">
+                      {planTarget
+                        ? `Прошло ${planRows[0].progress.daysPassed} из ${planRows[0].progress.daysInMonth} дней. Смотреть надо на темп, а не на процент: 60% к 20 числу — провал, к 8 числу — опережение.`
+                        : "Цель на месяц не задана. Пока её нет, все цифры отвечают только на «сколько получилось»."}
+                    </div>
+                  </div>
+                  {canManageCash && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "plan", monthKey: planMonthKey, label: range.label, target: planTarget })}>{planTarget ? "Изменить план" : "Задать план"}</button>}
+                </div>
+                {planTarget && planRows.map((r) => {
+                  const p = r.progress;
+                  const ahead = p.gap >= 0;
+                  return (
+                    <div className="kd-planrow" key={r.key}>
+                      <span>{r.label}</span>
+                      <span className="kd-planbar" title={`Отметка — сколько должно быть на сегодня: ${r.money ? fmt(p.expected) + " ₸" : p.expected}`}>
+                        <i style={{ width: `${Math.min(100, p.pct == null ? 0 : p.pct)}%`, background: ahead ? "var(--primary)" : "var(--amber)" }} />
+                        <b style={{ left: `${Math.min(100, Math.round(p.daysPassed / p.daysInMonth * 100))}%` }} />
+                      </span>
+                      <strong>{r.money ? `${fmt(p.actual)} ₸` : p.actual}</strong>
+                      <span className="kd-muted">из {r.money ? `${fmt(p.target)} ₸` : p.target}</span>
+                      <span className={ahead ? "kd-delta-up" : "kd-delta-down"}>
+                        {p.pct == null ? "план не задан" : `${p.pct}% · ${ahead ? "+" : ""}${r.money ? fmt(p.gap) : p.gap} к темпу`}
+                      </span>
+                    </div>
+                  );
+                })}
+                {planTarget && planRows[0].progress.daysLeft > 0 && planRows[0].progress.perDayNeeded > 0 && (
+                  <div className="kd-muted" style={{ marginTop: 8 }}>
+                    Чтобы закрыть план по выручке, осталось делать {fmt(planRows[0].progress.perDayNeeded)} ₸ в день — {planRows[0].progress.daysLeft} дней.
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="kd-twocol">
               <div className="kd-card">
                 <div className="kd-section">Итоги · {range.label}{brandFilter !== "all" ? ` · ${brandFilter === "ours" ? "наши заявки" : "партнёрские"}` : ""}</div>
@@ -4502,6 +4563,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
       {modal?.kind === "techDoc" && <TechDocModal tech={modal.tech} doc={modal.doc} onClose={() => setModal(null)} onSave={saveTechDoc} />}
+      {modal?.kind === "plan" && <PlanModal monthKey={modal.monthKey} label={modal.label} target={modal.target} onClose={() => setModal(null)} onSave={saveMonthlyPlan} />}
       {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} existing={modal.expense} accounts={accounts} onClose={() => setModal(null)} onSave={(payload) => (modal.expense ? payExistingExpense(modal.tech, modal.expense, payload) : savePayrollPayment(modal.tech, payload))} />}
       {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
