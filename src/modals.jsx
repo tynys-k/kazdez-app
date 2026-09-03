@@ -1028,6 +1028,8 @@ function StockInModal({ chem, purchases = [], onClose, onSave }) {
   const [qty, setQty] = useState(""); const [price, setPrice] = useState(""); const [saving, setSaving] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [supplier, setSupplier] = useState("");
+  const [batch, setBatch] = useState("");
+  const [expires, setExpires] = useState("");
   const u = chemUnit(chem.unit_kind);
   // История нужна прямо здесь: перед тем как оформить приход, видно, у кого
   // и почём брали раньше.
@@ -1037,7 +1039,7 @@ function StockInModal({ chem, purchases = [], onClose, onSave }) {
   async function save() {
     setSaving(true);
     await onSave(chem, (Number(qty) || 0) * (u.factor || 1000), price ? Number(price) : null,
-      { purchase_date: date, supplier: supplier.trim() || null });
+      { purchase_date: date, supplier: supplier.trim() || null, batch_no: batch.trim() || null, expires_on: expires || null });
     setSaving(false);
   }
   return (
@@ -1055,6 +1057,10 @@ function StockInModal({ chem, purchases = [], onClose, onSave }) {
       )}
       <Field label="Дата прихода"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
       <Field label="Поставщик"><input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="у кого купили" /></Field>
+      <div className="kd-grid2">
+        <Field label="Номер партии"><input value={batch} onChange={(e) => setBatch(e.target.value)} placeholder="с этикетки" /></Field>
+        <Field label="Годен до"><input type="date" value={expires} onChange={(e) => setExpires(e.target.value)} /></Field>
+      </div>
       <div className="kd-muted" style={{ marginTop: 4 }}>
         Заявки считаются по цене на свою дату — задним числом прошлые отчёты уже не поедут.
       </div>
@@ -1667,14 +1673,14 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
   const pestGuideMap = (() => { try { return JSON.parse(settings.pest_guide || "{}"); } catch { return {}; } })();
   const firstPest = (pestTypes[0] && pestTypes[0].name) || "";
   const [pgPest, setPgPest] = useState(firstPest);
-  const [pg, setPg] = useState(pestGuideMap[firstPest] || { info: "", chems: "", times: "", drive: "" });
+  const [pg, setPg] = useState(pestGuideMap[firstPest] || { info: "", chems: "", times: "", drive: "", norm: "" });
   const [closedUntil, setClosedUntil] = useState(settings.books_closed_until || "");
   const [pRow, setPRow] = useState({ pest: "", area_from: "", area_to: "", price: "" });
-  const loadPg = (name) => { setPgPest(name); setPg(pestGuideMap[name] || { info: "", chems: "", times: "", drive: "" }); };
+  const loadPg = (name) => { setPgPest(name); setPg(pestGuideMap[name] || { info: "", chems: "", times: "", drive: "", norm: "" }); };
   const savePg = () => {
     const map = { ...pestGuideMap };
-    const val = { info: (pg.info || "").trim(), chems: (pg.chems || "").trim(), times: (pg.times || "").trim(), drive: (pg.drive || "").trim() };
-    if (!val.info && !val.chems && !val.times && !val.drive) delete map[pgPest];
+    const val = { info: (pg.info || "").trim(), chems: (pg.chems || "").trim(), times: (pg.times || "").trim(), drive: (pg.drive || "").trim(), norm: Number(pg.norm) || 0 };
+    if (!val.info && !val.chems && !val.times && !val.drive && !val.norm) delete map[pgPest];
     else map[pgPest] = val;
     onSaveSetting("pest_guide", JSON.stringify(map));
   };
@@ -1801,6 +1807,12 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
               <Field label="Вредитель"><select value={pgPest} onChange={(e) => loadPg(e.target.value)}>{pestTypes.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select></Field>
               <Field label="О вредителе (описание)"><textarea rows={2} value={pg.info} onChange={(e) => setPg({ ...pg, info: e.target.value })} placeholder="Коротко: чем опасен, где прячется…" /></Field>
               <Field label="Препараты"><textarea rows={2} value={pg.chems} onChange={(e) => setPg({ ...pg, chems: e.target.value })} placeholder="Напр.: Гет, Дельта Зона, Ксулат…" /></Field>
+              <Field label="Норма расхода на м² (мл или г)">
+                <input value={pg.norm ?? ""} onChange={(e) => setPg({ ...pg, norm: e.target.value })} inputMode="decimal" placeholder="напр. 15" />
+              </Field>
+              <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+                По ней в отчёте подсвечивается отклонение больше чем на треть — и перерасход, и подозрительная экономия. Пусто — сравнивать не с чем.
+              </div>
               <div className="kd-grid2">
                 <Field label="Сколько обработок"><input value={pg.times} onChange={(e) => setPg({ ...pg, times: e.target.value })} placeholder="2 (первичная + повтор)" /></Field>
                 <Field label="Инструкция клиенту (Google Drive)"><input value={pg.drive} onChange={(e) => setPg({ ...pg, drive: e.target.value })} placeholder="https://drive.google.com/..." /></Field>

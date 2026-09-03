@@ -2240,6 +2240,18 @@ function Dashboard({ session, profile }) {
   const upliftPct = upliftTotals.quote > 0 ? Math.round((upliftTotals.paid - upliftTotals.quote) / upliftTotals.quote * 100) : 0;
 
   // ---- склад ----
+  // Нормы расхода лежат в справочнике по вредителям, рядом с описанием
+  // препаратов: там их и заполняют.
+  const chemNorms = (() => {
+    const guide = calc.parseTargets(settings.pest_guide);
+    const out = {};
+    for (const [pest, val] of Object.entries(guide)) {
+      const n = Number(val?.norm) || 0;
+      if (n > 0) out[pest] = n;
+    }
+    return out;
+  })();
+
   const inventory = chemicals.map((c) => {
     const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => (x.chemical_id ? x.chemical_id === c.id : norm(x.name) === norm(c.name))).reduce((a, x) => a + lineAmount(x), 0), 0);
     const remaining = (Number(c.purchased_ml) || 0) - used;
@@ -2248,8 +2260,9 @@ function Dashboard({ session, profile }) {
     // расходуемым по капле ровно перед сезоном.
     const forecast = calc.chemForecast(c, { jobs, remaining });
     const suppliers = calc.supplierPrices(c.id, chemPurchases);
+    const batches = calc.batchesWithRemaining(c.id, chemPurchases, used);
     return {
-      ...c, used, remaining, forecast, suppliers,
+      ...c, used, remaining, forecast, suppliers, batches,
       low: remaining <= (Number(c.min_ml) || 0),
       orderSoon: forecast?.daysLeft != null && forecast.daysLeft <= 14,
       stockValue: remaining * pricePerBase(c),
@@ -2267,6 +2280,9 @@ function Dashboard({ session, profile }) {
   const docsSoon = docAlerts.filter((d) => d.state === "soon").length;
   const trainingAlerts = calc.trainingDue(training, { activeIds: activeProfileIds });
   const orderSoonCount = inventory.filter((i) => i.orderSoon).length;
+  const usedByChem = Object.fromEntries(inventory.map((c) => [c.id, c.used]));
+  const badBatches = calc.expiringBatches(chemicals, chemPurchases, usedByChem);
+  const expiredBatches = badBatches.filter((b) => b.state === "expired").length;
   const totalStockValue = inventory.reduce((s, c) => s + c.stockValue, 0);
   const equipIssuedQty = (equipId) => equipHandouts.filter((h) => h.equipment_id === equipId && h.status === "with_tech").reduce((s, h) => s + (Number(h.qty) || 0), 0);
   const totalEquipValue = equipment.reduce((s, e) => s + equipIssuedQty(e.id) * (Number(e.price) || 0), 0);
@@ -2406,6 +2422,8 @@ function Dashboard({ session, profile }) {
     // Предупреждение до того, как остаток стал критическим: по расходу видно,
     // что заказывать надо уже сейчас, иначе закупка пойдёт впопыхах.
     isAdmin && orderSoonCount ? { id: "stockorder", label: "Пора заказывать препараты", value: orderSoonCount, tab: "stock", tone: "warning" } : null,
+    isAdmin && expiredBatches ? { id: "expiredchem", label: "Просроченные партии на складе", value: expiredBatches, tab: "stock", tone: "danger" } : null,
+    isAdmin && badBatches.length - expiredBatches > 0 ? { id: "expiringchem", label: "Партии истекают в этом месяце", value: badBatches.length - expiredBatches, tab: "stock", tone: "warning" } : null,
     // Просроченный допуск — надзорный риск: штраф и остановка работ, а не
     // внутренний беспорядок. Поэтому красным и выше складских предупреждений.
     docsExpired ? { id: "docsexpired", label: "Просрочены допуски сотрудников", value: docsExpired, tab: "team", tone: "danger" } : null,
@@ -3895,6 +3913,45 @@ function Dashboard({ session, profile }) {
             </div>
 
             <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Расход против нормы · {range.label}</div>
+              {Object.keys(chemNorms).length === 0 && (
+                <div className="kd-muted">Нормы расхода не заданы. Их вписывают в справочнике по вредителям в Настройках — без них сравнивать не с чем.</div>
+              )}
+              {Object.keys(chemNorms).length > 0 && (() => {
+                const rows = jobs
+                  .filter((j) => j.status === "done" && inPeriodIso(j.scheduled_date))
+                  .map((j) => ({ job: j, check: calc.chemNormCheck(j, { norms: chemNorms }) }))
+                  .filter((r) => r.check && r.check.state !== "ok")
+                  .sort((a, b) => Math.abs(b.check.deviation) - Math.abs(a.check.deviation));
+                if (rows.length === 0) return <div className="kd-muted">Отклонений больше чем на треть за период нет.</div>;
+                return (
+                  <>
+                    <div className="kd-muted" style={{ marginBottom: 8 }}>
+                      Отклонение больше трети от нормы. Это повод посмотреть, а не обвинение: если на заявке смешаны жидкий и порошковый препарат, сумма условная.
+                    </div>
+                    <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr .8fr 1fr 1fr 1fr" }}>
+                      <span>Заявка</span><span>Площадь</span><span>Норма</span><span>Факт</span><span>Отклонение</span>
+                    </div>
+                    {rows.slice(0, 25).map(({ job: j, check }) => (
+                      <div className="kd-ledgerrow" key={j.id} style={{ gridTemplateColumns: "1.6fr .8fr 1fr 1fr 1fr" }}>
+                        <span className="kd-ledgername">{j.pest} · {isoToRu(j.scheduled_date)}
+                          <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{techById(j.assigned_to)?.full_name || "не назначен"}</em>
+                        </span>
+                        <span className="kd-muted">{j.area} м²</span>
+                        <span className="kd-muted">{fmt(check.expected)}</span>
+                        <span>{fmt(check.used)}</span>
+                        <strong style={{ color: check.state === "over" ? "var(--rust)" : "var(--amber)" }}>
+                          {check.deviation > 0 ? "+" : ""}{check.deviation}%
+                        </strong>
+                      </div>
+                    ))}
+                    {rows.length > 25 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 25 из {rows.length} — с наибольшим отклонением.</div>}
+                  </>
+                );
+              })()}
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Возвраты по гарантии · {range.label}</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>
                 Повтор считается тому, кто делал исходную заявку, и в её период — иначе июльская работа попадёт в августовскую статистику другого человека.
@@ -4268,6 +4325,31 @@ function Dashboard({ session, profile }) {
                 )}
                 {!c.forecast?.daysLeft && !c.forecast?.perMonth && (
                   <div className="kd-muted" style={{ marginTop: 6 }}>Расхода за последние три месяца нет — срок жизни остатка посчитать не из чего.</div>
+                )}
+                {c.batches.some((b) => b.purchase.expires_on || b.purchase.batch_no) && (
+                  <details className="kd-more" style={{ marginTop: 8 }}>
+                    <summary>Партии · {c.batches.filter((b) => b.remaining > 0).length} в остатке</summary>
+                    <div className="kd-muted" style={{ marginBottom: 6 }}>
+                      Расход раскладывается по приходам с самого раннего: какая партия ушла на конкретную заявку, система не знает и не выдумывает.
+                    </div>
+                    {c.batches.filter((b) => b.remaining > 0 || b.purchase.expires_on).map((b) => {
+                      const st = b.purchase.expires_on ? calc.docStatus({ expires_on: b.purchase.expires_on }) : { state: "nolimit", daysLeft: null };
+                      const alive = b.remaining > 0;
+                      const color = !alive ? "var(--muted)" : st.state === "expired" ? "var(--rust)" : st.state === "soon" ? "var(--amber)" : "var(--muted)";
+                      return (
+                        <div className="kd-ledgerrow" key={b.purchase.id} style={{ gridTemplateColumns: "96px 1fr 110px 120px" }}>
+                          <span className="kd-muted" style={{ textAlign: "left" }}>{isoToRu(b.purchase.purchase_date)}</span>
+                          <span style={{ textAlign: "left" }}>{b.purchase.batch_no || <em className="kd-muted" style={{ fontStyle: "normal" }}>партия не указана</em>}</span>
+                          <span className={alive ? "" : "kd-muted"}>{alive ? `осталось ${fmtAmount(b.remaining, c.unit_kind)}` : "израсходована"}</span>
+                          <span style={{ color }}>
+                            {b.purchase.expires_on
+                              ? (st.state === "expired" ? `просрочена ${-st.daysLeft} дн.` : `годна до ${isoToRu(b.purchase.expires_on)}`)
+                              : "срок не указан"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </details>
                 )}
                 {c.suppliers.length > 0 && (
                   <details className="kd-more" style={{ marginTop: 8 }}>

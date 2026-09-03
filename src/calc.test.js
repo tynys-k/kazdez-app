@@ -11,6 +11,7 @@ import {
   planProgress, parseTargets,
   trainingSummary, trainingDue,
   lastAcknowledgement, notAcknowledged, employeeHistory,
+  chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -1208,6 +1209,64 @@ describe("обучение менеджеров", () => {
 
   it("уволенных в списке нет", () => {
     expect(trainingDue(records, { todayIso: today, activeIds: new Set(["m2"]) })).toEqual([]);
+  });
+});
+
+describe("норма расхода", () => {
+  const norms = { "Тараканы": 15 };
+
+  it("считает отклонение от нормы на квадратный метр", () => {
+    const job = { pest: "Тараканы", area: 40, chemicals: [{ amount: 900 }] };
+    // норма 15 × 40 = 600, факт 900 → +50%
+    expect(chemNormCheck(job, { norms })).toMatchObject({ expected: 600, used: 900, deviation: 50, state: "over" });
+  });
+
+  it("подозрительная экономия видна так же, как перерасход", () => {
+    const job = { pest: "Тараканы", area: 40, chemicals: [{ amount: 300 }] };
+    expect(chemNormCheck(job, { norms }).state).toBe("under");
+  });
+
+  it("в пределах трети — не повод для разговора", () => {
+    const job = { pest: "Тараканы", area: 40, chemicals: [{ amount: 700 }] };
+    expect(chemNormCheck(job, { norms }).state).toBe("ok");
+  });
+
+  it("без нормы, площади или расхода сравнивать не с чем", () => {
+    expect(chemNormCheck({ pest: "Клопы", area: 40, chemicals: [{ amount: 900 }] }, { norms })).toBeNull();
+    expect(chemNormCheck({ pest: "Тараканы", area: 0, chemicals: [{ amount: 900 }] }, { norms })).toBeNull();
+    expect(chemNormCheck({ pest: "Тараканы", area: 40, chemicals: [] }, { norms })).toBeNull();
+  });
+});
+
+describe("партии препаратов", () => {
+  const purchases = [
+    { id: "p1", chemical_id: "c1", purchase_date: "2026-01-10", amount: 1000, expires_on: "2026-06-01" },
+    { id: "p2", chemical_id: "c1", purchase_date: "2026-05-10", amount: 2000, expires_on: "2027-05-01" },
+    { id: "p3", chemical_id: "c2", purchase_date: "2026-05-10", amount: 500 },
+  ];
+
+  it("расход списывается с самой ранней партии", () => {
+    const rows = batchesWithRemaining("c1", purchases, 1200);
+    expect(rows.map((r) => r.remaining)).toEqual([0, 1800]);
+  });
+
+  it("расход больше остатка не уводит партии в минус", () => {
+    const rows = batchesWithRemaining("c1", purchases, 99999);
+    expect(rows.map((r) => r.remaining)).toEqual([0, 0]);
+  });
+
+  it("просроченной считается только та партия, где что-то осталось", () => {
+    const chems = [{ id: "c1", name: "Дельта" }];
+    // израсходована целиком — просрочка никого не волнует
+    expect(expiringBatches(chems, purchases, { c1: 1000 }, { todayIso: "2026-09-01" })).toEqual([]);
+    const bad = expiringBatches(chems, purchases, { c1: 0 }, { todayIso: "2026-09-01" });
+    expect(bad.map((b) => b.purchase.id)).toEqual(["p1"]);
+    expect(bad[0].state).toBe("expired");
+  });
+
+  it("партия без срока годности не попадает в предупреждения", () => {
+    const chems = [{ id: "c2", name: "Гет" }];
+    expect(expiringBatches(chems, purchases, { c2: 0 }, { todayIso: "2026-09-01" })).toEqual([]);
   });
 });
 
