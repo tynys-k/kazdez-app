@@ -84,6 +84,44 @@ export function docsNeedingAttention(docs = [], { todayIso, soonDays = 30, activ
     .sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
+// --- обучение --------------------------------------------------------------
+
+// Сводка обучения по человеку: сколько тем пройдено, когда последняя и
+// какая ближайшая перепроверка.
+//
+// Состояние перепроверки считается той же функцией, что и сроки допусков:
+// правило «просрочено / скоро / в порядке» должно быть одно на всю систему,
+// иначе два списка начнут расходиться в мелочах.
+export function trainingSummary(records = [], personId, { todayIso, soonDays = 30 } = {}) {
+  const mine = records.filter((r) => String(r.person_id) === String(personId));
+  if (mine.length === 0) return { topics: 0, lastPassed: null, nextCheck: null, state: "none", daysLeft: null, avgScore: null };
+
+  const passed = mine.map((r) => r.passed_on).filter(Boolean).sort();
+  const checks = mine.map((r) => r.next_check_on).filter(Boolean).sort();
+  const scored = mine.map((r) => Number(r.score)).filter((n) => Number.isFinite(n) && n > 0);
+  const nextCheck = checks[0] || null;
+  const st = nextCheck ? docStatus({ expires_on: nextCheck }, todayIso, soonDays) : { state: "nolimit", daysLeft: null };
+
+  return {
+    topics: new Set(mine.map((r) => r.topic)).size,
+    lastPassed: passed.length ? passed[passed.length - 1] : null,
+    nextCheck,
+    state: st.state,
+    daysLeft: st.daysLeft,
+    // средний балл только по темам, где балл вообще ставили
+    avgScore: scored.length ? Math.round(scored.reduce((a, b) => a + b, 0) / scored.length) : null,
+  };
+}
+
+// Кого пора проверять: перепроверка просрочена или наступает в ближайший месяц.
+export function trainingDue(records = [], { todayIso, soonDays = 30, activeIds = null } = {}) {
+  return records
+    .filter((r) => r.next_check_on && (activeIds ? activeIds.has(String(r.person_id)) : true))
+    .map((r) => ({ record: r, ...docStatus({ expires_on: r.next_check_on }, todayIso, soonDays) }))
+    .filter((r) => r.state === "expired" || r.state === "soon")
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
 // --- закуп: поставщики и прогноз -----------------------------------------
 
 const ISO_DAY = 86400000;

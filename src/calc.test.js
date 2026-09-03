@@ -9,6 +9,7 @@ import {
   periodTotals, comparePeriods, feedbackStats, happyClients,
   seasonality, subscriptionComparison,
   planProgress, parseTargets,
+  trainingSummary, trainingDue,
 } from "./calc";
 
 // Препарат: 10 000 ₸ за литр → 10 ₸ за мл.
@@ -1165,5 +1166,46 @@ describe("абоненты против разовых", () => {
   it("невыполненные заявки не считаются ни там, ни там", () => {
     const { oneOff } = subscriptionComparison(jobs, { inPeriod: august, phoneKeyOf: key });
     expect(oneOff.done).toBe(1);
+  });
+});
+
+describe("обучение менеджеров", () => {
+  const today = "2026-09-01";
+  const records = [
+    { id: "a", person_id: "m1", topic: "Скрипт первого звонка", passed_on: "2026-03-01", score: 80, next_check_on: "2026-08-01" },
+    { id: "b", person_id: "m1", topic: "Работа с возражениями", passed_on: "2026-06-01", score: null, next_check_on: "2026-12-01" },
+    { id: "c", person_id: "m2", topic: "Скрипт первого звонка", passed_on: "2026-08-20", score: 60, next_check_on: null },
+  ];
+
+  it("сводит темы, последнюю дату и ближайшую перепроверку", () => {
+    const s = trainingSummary(records, "m1", { todayIso: today });
+    expect(s.topics).toBe(2);
+    expect(s.lastPassed).toBe("2026-06-01");
+    expect(s.nextCheck).toBe("2026-08-01");
+    expect(s.state).toBe("expired");
+  });
+
+  it("средний балл считается только по темам с оценкой", () => {
+    // вторая тема пройдена без оценки — это не ноль баллов
+    expect(trainingSummary(records, "m1", { todayIso: today }).avgScore).toBe(80);
+  });
+
+  it("без записей возвращает пустую сводку, а не падает", () => {
+    expect(trainingSummary(records, "нет", { todayIso: today })).toMatchObject({ topics: 0, state: "none", avgScore: null });
+  });
+
+  it("без даты перепроверки о теме не напоминают", () => {
+    const s = trainingSummary(records, "m2", { todayIso: today });
+    expect(s.nextCheck).toBeNull();
+    expect(s.state).toBe("nolimit");
+  });
+
+  it("список на перепроверку — просроченные первыми", () => {
+    const due = trainingDue(records, { todayIso: today });
+    expect(due.map((d) => d.record.id)).toEqual(["a"]);
+  });
+
+  it("уволенных в списке нет", () => {
+    expect(trainingDue(records, { todayIso: today, activeIds: new Set(["m2"]) })).toEqual([]);
   });
 });
