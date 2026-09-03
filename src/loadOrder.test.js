@@ -25,7 +25,7 @@ const EXPECTED = [
   ["mvr","money_moves"], ["tndr","tenders"], ["tgr","tender_guarantees"], ["tsr","tender_services"],
   ["grr","guarantee_returns"], ["ldr","leads"], ["lsr","lead_stages"], ["mcr","mkt_channels"],
   ["mtr","mkt_topups"], ["dofr","tech_days_off"], ["fur","client_followups"], ["qcr","quality_checks"],
-  ["cor","service_contracts"], ["cer","client_events"], ["pfr","client_public_feedback"], ["jpr","job_proofs"],
+  ["cor","service_contracts"], ["cer","deferred"], ["pfr","client_public_feedback"], ["jpr","job_proofs"],
   ["car","cash_adjustments"], ["iar","inventory_adjustments"], ["errr","deferred"], ["jhr","job_helpers"],
   ["plr","price_list"], ["cpr","chemical_purchases"], ["tdr","tech_documents"], ["trr","training_records"], ["sar","safety_acknowledgements"], ["evr","employee_events"],
 ];
