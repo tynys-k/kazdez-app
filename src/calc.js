@@ -122,6 +122,67 @@ export function trainingDue(records = [], { todayIso, soonDays = 30, activeIds =
     .sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
+// --- нормы расхода -------------------------------------------------------
+
+// Сравнение фактического расхода на заявке с нормой на квадратный метр.
+//
+// Дезинфектор вписывает расход сам, а нормы нигде не было — поэтому нельзя
+// было увидеть ни перерасход, ни подозрительную экономию. Норма задаётся в
+// справочнике по вредителям и хранится там же.
+//
+// Считаем суммарный расход в базовых единицах. Если на заявке смешаны жидкий
+// и порошковый препарат, сумма условная — поэтому отклонение показываем как
+// повод посмотреть, а не как обвинение.
+export function chemNormCheck(job, { norms = {}, tolerance = 33 } = {}) {
+  const area = Number(job?.area) || 0;
+  const norm = Number(norms[String(job?.pest || "").trim()]) || 0;
+  if (!area || !norm) return null;
+  const used = (job?.chemicals || []).reduce((sum, line) => sum + lineAmount(line), 0);
+  if (!used) return null;
+  const expected = Math.round(area * norm);
+  const deviation = Math.round((used - expected) / expected * 100);
+  return {
+    used, expected, deviation,
+    state: deviation > tolerance ? "over" : deviation < -tolerance ? "under" : "ok",
+  };
+}
+
+// --- партии и сроки годности ---------------------------------------------
+
+// Остаток по партиям: раскладываем общий расход на приходы по очереди, от
+// самого раннего.
+//
+// Какая именно партия ушла на заявку, система не знает — и врать об этом не
+// надо. Списываем по порядку поступления: так работает склад в жизни, и так
+// просроченным оказывается то, что действительно залежалось.
+export function batchesWithRemaining(chemId, purchases = [], usedTotal = 0) {
+  const rows = purchases
+    .filter((p) => String(p.chemical_id) === String(chemId))
+    .sort((a, b) => String(a.purchase_date).localeCompare(String(b.purchase_date)));
+  let left = Math.max(0, Number(usedTotal) || 0);
+  return rows.map((p) => {
+    const amount = Number(p.amount) || 0;
+    const spent = Math.min(amount, left);
+    left -= spent;
+    return { purchase: p, amount, remaining: Math.max(0, amount - spent) };
+  });
+}
+
+// Партии, которые уже просрочены или истекают в ближайший месяц, — и только
+// те, где что-то ещё осталось. Просроченная пустая партия никого не волнует.
+export function expiringBatches(chemicals = [], purchases = [], usedByChem = {}, { todayIso, soonDays = 30 } = {}) {
+  const out = [];
+  for (const chem of chemicals) {
+    const rows = batchesWithRemaining(chem.id, purchases, usedByChem[chem.id] || 0);
+    for (const row of rows) {
+      if (row.remaining <= 0 || !row.purchase.expires_on) continue;
+      const st = docStatus({ expires_on: row.purchase.expires_on }, todayIso, soonDays);
+      if (st.state === "expired" || st.state === "soon") out.push({ chem, ...row, ...st });
+    }
+  }
+  return out.sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
 // --- закуп: поставщики и прогноз -----------------------------------------
 
 const ISO_DAY = 86400000;
