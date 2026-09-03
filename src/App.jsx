@@ -1,6 +1,6 @@
 // KAZDEZ-USABILITY-YANDEX-2026-07-18
 // Этап 3: единое окно, SLA, клиент 360, жизненный цикл и публичная страница заявки.
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
@@ -429,6 +429,30 @@ function Dashboard({ session, profile }) {
   // при этом нужны только в двух разделах. Раньше они тянулись при каждом
   // открытии приложения вместе со всем остальным.
   const [journalLoaded, setJournalLoaded] = useState(false);
+  // Печать и подпись компании хранятся в настройках картинками в base64 и
+  // весят больше, чем все остальные данные вместе. Раньше они уезжали к
+  // каждому пользователю при каждой загрузке — на них уходила треть всего
+  // трафика. Теперь их забираем только когда они действительно нужны:
+  // перед печатью документа и на экране настроек.
+  const [companyImagesLoaded, setCompanyImagesLoaded] = useState(false);
+  async function loadCompanyImages() {
+    if (companyImagesLoaded) return;
+    const { data, error } = await supabase.from("app_settings").select("*").in("key", COMPANY_IMAGE_KEYS);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    setCompanyImagesLoaded(true);
+    setSettings((prev) => ({ ...prev, ...Object.fromEntries((data || []).map((r) => [r.key, r.value])) }));
+  }
+
+  // История клиента открывается редко, а событий уже тысячи. Грузим их при
+  // открытии окна, а не всем и всегда.
+  const [clientEventsLoaded, setClientEventsLoaded] = useState(false);
+  async function loadClientEvents() {
+    if (clientEventsLoaded) return;
+    setClientEventsLoaded(true);
+    const { data } = await supabase.from("client_events").select("*").order("created_at", { ascending: false }).limit(1000);
+    if (data) setClientEvents(data);
+  }
+
   async function loadJournalData(force = false) {
     if (journalLoaded && !force) return;
     setJournalLoaded(true);
@@ -465,7 +489,8 @@ function Dashboard({ session, profile }) {
       supabase.from("equipment_handouts").select("*"),
       supabase.from("client_sources").select("*").order("name"),
       supabase.from("pest_types").select("*").order("name"),
-      supabase.from("app_settings").select("*"),
+      // без печати и подписи: они тяжёлые и нужны редко, см. loadCompanyImages
+      supabase.from("app_settings").select("*").not("key", "in", `(${COMPANY_IMAGE_KEYS.join(",")})`),
       supabase.from("expense_categories").select("*").order("name"),
       supabase.from("opex").select("*").order("spent_date", { ascending: false }),
       supabase.from("cash_deposits").select("*").order("requested_at", { ascending: false }),
@@ -484,7 +509,7 @@ function Dashboard({ session, profile }) {
       supabase.from("client_followups").select("*").order("due_date", { ascending: true }),
       supabase.from("quality_checks").select("*").order("contacted_at", { ascending: false }),
       supabase.from("service_contracts").select("*").order("next_service_date", { ascending: true }),
-      supabase.from("client_events").select("*").order("created_at", { ascending: false }),
+      Promise.resolve({ data: null, error: null }),
       supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }),
       supabase.from("job_proofs").select("*").order("updated_at", { ascending: false }),
       // Ревизии кассы и ручные корректировки остатков. Последняя запись kind="revision"
@@ -530,7 +555,13 @@ function Dashboard({ session, profile }) {
     setPestTypes(ptyr.data || []);
     const settingsMap = useOfflineSnapshot ? (offlineSnapshot.settings || {}) : {};
     if (!useOfflineSnapshot) (str.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
-    setSettings(settingsMap);
+    // Печать и подпись в этот запрос не входят: если их уже подтянули,
+    // сохраняем — иначе фоновое обновление вымывало бы их из памяти, и
+    // документ печатался бы без печати.
+    setSettings((prev) => {
+      const kept = Object.fromEntries(COMPANY_IMAGE_KEYS.filter((k) => prev[k] != null).map((k) => [k, prev[k]]));
+      return { ...settingsMap, ...kept };
+    });
     setExpCats(ecr.data || []);
     setOpex(opr.data || []);
     setDeposits(dpr.data || []);
@@ -549,7 +580,7 @@ function Dashboard({ session, profile }) {
     setFollowups(fur.data || []);
     setQualityChecks(qcr.data || []);
     setContracts(cor.data || []);
-    setClientEvents(cer.data || []);
+    if (cer.data) setClientEvents(cer.data);
     setPublicFeedback(pfr.data || []);
     setJobProofs(jpr.data || []);
     setCashAdjustments(car.data || []);
@@ -583,12 +614,43 @@ function Dashboard({ session, profile }) {
   // Журнал и корзина подтягиваются при первом заходе в раздел, а не при
   // каждом открытии приложения.
   useEffect(() => { if (tab === "journal" || tab === "trash") loadJournalData(); }, [tab]);
-  // Тревоги в колокольчике считаются из уже загруженных данных, поэтому
-  // раз в пять минут просто обновляем их — отдельного запроса за уведомлениями
-  // больше нет.
+  // Автообновление данных.
+  //
+  // Раньше здесь стоял безусловный интервал в пять минут. Вкладка, забытая
+  // открытой на весь день, качала все данные двенадцать раз в час — и именно
+  // это, а не работа людей, съедало почти весь трафик проекта.
+  //
+  // Теперь три условия: вкладка на экране, человек что-то делал в последние
+  // пятнадцать минут, и с прошлого обновления прошло не меньше десяти минут.
+  // Плюс обновление при возврате на вкладку — так данные свежие ровно тогда,
+  // когда на них смотрят.
+  const lastActivityRef = useRef(Date.now());
+  const lastLoadRef = useRef(Date.now());
   useEffect(() => {
-    const timer = setInterval(() => { if (navigator.onLine) load(); }, 5 * 60 * 1000);
-    return () => clearInterval(timer);
+    const touch = () => { lastActivityRef.current = Date.now(); };
+    const events = ["pointerdown", "keydown", "visibilitychange"];
+    events.forEach((e) => window.addEventListener(e, touch, { passive: true }));
+
+    const REFRESH_MS = 10 * 60 * 1000;
+    const IDLE_MS = 15 * 60 * 1000;
+    const maybeLoad = (force = false) => {
+      if (!navigator.onLine) return;
+      if (document.visibilityState !== "visible") return;
+      if (!force && Date.now() - lastActivityRef.current > IDLE_MS) return;
+      if (Date.now() - lastLoadRef.current < REFRESH_MS) return;
+      lastLoadRef.current = Date.now();
+      load();
+    };
+    // Вернулись на вкладку — данные могли устареть, пока её не смотрели.
+    const onVisible = () => { if (document.visibilityState === "visible") maybeLoad(true); };
+    document.addEventListener("visibilitychange", onVisible);
+
+    const timer = setInterval(() => maybeLoad(false), 60 * 1000);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      events.forEach((e) => window.removeEventListener(e, touch));
+    };
   }, [session.user.id]);
 
   async function logAction(action, summary) {
@@ -761,7 +823,8 @@ function Dashboard({ session, profile }) {
   const techById = (id) => techs.find((t) => t.id === id);
   const pestGuideObj = (() => { try { return JSON.parse(settings.pest_guide || "{}"); } catch { return {}; } })();
   // сделать гарантийный сертификат по заявке (реальные данные)
-  function certifyJob(job) {
+  async function certifyJob(job) {
+    await loadCompanyImages();
     const yr = new Date().getFullYear();
     const num = `ГС-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
     generateCertificate({
@@ -779,7 +842,8 @@ function Dashboard({ session, profile }) {
     }, settings);
   }
   // сделать акт о проведении дезработ (для первичной обработки — гарантия после второй)
-  function certifyAct(job) {
+  async function certifyAct(job) {
+    await loadCompanyImages();
     const yr = new Date().getFullYear();
     const num = `АКТ-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
     const chems = (job.chemicals || []).map((l) => {
@@ -1378,6 +1442,9 @@ function Dashboard({ session, profile }) {
   async function saveAppSetting(key, value) {
     const { error } = await supabase.from("app_settings").upsert({ key, value, updated_at: new Date().toISOString() });
     if (error) { showToast("Ошибка: " + error.message); return; }
+    // Пишем в память сразу: следующая загрузка сохраняет то, что здесь лежит,
+    // и без этой строки удалённая печать вернулась бы из старого состояния.
+    setSettings((prev) => ({ ...prev, [key]: value }));
     await logAction("Настройки", `${key} → ${JSON.stringify(value)}`);
     showToast("Сохранено"); load();
   }
@@ -2553,7 +2620,7 @@ function Dashboard({ session, profile }) {
         </nav>
         <div className="kd-navfoot">
           <div className={`kd-connection ${online ? "online" : "offline"}`}>{online ? <Wifi size={14} /> : <WifiOff size={14} />}<span>{online ? `На связи${lastLoadedAt ? ` · ${lastLoadedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Нет подключения"}</span></div>
-          {canAccess("action.settings") && <button className="kd-tab" onClick={() => { setModal({ kind: "settings" }); setSideOpen(false); }}><Settings size={17} /><span className="kd-tab-lbl">Настройки</span></button>}
+          {canAccess("action.settings") && <button className="kd-tab" onClick={() => { loadCompanyImages(); setModal({ kind: "settings" }); setSideOpen(false); }}><Settings size={17} /><span className="kd-tab-lbl">Настройки</span></button>}
           <button className="kd-tab" onClick={() => supabase.auth.signOut()}><LogOut size={17} /><span className="kd-tab-lbl">Выйти</span></button>
         </div>
       </aside>
@@ -2755,7 +2822,7 @@ function Dashboard({ session, profile }) {
                   onRequestEdit={() => setModal({ kind: "requestEdit", job: j })}
                   onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
-                        onHistory={() => setModal({ kind: "history", job: j })}
+                        onHistory={() => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                         onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
@@ -2887,7 +2954,7 @@ function Dashboard({ session, profile }) {
                   onRequestEdit={() => setModal({ kind: "requestEdit", job: j })}
                   onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
-                      onHistory={() => setModal({ kind: "history", job: j })}
+                      onHistory={() => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                       onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
@@ -3305,7 +3372,7 @@ function Dashboard({ session, profile }) {
                   onRequestEdit={() => setModal({ kind: "requestEdit", job: j })}
                   onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
-                  onHistory={() => setModal({ kind: "history", job: j })}
+                  onHistory={() => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
                   onOpenDetails={() => setModal({ kind: "details", job: j })}
                   onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину.`, () => deleteJob(j))} />
               ))}
