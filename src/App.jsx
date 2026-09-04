@@ -2949,14 +2949,13 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "today" && (
           <div className="kd-today">
-            {alerts.length > 0 && (
+            {canEditJobs && alerts.length > 0 && (
               <section className="kd-card kd-alerts">
                 <div className="kd-tabbar" style={{ marginBottom: 10 }}>
                   <div>
                     <div className="kd-section" style={{ margin: 0 }}>Требует решения · {alerts.length}</div>
                     <div className="kd-muted">
-                      Считает база по расписанию, а не открытая вкладка: тревога появляется, даже когда приложение никто не открывал.
-                      Причина ушла — тревога закроется сама.
+                      Правила считает база при заходе в приложение. Причина ушла — тревога закроется сама, отмечать ничего не нужно.
                     </div>
                   </div>
                 </div>

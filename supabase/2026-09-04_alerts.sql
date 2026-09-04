@@ -42,9 +42,16 @@ alter table public.alerts alter column entity_id type text using entity_id::text
 
 alter table public.alerts enable row level security;
 
+-- Видят те, кто может что-то с этим сделать. Дезинфектору не нужны ни лиды,
+-- ни контроль качества, а телефоны клиентов из текста тревог ему видеть
+-- незачем: это чужая работа и чужие персональные данные.
 drop policy if exists "alerts select" on public.alerts;
 create policy "alerts select" on public.alerts
-  for select to authenticated using (true);
+  for select to authenticated
+  using (public.is_admin()
+      or public.kd_has_permission('action.jobs_edit')
+      or public.kd_has_permission('action.team_manage')
+      or public.kd_has_permission('action.finance_edit'));
 
 -- Закрыть тревогу может тот, кто способен с ней что-то сделать. Иначе
 -- «разобрался» превращается в способ убрать проблему с глаз.
