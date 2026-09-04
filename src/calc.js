@@ -770,6 +770,44 @@ export function comparePeriods(now, before) {
   };
 }
 
+// --- чем работали и что из этого вышло -----------------------------------
+
+// Возвраты по гарантии в разрезе оборудования и препаратов.
+//
+// Ради этого и собирается отметка об оборудовании: понять, влияет ли техника
+// и препарат на то, что клиент вызывает по гарантии. Одна и та же обработка
+// холодным туманом и горячим даёт разный результат по клопам — но пока это
+// не посчитано, спор остаётся спором.
+//
+// Возврат считается по исходной заявке: повтор — это следствие того, чем
+// работали в первый раз, а не во второй.
+export function qualityByFactor(jobs = [], { inPeriod = () => true, factorsOf } = {}) {
+  const repeatedOrigins = new Set(
+    jobs.filter((j) => j.repeat_of && j.status === "done").map((j) => String(j.repeat_of)),
+  );
+  const acc = new Map();
+
+  for (const job of jobs) {
+    if (job.status !== "done" || job.repeat_of) continue;
+    if (!inPeriod(job.scheduled_date)) continue;
+    const factors = (factorsOf ? factorsOf(job) : []).filter(Boolean);
+    if (!factors.length) continue;
+    const returned = repeatedOrigins.has(String(job.id));
+    for (const key of new Set(factors)) {
+      const row = acc.get(key) || { key, jobs: 0, returns: 0 };
+      row.jobs += 1;
+      if (returned) row.returns += 1;
+      acc.set(key, row);
+    }
+  }
+
+  return [...acc.values()]
+    .map((r) => ({ ...r, rate: r.jobs ? Math.round(r.returns / r.jobs * 100) : 0 }))
+    // Сначала то, где возвращаются чаще всего, но только там, где есть на чём
+    // делать вывод: три заявки с одним возвратом дают «33%» и ничего не значат.
+    .sort((a, b) => (b.jobs >= 5 ? 1 : 0) - (a.jobs >= 5 ? 1 : 0) || b.rate - a.rate || b.jobs - a.jobs);
+}
+
 // --- гарантийные возвраты ------------------------------------------------
 
 // Чистая стоимость повторных выездов по заявке.
