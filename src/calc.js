@@ -313,6 +313,49 @@ export function executorShareAmt(job) {
   return Math.round((Number(job.report_paid) || 0) * (Number(job.executor_share_pct) || 0) / 100);
 }
 
+// --- объект обработки ----------------------------------------------------
+
+// Что происходило на объекте: сколько раз обрабатывали, от чего, на какую
+// сумму и как часто приходилось возвращаться.
+//
+// Для дезинфекции это главный вопрос при выезде: «здесь уже были, чем травили
+// и почему не помогло». Раньше ответить на него было нечем — адрес жил
+// строкой в заявке.
+export function objectSummary(objectId, jobs = [], { todayIso, activeMonths = 12 } = {}) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const mine = jobs
+    .filter((j) => j.object_id && String(j.object_id) === String(objectId))
+    .sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || "")));
+
+  const done = mine.filter((j) => j.status === "done");
+  const revenue = done.reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
+  const repeats = done.filter((j) => j.repeat_of).length;
+
+  const from = (() => {
+    const d = new Date(`${today}T00:00:00`);
+    d.setMonth(d.getMonth() - activeMonths);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const recent = done.filter((j) => j.scheduled_date && String(j.scheduled_date).slice(0, 10) >= from).length;
+
+  const pests = [...new Set(done.map((j) => (j.pest || "").trim()).filter(Boolean))];
+
+  return {
+    jobs: mine,
+    total: mine.length,
+    done: done.length,
+    revenue,
+    repeats,
+    recent,
+    pests,
+    lastDone: done[0] || null,
+    // Три и больше обработок за год на одной точке — это не разовая проблема,
+    // а источник, который никто не устранил. Такой объект надо предлагать на
+    // обслуживание, а не обрабатывать снова по разовой цене.
+    persistent: recent >= 3,
+  };
+}
+
 // --- ушедшие клиенты -----------------------------------------------------
 
 // Клиенты, которые обработались и больше не появлялись.

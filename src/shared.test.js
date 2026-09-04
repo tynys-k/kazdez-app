@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clientMemoFor, describeChange, monthLabel, phoneKey, samePhone, waLink, winbackMsg } from "./shared";
+import { addressKey, clientMemoFor, describeChange, monthLabel, phoneKey, samePhone, waLink, winbackMsg } from "./shared";
 
 describe("phoneKey", () => {
   it("склеивает записи одного номера в разных формах", () => {
@@ -141,5 +141,31 @@ describe("журнал изменений", () => {
     const d = describeChange({ entity: "чего_то_новое", action: "update", field: "какое_то_поле", before: "1", after: "2" });
     expect(d.entity).toBe("чего_то_новое");
     expect(d.title).toBe("какое_то_поле");
+  });
+});
+
+describe("ключ адреса", () => {
+  it("одна и та же точка в разных записях сходится", () => {
+    expect(addressKey("Мкр. Аксай-3, д.12, кв.45")).toBe(addressKey("мкр аксай 3 д 12 кв 45"));
+    expect(addressKey("ул. Абая 15 кв 3")).toBe(addressKey("УЛ  АБАЯ,  15,  кв.3"));
+  });
+
+  it("ё и е не разводят один адрес на два", () => {
+    expect(addressKey("ул. Королёва 7")).toBe(addressKey("ул. Королева 7"));
+  });
+
+  it("квартира остаётся частью объекта", () => {
+    // две квартиры в одном подъезде — два разных объекта с разной историей
+    expect(addressKey("Абая 15 кв 3")).not.toBe(addressKey("Абая 15 кв 4"));
+  });
+
+  it("дом без квартиры не сливается с квартирой в нём", () => {
+    expect(addressKey("Абая 15")).not.toBe(addressKey("Абая 15 кв 3"));
+  });
+
+  it("пустой адрес не даёт ключа", () => {
+    expect(addressKey("")).toBe("");
+    expect(addressKey(null)).toBe("");
+    expect(addressKey("   ,,,  ")).toBe("");
   });
 });
