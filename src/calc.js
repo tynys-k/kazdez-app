@@ -356,6 +356,24 @@ export function objectSummary(objectId, jobs = [], { todayIso, activeMonths = 12
   };
 }
 
+// --- кто такой клиент ----------------------------------------------------
+
+// Ключ клиента для группировки.
+//
+// В базе клиент — отдельная запись, и заявка ссылается на неё через
+// client_id: связь проставляет триггер, а не приложение. Раньше здесь
+// группировали по последним десяти цифрам телефона, из-за чего один человек
+// с двумя номерами считался за двух клиентов, а смена номера обнуляла всю
+// его историю.
+//
+// Телефон остаётся запасным вариантом: у совсем старых заявок без номера
+// связи может не быть, и терять их из отчётов нельзя.
+export function clientKeyOf(job, phoneKeyOf) {
+  if (job?.client_id) return `id:${job.client_id}`;
+  const byPhone = phoneKeyOf ? phoneKeyOf(job?.client_phone) : "";
+  return byPhone ? `tel:${byPhone}` : "";
+}
+
 // --- ушедшие клиенты -----------------------------------------------------
 
 // Клиенты, которые обработались и больше не появлялись.
@@ -380,7 +398,7 @@ export function dormantClients(jobs = [], { months = 12, todayIso, phoneKeyOf, m
 
   const byClient = new Map();
   for (const job of jobs) {
-    const key = phoneKeyOf ? phoneKeyOf(job.client_phone) : String(job.client_phone || "");
+    const key = clientKeyOf(job, phoneKeyOf);
     if (!key) continue;
     let c = byClient.get(key);
     if (!c) {
@@ -544,7 +562,7 @@ export function subscriptionComparison(jobs = [], { inPeriod = () => true, phone
     const bucket = j.service_contract_id ? sub : one;
     bucket.done += 1;
     bucket.revenue += Number(j.report_paid) || 0;
-    const key = phoneKeyOf ? phoneKeyOf(j.client_phone) : String(j.client_phone || "");
+    const key = clientKeyOf(j, phoneKeyOf);
     if (key) bucket.clients.add(key);
   }
 
@@ -913,7 +931,7 @@ export function clientStats(jobs = [], { from = null, to = null, phoneKeyOf } = 
   const byClient = new Map();
   for (const job of jobs) {
     if (job.status === "canceled") continue;
-    const key = phoneKeyOf(job.client_phone);
+    const key = clientKeyOf(job, phoneKeyOf);
     if (!key) continue;
     const date = job.scheduled_date || null;
     let c = byClient.get(key);
