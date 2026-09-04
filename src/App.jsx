@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
@@ -302,6 +302,7 @@ function Dashboard({ session, profile }) {
   const [training, setTraining] = useState([]);
   const [safetyAcks, setSafetyAcks] = useState([]);
   const [peopleEvents, setPeopleEvents] = useState([]);
+  const [discounts, setDiscounts] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -532,9 +533,10 @@ function Dashboard({ session, profile }) {
       supabase.from("training_records").select("*").order("passed_on", { ascending: false }),
       supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }),
       supabase.from("employee_events").select("*").order("happened_on", { ascending: false }),
+      supabase.from("job_discounts").select("*").order("created_at", { ascending: false }),
     ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr, cpr, tdr, trr, sar, evr] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс", "Закуп препаратов", "Допуски сотрудников", "Обучение", "Инструктаж", "История сотрудников"];
+    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr, cpr, tdr, trr, sar, evr, dsr2] = responses;
+    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс", "Закуп препаратов", "Допуски сотрудников", "Обучение", "Инструктаж", "История сотрудников", "Скидки"];
     setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
     setReportChemsFailed(!!cr.error);
     let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
@@ -595,6 +597,7 @@ function Dashboard({ session, profile }) {
     setTraining(trr.data || []);
     setSafetyAcks(sar.data || []);
     setPeopleEvents(evr.data || []);
+    setDiscounts(dsr2.data || []);
     if (!useOfflineSnapshot && !jr.error) {
       try {
         const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
@@ -940,8 +943,17 @@ function Dashboard({ session, profile }) {
     if (list.some((x) => norm(x.name) === norm(v))) return;
     await supabase.from(table).insert({ name: v });
   }
+  // Цена по прайсу считается один раз, при оформлении, и дальше не
+  // пересчитывается: прайс могут поменять, а сравнивать надо с той ценой, о
+  // которой договаривались с клиентом.
+  function quotedPriceFor(payload) {
+    const hit = calc.priceFor(payload.pest, payload.area, priceList);
+    return hit && hit.exact ? hit.price : null;
+  }
+
   async function createJob(payload) {
-    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
+    const quoted = quotedPriceFor(payload);
+    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, quoted_price: quoted, created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
     if (error) { showToast("Ошибка: " + error.message); return false; }
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
@@ -952,7 +964,10 @@ function Dashboard({ session, profile }) {
   }
   async function editJob(job, payload) {
     if (blockedByClosedPeriod(payload.scheduled_date || job.scheduled_date)) return;
-    const { error } = await supabase.from("jobs").update(payload).eq("id", job.id);
+    // Пересчитываем прайсовую цену, только если её ещё нет: у заявки, по
+    // которой уже договорились, цена не должна меняться от правки площади.
+    const patch = job.quoted_price == null ? { ...payload, quoted_price: quotedPriceFor({ ...job, ...payload }) } : payload;
+    const { error } = await supabase.from("jobs").update(patch).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return false; }
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
@@ -1037,6 +1052,19 @@ function Dashboard({ session, profile }) {
     });
     if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); load(); return false; }
     await recordClientEvent(job, "done", "Работа выполнена", `Оплата: ${fmt((Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0))} ₸`);
+    // Причина скидки пишется отдельной записью: сумма уходит защищённой
+    // функцией, а причину указывает тот, кто скидку дал.
+    if (report.discountReason) {
+      const { error: dError } = await supabase.from("job_discounts").upsert({
+        job_id: job.id,
+        quoted: Number(job.quoted_price) || 0,
+        charged: (Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0),
+        reason: report.discountReason,
+        note: report.discountNote || null,
+        created_by: session.user.id,
+      }, { onConflict: "job_id" });
+      if (dError) showToast("Отчёт сохранён, но причина скидки не записалась: " + dError.message);
+    }
     setModal({ kind: "reportSuccess" }); load(); return true;
   }
   async function markTransferPaid(job, accountId, paidDate) {
@@ -2341,6 +2369,14 @@ function Dashboard({ session, profile }) {
   // Ушедшие клиенты: обработались и не появлялись дольше выбранного срока.
   // Считается по ключу телефона, поэтому «+7 701 …» и «8 701 …» — один человек.
   const dormant = calc.dormantClients(jobs, { months: dormantMonths, phoneKeyOf: phoneKey });
+  // Порог, ниже которого скидка требует объяснения. Настраивается: у разных
+  // компаний разная норма торга.
+  const discountThreshold = Number(settings.discount_threshold_pct) || 20;
+  const discountStats = calc.discountReport(jobs, { inPeriod: inPeriodIso, threshold: discountThreshold, reasons: discounts });
+  const discountsNoReason = calc.discountReport(jobs, {
+    inPeriod: (iso) => { const d = parseIso(iso); return !!d && Date.now() - d.getTime() < 30 * 86400000; },
+    threshold: discountThreshold, reasons: discounts,
+  }).unexplained;
   const lowCount = inventory.filter((i) => i.low).length;
   // Допуски: считаем только по работающим сотрудникам — отключённые учётные
   // записи не должны висеть в предупреждениях вечно.
@@ -2498,6 +2534,8 @@ function Dashboard({ session, profile }) {
     // внутренний беспорядок. Поэтому красным и выше складских предупреждений.
     docsExpired ? { id: "docsexpired", label: "Просрочены допуски сотрудников", value: docsExpired, tab: "team", tone: "danger" } : null,
     docsSoon ? { id: "docssoon", label: "Допуски истекают в этом месяце", value: docsSoon, tab: "team", tone: "warning" } : null,
+    // Скидка без объяснения — не «дал скидку», а «никому не сказал».
+    isAdmin && discountsNoReason ? { id: "discounts", label: "Скидки без объяснения за 30 дней", value: discountsNoReason, tab: "growth", tone: "danger" } : null,
     trainingAlerts.length ? { id: "training", label: "Пора перепроверить обучение", value: trainingAlerts.length, tab: "team", tone: "warning" } : null,
     isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
     isAdmin && dueFollowups.length ? { id: "client-followups", label: "Пора связаться с клиентами", value: dueFollowups.length, tab: "retention", tone: "warning" } : null,
@@ -3983,6 +4021,54 @@ function Dashboard({ session, profile }) {
             </div>
 
             <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Скидки ниже прайса · {range.label}</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>
+                Считаются заявки, где итог оказался ниже зафиксированной прайсовой цены больше чем на {discountThreshold}%.
+                Порог меняется в Настройках. Заявки без прайсовой цены сюда не попадают — сравнивать не с чем.
+              </div>
+              {discountStats.count === 0 && <div className="kd-muted">За период скидок ниже порога нет.</div>}
+              {discountStats.count > 0 && (
+                <>
+                  <div className="kd-row">
+                    <span>Отдано скидками</span>
+                    <span className="kd-twoval">
+                      <em>{discountStats.count} заявок{discountStats.unexplained ? ` · без причины ${discountStats.unexplained}` : ""}</em>
+                      <strong style={{ color: "var(--rust)" }}>−{fmt(discountStats.total)} ₸</strong>
+                    </span>
+                  </div>
+                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr" }}>
+                    <span>Сотрудник</span><span>Заявок</span><span>Без причины</span><span>Сумма</span>
+                  </div>
+                  {discountStats.byTech.map((r) => (
+                    <div className="kd-ledgerrow" key={String(r.techId)} style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr" }}>
+                      <span className="kd-ledgername">{techById(r.techId)?.full_name || personName(r.techId) || "не назначен"}</span>
+                      <span>{r.count}</span>
+                      <span style={{ color: r.unexplained ? "var(--rust)" : undefined }}>{r.unexplained || "—"}</span>
+                      <strong>−{fmt(r.amount)} ₸</strong>
+                    </div>
+                  ))}
+                  <details className="kd-more" style={{ marginTop: 10 }}>
+                    <summary>Разбор по заявкам · {discountStats.count}</summary>
+                    {discountStats.rows.slice(0, 30).map(({ job: j, quoted, charged, pct, reason }) => (
+                      <div className="kd-ledgerrow" key={j.id} style={{ gridTemplateColumns: "1.5fr 1fr 1fr 1.4fr" }}>
+                        <span className="kd-ledgername">{j.pest} · {isoToRu(j.scheduled_date)}
+                          <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{techById(j.assigned_to)?.full_name || "не назначен"}</em>
+                        </span>
+                        <span className="kd-muted">прайс {fmt(quoted)}</span>
+                        <span>факт {fmt(charged)} <em style={{ fontStyle: "normal", color: "var(--rust)" }}>({pct}%)</em></span>
+                        <span style={{ textAlign: "left" }}>
+                          {reason
+                            ? <>{DISCOUNT_REASONS[reason.reason] || reason.reason}{reason.note ? <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{reason.note}</em> : null}</>
+                            : <strong style={{ color: "var(--rust)" }}>причина не указана</strong>}
+                        </span>
+                      </div>
+                    ))}
+                  </details>
+                </>
+              )}
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Расход против нормы · {range.label}</div>
               {Object.keys(chemNorms).length === 0 && (
                 <div className="kd-muted">Нормы расхода не заданы. Их вписывают в справочнике по вредителям в Настройках — без них сравнивать не с чем.</div>
@@ -4913,7 +4999,7 @@ function Dashboard({ session, profile }) {
         const reasons = [count === 0 ? "свободен в этот день" : `${count} заяв. в этот день`, sameArea ? "есть выезд рядом" : "", avgRating ? `качество ${avgRating.toFixed(1)}/5` : ""].filter(Boolean);
         return { off, night, count, score, reasons };
       }} />}
-      {modal?.kind === "report" && <ReportModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} primaryReport={(() => {
+      {modal?.kind === "report" && <ReportModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} discountThreshold={discountThreshold} primaryReport={(() => {
         if (!modal.job.repeat_of) return null;
         const p = jobs.find((x) => x.id === modal.job.repeat_of);
         if (!p) return null;

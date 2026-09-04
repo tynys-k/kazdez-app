@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor } from "./calc";
-import { EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -640,7 +640,7 @@ function DocModal({ doc, partners, onClose, onSave }) {
   );
 }
 
-function ReportModal({ job, partnerName, chemicals, primaryReport, onClose, onSave }) {
+function ReportModal({ job, partnerName, chemicals, primaryReport, discountThreshold = 20, onClose, onSave }) {
   const draftKey = `kazdez-report-draft-v4:${job.id}`;
   const draftRef = useRef(null);
   if (draftRef.current === null) { try { draftRef.current = JSON.parse(localStorage.getItem(draftKey) || "null") || {}; } catch { draftRef.current = {}; } }
@@ -652,9 +652,17 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, onClose, onSa
   const [docNeeded, setDocNeeded] = useState(!!draft.docNeeded); const [avr, setAvr] = useState(!!draft.avr); const [dogovor, setDogovor] = useState(!!draft.dogovor); const [docNote, setDocNote] = useState(draft.docNote || "");
   const [saving, setSaving] = useState(false);
   const [offlineSaved, setOfflineSaved] = useState(false);
+  const [discountReason, setDiscountReason] = useState(draft.discountReason || "");
+  const [discountNote, setDiscountNote] = useState(draft.discountNote || "");
   const total = (Number(cash) || 0) + (Number(qr) || 0) + (Number(transfer) || 0);
+  // Прайсовая цена зафиксирована при оформлении заявки. Если её нет — сравнивать
+  // не с чем, и мешать сдать отчёт мы не имеем права.
+  const quoted = Number(job.quoted_price) || 0;
+  const gap = quoted > 0 && total > 0 ? Math.round((total - quoted) / quoted * 100) : null;
+  const needsReason = gap !== null && gap <= -Math.abs(discountThreshold);
+  const reasonMissing = needsReason && (!discountReason || (discountReason === "other" && !discountNote.trim()));
   useEffect(() => {
-    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, savedAt: new Date().toISOString() }));
+    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, discountReason, discountNote, savedAt: new Date().toISOString() }));
   }, [draftKey, cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote]);
   const setChem = (i, k) => (e) => { const n = chems.slice(); n[i] = { ...n[i], [k]: e.target.value }; setChems(n); };
   function methodLabel() {
@@ -673,20 +681,48 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, onClose, onSa
       const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
       return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
     });
-    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote } }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
+    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "" }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
     if (ok !== false) localStorage.removeItem(draftKey);
     setSaving(false);
   }
   return (
     <ModalShell title="Отчёт по заявке" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
+      <button className="kd-btn primary" disabled={saving || reasonMissing} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
     </>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
       <PartnerOrigin name={partnerName || job.partner_name} />
       {!navigator.onLine && <div className="kd-offline-draft"><Info size={17} /><div><strong>Нет связи</strong><span>Заполняйте отчёт — черновик сохраняется на этом устройстве. Отправьте его после восстановления интернета.</span></div></div>}
       {offlineSaved && <div className="kd-allgood"><CheckCircle2 size={18} />Черновик сохранён на устройстве</div>}
 
+      {quoted > 0 && (
+        <div className="kd-row" style={{ marginBottom: 10 }}>
+          <span>Цена по прайсу</span>
+          <span className="kd-twoval">
+            {gap !== null && <em style={{ color: gap < 0 ? "var(--rust)" : gap > 0 ? "var(--primary)" : undefined }}>
+              {gap > 0 ? "+" : ""}{gap}%
+            </em>}
+            <strong>{fmt(quoted)} ₸</strong>
+          </span>
+        </div>
+      )}
+      {needsReason && (
+        <div className="kd-card" style={{ marginBottom: 14, borderColor: "var(--amber)", background: "var(--amber-tint)", boxShadow: "none" }}>
+          <div className="kd-section" style={{ marginTop: 0 }}>Сумма ниже прайса на {Math.abs(gap)}%</div>
+          <div className="kd-muted" style={{ marginBottom: 10 }}>
+            Так бывает, и это нормально — но причину надо назвать. Без неё скидка попадёт в отчёт как необъяснённая.
+          </div>
+          <Field label="Причина">
+            <select value={discountReason} onChange={(e) => setDiscountReason(e.target.value)}>
+              <option value="">— выбери причину —</option>
+              {Object.entries(DISCOUNT_REASONS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </Field>
+          <Field label={discountReason === "other" ? "Пояснение (обязательно)" : "Пояснение"}>
+            <input value={discountNote} onChange={(e) => setDiscountNote(e.target.value)} placeholder="коротко, своими словами" />
+          </Field>
+        </div>
+      )}
       {primaryReport && (
         <div className="kd-card" style={{ marginBottom: 14, background: "var(--surface-sunk)", boxShadow: "none" }}>
           <div className="kd-section" style={{ marginTop: 0 }}>📋 Первичная обработка — от чего отталкиваться</div>
@@ -1728,6 +1764,14 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
                 onBlur={(e) => { const v = e.target.value.trim(); if (v !== (settings[l.key] || "")) onSaveSetting(l.key, v || null); }} />
             </div>
           ))}
+          <div className="kd-field">
+            <span>💸 Порог скидки, %</span>
+            <input defaultValue={settings.discount_threshold_pct ?? 20} inputMode="numeric" placeholder="20"
+              onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(settings.discount_threshold_pct ?? 20)) onSaveSetting("discount_threshold_pct", v || null); }} />
+          </div>
+          <div className="kd-muted" style={{ marginTop: -6, marginBottom: 12 }}>
+            Насколько итог может быть ниже прайса без объяснения. Ниже порога исполнитель обязан выбрать причину, иначе отчёт не сохранится.
+          </div>
           <div className="kd-field">
             <span>⭐ Страница отзывов</span>
             <input defaultValue={settings.review_link || ""} placeholder="https://2gis.kz/... или ссылка на Карты"

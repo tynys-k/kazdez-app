@@ -1135,6 +1135,64 @@ export function dayLoad(jobsOfDay = [], durations = null, { workdayMinutes = WOR
   };
 }
 
+// --- контроль скидок -----------------------------------------------------
+
+// Насколько отпустили дешевле прайса.
+//
+// Сравниваем с ценой, зафиксированной при оформлении заявки, а не с
+// сегодняшним прайсом: прайс могли поменять после, а разговор с клиентом был
+// про ту цену.
+//
+// Заявки без прайсовой цены (нет ступени, не указана площадь) в контроль не
+// попадают: сравнивать не с чем, и подсвечивать их красным — значит приучить
+// смотреть мимо.
+export function discountCheck(job, { threshold = 20 } = {}) {
+  const quoted = Number(job?.quoted_price) || 0;
+  const charged = Number(job?.report_paid) || 0;
+  if (quoted <= 0 || job?.status !== "done") return null;
+  const diff = charged - quoted;
+  const pct = Math.round(diff / quoted * 100);
+  return {
+    quoted, charged, diff, pct,
+    // ниже порога — повод спросить; выше прайса — хорошая работа, не претензия
+    state: pct <= -Math.abs(threshold) ? "under" : pct > 0 ? "over" : "ok",
+  };
+}
+
+// Скидки за период по сотрудникам: сколько раз и на какую сумму отпустили
+// ниже прайса. Сверху тот, кто отдал больше денег.
+export function discountReport(jobs = [], { inPeriod = () => true, threshold = 20, reasons = [] } = {}) {
+  const byReason = new Map(reasons.map((r) => [String(r.job_id), r]));
+  const byTech = new Map();
+  const rows = [];
+  let total = 0;
+
+  for (const job of jobs) {
+    if (!inPeriod(job.scheduled_date)) continue;
+    const check = discountCheck(job, { threshold });
+    if (!check || check.state !== "under") continue;
+    const reason = byReason.get(String(job.id)) || null;
+    rows.push({ job, ...check, reason });
+    total += -check.diff;
+    const key = String(job.assigned_to || "");
+    const cur = byTech.get(key) || { techId: job.assigned_to, count: 0, amount: 0, unexplained: 0 };
+    cur.count += 1;
+    cur.amount += -check.diff;
+    // Скидка без причины — отдельная цифра: это не «дал скидку», это «никому
+    // не объяснил».
+    if (!reason) cur.unexplained += 1;
+    byTech.set(key, cur);
+  }
+
+  return {
+    total,
+    count: rows.length,
+    unexplained: rows.filter((r) => !r.reason).length,
+    rows: rows.sort((a, b) => a.diff - b.diff),
+    byTech: [...byTech.values()].sort((a, b) => b.amount - a.amount),
+  };
+}
+
 // --- прайс ----------------------------------------------------------------
 
 // Цена по виду вредителя и площади. Вид сравниваем без учёта регистра и
