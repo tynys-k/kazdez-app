@@ -469,153 +469,169 @@ function Dashboard({ session, profile }) {
     if (e.data) setClientErrors(e.data);
     if (c.data) setChangeLog(c.data);
   }
-  async function load() {
-    setLoading(true);
+  // Реестр источников данных.
+  //
+  // Раньше здесь стоял массив из сорока с лишним запросов, результат которого
+  // разбирался ПО ПОЗИЦИЯМ: вставленный не туда запрос молча отдавал
+  // переменной чужую таблицу. Так пропали доплаты помощникам и прайс, и ради
+  // защиты от этого пришлось писать отдельный тест-замок. Теперь запрос,
+  // подпись и обработчик стоят в одной строке — разъехаться им негде.
+  //
+  // load() без аргументов обновляет всё. load(["jobs"]) — только заявки:
+  // качать сорок таблиц после сохранения одной записи незачем, и именно это
+  // съедало почти весь трафик проекта.
+  const SOURCES = [
+    { key: "jobs", label: "Заявки", run: () => fetchAllRows("jobs") },
+    { key: "report_chemicals", label: "Препараты в отчётах", run: () => fetchAllRows("report_chemicals") },
+    { key: "chemicals", label: "Склад", run: () => supabase.from("chemicals").select("*") },
+    { key: "profiles", label: "Сотрудники", run: () => supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at, cash_opening_balance, cash_opening_date, salary_monthly, work_schedule") },
+    { key: "handouts", label: "Выдача препаратов", run: () => supabase.from("handouts").select("*"), set: setHandouts },
+    { key: "partners", label: "Партнёры", run: () => supabase.from("partners").select("*"), set: setPartners },
+    { key: "doc_services", label: "Документы", run: () => supabase.from("doc_services").select("*").order("created_at", { ascending: false }), set: setDocs },
+    { key: "tech_expenses", label: "Расходы сотрудников", run: () => supabase.from("tech_expenses").select("*").order("created_at", { ascending: false }), set: setExpenses },
+    { key: "equipment", label: "Оборудование", run: () => supabase.from("equipment").select("*"), set: setEquipment },
+    { key: "equipment_handouts", label: "Выдача оборудования", run: () => supabase.from("equipment_handouts").select("*"), set: setEquipHandouts },
+    { key: "client_sources", label: "Источники", run: () => supabase.from("client_sources").select("*").order("name"), set: setSources },
+    { key: "pest_types", label: "Виды работ", run: () => supabase.from("pest_types").select("*").order("name"), set: setPestTypes },
+    { key: "app_settings", label: "Настройки", run: () => supabase.from("app_settings").select("*").not("key", "in", `(${COMPANY_IMAGE_KEYS.join(",")})`) },
+    { key: "expense_categories", label: "Категории расходов", run: () => supabase.from("expense_categories").select("*").order("name"), set: setExpCats },
+    { key: "opex", label: "Операционные расходы", run: () => supabase.from("opex").select("*").order("spent_date", { ascending: false }), set: setOpex },
+    { key: "cash_deposits", label: "Сдача наличных", run: () => supabase.from("cash_deposits").select("*").order("requested_at", { ascending: false }), set: setDeposits },
+    { key: "tasks", label: "Задачи", run: () => supabase.from("tasks").select("*").order("created_at", { ascending: false }), set: setTasks },
+    { key: "accounts", label: "Счета", run: () => supabase.from("accounts").select("*").order("sort"), set: setAccounts },
+    { key: "money_moves", label: "Движение денег", run: () => fetchAllRows("money_moves", { column: "move_date", ascending: false }), set: setMoves },
+    { key: "tenders", label: "Тендеры", run: () => supabase.from("tenders").select("*").order("created_at", { ascending: false }), set: setTenders },
+    { key: "tender_guarantees", label: "Обеспечения", run: () => supabase.from("tender_guarantees").select("*"), set: setTenderGuarantees },
+    { key: "tender_services", label: "Работы по тендерам", run: () => supabase.from("tender_services").select("*").order("seq"), set: setTenderServices },
+    { key: "guarantee_returns", label: "Возвраты", run: () => supabase.from("guarantee_returns").select("*").order("return_date", { ascending: false }), set: setGuaranteeReturns },
+    { key: "leads", label: "Клиенты", run: () => supabase.from("leads").select("*").order("updated_at", { ascending: false }), set: setLeads },
+    { key: "lead_stages", label: "Этапы CRM", run: () => supabase.from("lead_stages").select("*").order("sort"), set: setLeadStages },
+    { key: "mkt_channels", label: "Рекламные каналы", run: () => supabase.from("mkt_channels").select("*").order("sort"), set: setMktChannels },
+    { key: "mkt_topups", label: "Расходы рекламы", run: () => supabase.from("mkt_topups").select("*").order("topup_date", { ascending: false }), set: setMktTopups },
+    { key: "tech_days_off", label: "Выходные", run: () => supabase.from("tech_days_off").select("*"), set: setDaysOff },
+    { key: "client_followups", label: "Касания", run: () => supabase.from("client_followups").select("*").order("due_date", { ascending: true }), set: setFollowups },
+    { key: "quality_checks", label: "Контроль качества", run: () => supabase.from("quality_checks").select("*").order("contacted_at", { ascending: false }), set: setQualityChecks },
+    { key: "service_contracts", label: "Абоненты", run: () => supabase.from("service_contracts").select("*").order("next_service_date", { ascending: true }), set: setContracts },
+    { key: "client_public_feedback", label: "Оценки клиентов", run: () => supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }), set: setPublicFeedback },
+    { key: "job_proofs", label: "Подтверждения работ", run: () => supabase.from("job_proofs").select("*").order("updated_at", { ascending: false }), set: setJobProofs },
+    { key: "cash_adjustments", label: "Ревизии кассы", run: () => supabase.from("cash_adjustments").select("*").order("created_at", { ascending: false }), set: setCashAdjustments },
+    { key: "inventory_adjustments", label: "Ревизии препаратов", run: () => supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }), set: setInventoryAdjustments },
+    { key: "job_helpers", label: "Помощники на заявках", run: () => supabase.from("job_helpers").select("*"), set: setJobHelpers },
+    { key: "price_list", label: "Прайс", run: () => supabase.from("price_list").select("*").order("pest").order("area_from"), set: setPriceList },
+    { key: "chemical_purchases", label: "Закуп препаратов", run: () => supabase.from("chemical_purchases").select("*").order("purchase_date", { ascending: false }), set: setChemPurchases },
+    { key: "tech_documents", label: "Допуски сотрудников", run: () => supabase.from("tech_documents").select("*").order("expires_on", { ascending: true }), set: setTechDocs },
+    { key: "training_records", label: "Обучение", run: () => supabase.from("training_records").select("*").order("passed_on", { ascending: false }), set: setTraining },
+    { key: "safety_acknowledgements", label: "Инструктаж", run: () => supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }), set: setSafetyAcks },
+    { key: "employee_events", label: "История сотрудников", run: () => supabase.from("employee_events").select("*").order("happened_on", { ascending: false }), set: setPeopleEvents },
+    { key: "job_discounts", label: "Скидки", run: () => supabase.from("job_discounts").select("*").order("created_at", { ascending: false }), set: setDiscounts },
+  ];
+
+  // Расход препаратов подмешивается в заявки, поэтому в одиночку заявки не
+  // обновляются: иначе у них пропал бы список препаратов.
+  function withDependencies(keys) {
+    const set = new Set(keys);
+    if (set.has("jobs")) set.add("report_chemicals");
+    if (set.has("report_chemicals")) set.add("jobs");
+    return [...set];
+  }
+
+  async function load(only = null) {
+    const keys = only ? withDependencies(only) : null;
+    const picked = keys ? SOURCES.filter((s) => keys.includes(s.key)) : SOURCES;
+    if (!keys) setLoading(true);
     try {
-    const responses = await Promise.all([
-      fetchAllRows("jobs"),
-      fetchAllRows("report_chemicals"),
-      supabase.from("chemicals").select("*"),
-      // Журнал, корзина и сбои нужны только в своих разделах. Позицию в массиве
-      // сохраняем заглушкой, чтобы не сдвигать разбор остальных сорока ответов,
-      // а данные подтягиваем при открытии раздела — см. loadJournalData.
-      Promise.resolve({ data: null, error: null }),
-      Promise.resolve({ data: null, error: null }),
-      // cash_opening_balance / cash_opening_date — база ревизии кассы: от них считается «на руках»
-      // (см. techOpening ниже). salary_monthly — оклад для вкладки «Зарплата».
-      // Поле, забытое в этом select, читается как undefined и молча ломает расчёт — так уже было с ревизией.
-      supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at, cash_opening_balance, cash_opening_date, salary_monthly, work_schedule"),
-      supabase.from("handouts").select("*"),
-      supabase.from("partners").select("*"),
-      supabase.from("doc_services").select("*").order("created_at", { ascending: false }),
-      supabase.from("tech_expenses").select("*").order("created_at", { ascending: false }),
-      supabase.from("equipment").select("*"),
-      supabase.from("equipment_handouts").select("*"),
-      supabase.from("client_sources").select("*").order("name"),
-      supabase.from("pest_types").select("*").order("name"),
-      // без печати и подписи: они тяжёлые и нужны редко, см. loadCompanyImages
-      supabase.from("app_settings").select("*").not("key", "in", `(${COMPANY_IMAGE_KEYS.join(",")})`),
-      supabase.from("expense_categories").select("*").order("name"),
-      supabase.from("opex").select("*").order("spent_date", { ascending: false }),
-      supabase.from("cash_deposits").select("*").order("requested_at", { ascending: false }),
-      supabase.from("tasks").select("*").order("created_at", { ascending: false }),
-      supabase.from("accounts").select("*").order("sort"),
-      fetchAllRows("money_moves", { column: "move_date", ascending: false }),
-      supabase.from("tenders").select("*").order("created_at", { ascending: false }),
-      supabase.from("tender_guarantees").select("*"),
-      supabase.from("tender_services").select("*").order("seq"),
-      supabase.from("guarantee_returns").select("*").order("return_date", { ascending: false }),
-      supabase.from("leads").select("*").order("updated_at", { ascending: false }),
-      supabase.from("lead_stages").select("*").order("sort"),
-      supabase.from("mkt_channels").select("*").order("sort"),
-      supabase.from("mkt_topups").select("*").order("topup_date", { ascending: false }),
-      supabase.from("tech_days_off").select("*"),
-      supabase.from("client_followups").select("*").order("due_date", { ascending: true }),
-      supabase.from("quality_checks").select("*").order("contacted_at", { ascending: false }),
-      supabase.from("service_contracts").select("*").order("next_service_date", { ascending: true }),
-      Promise.resolve({ data: null, error: null }),
-      supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }),
-      supabase.from("job_proofs").select("*").order("updated_at", { ascending: false }),
-      // Ревизии кассы и ручные корректировки остатков. Последняя запись kind="revision"
-      // задаёт новую точку отсчёта для «на руках» (см. techCashOnHand).
-      supabase.from("cash_adjustments").select("*").order("created_at", { ascending: false }),
-      // Ревизии и движения препаратов у сотрудников. Последняя запись kind="revision"
-      // по паре сотрудник+препарат задаёт точку отсчёта (см. techLedger).
-      supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }),
-      Promise.resolve({ data: null, error: null }),
-      // Порядок этих запросов обязан совпадать с порядком имён в разборе ниже:
-      // помощники (jhr), затем прайс (plr). Из-за перестановки доплаты помощникам
-      // читались как строки прайса и пропадали из зарплаты.
-      supabase.from("job_helpers").select("*"),
-      supabase.from("price_list").select("*").order("pest").order("area_from"),
-      supabase.from("chemical_purchases").select("*").order("purchase_date", { ascending: false }),
-      supabase.from("tech_documents").select("*").order("expires_on", { ascending: true }),
-      supabase.from("training_records").select("*").order("passed_on", { ascending: false }),
-      supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }),
-      supabase.from("employee_events").select("*").order("happened_on", { ascending: false }),
-      supabase.from("job_discounts").select("*").order("created_at", { ascending: false }),
-    ]);
-    const [jr, cr, chr, ar, tr, pr, hr, ptr, dsr, exr, eqr, ehr, scr, ptyr, str, ecr, opr, dpr, tkr, accr, mvr, tndr, tgr, tsr, grr, ldr, lsr, mcr, mtr, dofr, fur, qcr, cor, cer, pfr, jpr, car, iar, errr, jhr, plr, cpr, tdr, trr, sar, evr, dsr2] = responses;
-    const tableNames = ["Заявки", "Препараты в отчётах", "Склад", "Журнал", "Корзина", "Сотрудники", "Выдача препаратов", "Партнёры", "Документы", "Расходы сотрудников", "Оборудование", "Выдача оборудования", "Источники", "Виды работ", "Настройки", "Категории расходов", "Операционные расходы", "Сдача наличных", "Задачи", "Счета", "Движение денег", "Тендеры", "Обеспечения", "Работы по тендерам", "Возвраты", "Клиенты", "Этапы CRM", "Рекламные каналы", "Расходы рекламы", "Выходные", "Касания", "Контроль качества", "Абоненты", "Хронология клиентов", "Оценки клиентов", "Подтверждения работ", "Ревизии кассы", "Ревизии препаратов", "Журнал ошибок", "Помощники на заявках", "Прайс", "Закуп препаратов", "Допуски сотрудников", "Обучение", "Инструктаж", "История сотрудников", "Скидки"];
-    setDataWarnings(responses.map((response, index) => response.error ? `${tableNames[index]}: ${response.error.message}` : null).filter(Boolean));
-    setReportChemsFailed(!!cr.error);
-    let offlineSnapshot = null; try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; }
-    const useOfflineSnapshot = !navigator.onLine && !!jr.error && !!offlineSnapshot?.jobs;
-    const chems = cr.data || [];
-    const mappedJobs = (jr.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) }));
-    const currentJobs = useOfflineSnapshot ? offlineSnapshot.jobs : mappedJobs;
-    const currentChemicals = useOfflineSnapshot ? (offlineSnapshot.chemicals || []) : (chr.data || []);
-    const currentProfiles = useOfflineSnapshot ? (offlineSnapshot.profiles || []) : (pr.data || []);
-    setJobs(currentJobs);
-    setChemicals(currentChemicals);
-    setTechs(currentProfiles.filter((p) => p.role === "tech"));
-    setAllProfiles(currentProfiles);
-    setHandouts(hr.data || []);
-    setPartners(ptr.data || []);
-    setDocs(dsr.data || []);
-    setExpenses(exr.data || []);
-    setEquipment(eqr.data || []);
-    setEquipHandouts(ehr.data || []);
-    setSources(scr.data || []);
-    setPestTypes(ptyr.data || []);
-    const settingsMap = useOfflineSnapshot ? (offlineSnapshot.settings || {}) : {};
-    if (!useOfflineSnapshot) (str.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
-    // Печать и подпись в этот запрос не входят: если их уже подтянули,
-    // сохраняем — иначе фоновое обновление вымывало бы их из памяти, и
-    // документ печатался бы без печати.
-    setSettings((prev) => {
-      const kept = Object.fromEntries(COMPANY_IMAGE_KEYS.filter((k) => prev[k] != null).map((k) => [k, prev[k]]));
-      return { ...settingsMap, ...kept };
-    });
-    setExpCats(ecr.data || []);
-    setOpex(opr.data || []);
-    setDeposits(dpr.data || []);
-    setTasks(tkr.data || []);
-    setAccounts(accr.data || []);
-    setMoves(mvr.data || []);
-    setTenders(tndr.data || []);
-    setTenderGuarantees(tgr.data || []);
-    setTenderServices(tsr.data || []);
-    setGuaranteeReturns(grr.data || []);
-    setLeads(ldr.data || []);
-    setLeadStages(lsr.data || []);
-    setMktChannels(mcr.data || []);
-    setMktTopups(mtr.data || []);
-    setDaysOff(dofr.data || []);
-    setFollowups(fur.data || []);
-    setQualityChecks(qcr.data || []);
-    setContracts(cor.data || []);
-    if (cer.data) setClientEvents(cer.data);
-    setPublicFeedback(pfr.data || []);
-    setJobProofs(jpr.data || []);
-    setCashAdjustments(car.data || []);
-    setInventoryAdjustments(iar.data || []);
-    setJobHelpers(jhr.data || []);
-    setPriceList(plr.data || []);
-    setChemPurchases(cpr.data || []);
-    setTechDocs(tdr.data || []);
-    setTraining(trr.data || []);
-    setSafetyAcks(sar.data || []);
-    setPeopleEvents(evr.data || []);
-    setDiscounts(dsr2.data || []);
-    if (!useOfflineSnapshot && !jr.error) {
-      try {
-        const cacheJobs = mappedJobs.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
-        localStorage.setItem("kd-offline-snapshot-v4", JSON.stringify({ jobs: cacheJobs, chemicals: chr.data || [], profiles: pr.data || [], settings: settingsMap, savedAt: new Date().toISOString() }));
-      } catch { /* локальное хранилище может быть заполнено — онлайн-работе это не мешает */ }
-    }
-    if (useOfflineSnapshot) setDataWarnings([`Офлайн-режим: показаны данные на ${fmtTs(offlineSnapshot.savedAt)}`]);
-    setLastLoadedAt(useOfflineSnapshot && offlineSnapshot.savedAt ? new Date(offlineSnapshot.savedAt) : new Date());
-    setLoading(false);
+      const responses = await Promise.all(picked.map((s) => s.run()));
+      const res = {};
+      picked.forEach((s, i) => { res[s.key] = responses[i]; });
+
+      const warnings = picked
+        .map((s, i) => (responses[i].error ? `${s.label}: ${responses[i].error.message}` : null))
+        .filter(Boolean);
+      if (keys) {
+        // Частичное обновление знает только про свои таблицы: чужие
+        // предупреждения оставляем как есть, свои заменяем.
+        const mine = picked.map((s) => `${s.label}: `);
+        setDataWarnings((prev) => [...prev.filter((w) => !mine.some((m) => w.startsWith(m))), ...warnings]);
+      } else {
+        setDataWarnings(warnings);
+      }
+
+      for (const s of picked) if (s.set) s.set(res[s.key].data || []);
+
+      if (res.report_chemicals) setReportChemsFailed(!!res.report_chemicals.error);
+
+      // Офлайн-снимок нужен только при полной загрузке: частичное обновление
+      // без связи всё равно ничего не принесёт.
+      let offlineSnapshot = null;
+      if (!keys) { try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; } }
+      const useOfflineSnapshot = !keys && !navigator.onLine && !!res.jobs?.error && !!offlineSnapshot?.jobs;
+
+      if (res.jobs && res.report_chemicals) {
+        const chems = res.report_chemicals.data || [];
+        const mapped = (res.jobs.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) }));
+        setJobs(useOfflineSnapshot ? offlineSnapshot.jobs : mapped);
+      }
+      if (res.chemicals) setChemicals(useOfflineSnapshot ? (offlineSnapshot.chemicals || []) : (res.chemicals.data || []));
+      if (res.profiles) {
+        const people = useOfflineSnapshot ? (offlineSnapshot.profiles || []) : (res.profiles.data || []);
+        setTechs(people.filter((p) => p.role === "tech"));
+        setAllProfiles(people);
+      }
+      if (res.app_settings) {
+        const settingsMap = useOfflineSnapshot ? (offlineSnapshot.settings || {}) : {};
+        if (!useOfflineSnapshot) (res.app_settings.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
+        // Печать и подпись в этот запрос не входят: если их уже подтянули,
+        // сохраняем — иначе фоновое обновление вымывало бы их из памяти, и
+        // документ печатался бы без печати.
+        setSettings((prev) => {
+          const kept = Object.fromEntries(COMPANY_IMAGE_KEYS.filter((k) => prev[k] != null).map((k) => [k, prev[k]]));
+          return { ...settingsMap, ...kept };
+        });
+      }
+
+      // Офлайн-копию сохраняем только при полной загрузке: из частичной
+      // получился бы снимок без половины данных.
+      if (!keys && !useOfflineSnapshot && !res.jobs?.error) {
+        try {
+          const chems = res.report_chemicals?.data || [];
+          const mapped = (res.jobs?.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) }));
+          const cacheJobs = mapped.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
+          const settingsMap = {};
+          (res.app_settings?.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
+          localStorage.setItem("kd-offline-snapshot-v4", JSON.stringify({
+            jobs: cacheJobs, chemicals: res.chemicals?.data || [], profiles: res.profiles?.data || [],
+            settings: settingsMap, savedAt: new Date().toISOString(),
+          }));
+        } catch { /* локальное хранилище может быть заполнено — онлайн-работе это не мешает */ }
+      }
+      if (useOfflineSnapshot) setDataWarnings([`Офлайн-режим: показаны данные на ${fmtTs(offlineSnapshot.savedAt)}`]);
+      setLastLoadedAt(useOfflineSnapshot && offlineSnapshot.savedAt ? new Date(offlineSnapshot.savedAt) : new Date());
     } catch (error) {
       let snapshot = null; try { snapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { snapshot = null; }
       if (snapshot?.jobs) {
         setJobs(snapshot.jobs); setChemicals(snapshot.chemicals || []); setAllProfiles(snapshot.profiles || []); setTechs((snapshot.profiles || []).filter((p) => p.role === "tech")); setSettings(snapshot.settings || {}); setLastLoadedAt(snapshot.savedAt ? new Date(snapshot.savedAt) : null);
         setDataWarnings([`Нет связи с базой. Показана сохранённая копия на ${fmtTs(snapshot.savedAt)}`]);
       } else setDataWarnings([`Не удалось связаться с базой: ${error?.message || "неизвестная ошибка"}`]);
-      setLoading(false);
+    } finally {
+      if (!keys) setLoading(false);
     }
   }
+
+  // Готовые наборы для обновления после действия. Собраны так, чтобы на экране
+  // обновилось всё, на что это действие влияет, — экономия не должна
+  // оборачиваться устаревшими цифрами.
+  // Заявку правят чаще всего, и она тянет за собой многое: подтверждения,
+  // помощников, скидки, касания, контроль качества, дату следующего
+  // обслуживания по договору и справочники, которые пополняются на лету.
+  const reloadJobs = () => load([
+    "jobs", "job_proofs", "job_helpers", "job_discounts",
+    "client_followups", "quality_checks", "service_contracts",
+    "client_sources", "pest_types",
+  ]);
+  const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
+  const reloadStock = () => load(["chemicals", "handouts", "inventory_adjustments", "chemical_purchases"]);
+  const reloadPeople = () => load(["profiles", "tech_documents", "training_records", "employee_events", "safety_acknowledgements", "tech_days_off"]);
+
   useEffect(() => { load(); }, []);
   // Журнал и корзина подтягиваются при первом заходе в раздел, а не при
   // каждом открытии приложения.
@@ -917,7 +933,7 @@ function Dashboard({ session, profile }) {
     const chem = chemById(payload.chemical_id);
     const after = rows[0].balance_after;
     await logAction("Остатки препаратов", `${tech.full_name || "?"} · ${chem?.name || "?"}: ${fmtAmount(current, chem?.unit_kind)} → ${fmtAmount(after, chem?.unit_kind)} · ${payload.reason}`);
-    setModal(null); showToast("Движение сохранено"); load(); return true;
+    setModal(null); showToast("Движение сохранено"); reloadStock(); return true;
   }
   // Запись ревизии / «забрали в офис» / ручной корректировки. Суммы приходят уже
   // посчитанными из CashRevisionModal, здесь только фиксируем автора и пишем в базу.
@@ -934,7 +950,7 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return false; }
     const label = payload.kind === "office_take" ? "Забрали в офис" : payload.kind === "correction" ? "Корректировка наличных" : "Ревизия наличных";
     await logAction(label, `${tech.full_name || "?"}: ${fmt(payload.balance_before)} ₸ → ${fmt(payload.balance_after)} ₸ · ${payload.reason}`);
-    setModal(null); showToast("Сохранено"); load(); return true;
+    setModal(null); showToast("Сохранено"); reloadMoney(); return true;
   }
 
   async function ensureCatalog(table, list, value) {
@@ -959,7 +975,7 @@ function Dashboard({ session, profile }) {
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
     await recordClientEvent({ ...payload, id: created?.id, client_phone: created?.client_phone || payload.client_phone }, "created", "Заявка создана", `${payload.pest || "Услуга"} · ${isoToRu(payload.scheduled_date) || "дата уточняется"}`);
-    setModal(null); showToast("Заявка создана"); load();
+    setModal(null); showToast("Заявка создана"); reloadJobs();
     return true;
   }
   async function editJob(job, payload) {
@@ -973,14 +989,14 @@ function Dashboard({ session, profile }) {
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Редактирование", `${payload.pest || job.pest} · ${payload.address || job.address}`);
     await recordClientEvent({ ...job, ...payload }, "updated", "Данные заявки обновлены", actorName);
-    setModal(null); showToast("Заявка обновлена"); load();
+    setModal(null); showToast("Заявка обновлена"); reloadJobs();
     return true;
   }
   async function putOnRepeat(job) {
     const { error } = await supabase.from("jobs").update({ repeat_state: "on_repeat", repeat_since: new Date().toISOString() }).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return false; }
     await logAction("Повтор", `На повтор · ${job.pest} · ${job.address}`);
-    showToast("Заявка на повторе"); load();
+    showToast("Заявка на повторе"); reloadJobs();
   }
   async function cancelJob(job, reason) {
     if (blockedByClosedPeriod(job.scheduled_date)) return;
@@ -988,7 +1004,7 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Отмена заявки", `${job.pest} · ${job.address}${reason ? " — " + reason : ""}`);
     await recordClientEvent(job, "canceled", "Заявка отменена", reason || actorName);
-    setModal(null); showToast("Заявка отменена"); load();
+    setModal(null); showToast("Заявка отменена"); reloadJobs();
   }
   async function restoreCanceled(job) {
     const { error } = await supabase.from("jobs").update({ status: job.assigned_to ? "assigned" : "new", work_stage: job.assigned_to ? "assigned" : "new", cancel_reason: null, canceled_at: null, canceled_by: null }).eq("id", job.id);
@@ -1012,7 +1028,7 @@ function Dashboard({ session, profile }) {
     const { error } = await supabase.from("jobs").update({ repeat_state: null, repeat_since: null }).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Повтор", `Убрана с повтора · ${job.pest} · ${job.address}`);
-    showToast("Заявка возвращена в «Выполненные»"); load();
+    showToast("Заявка возвращена в «Выполненные»"); reloadJobs();
   }
   async function createRepeatJob(job) {
     const ins = await supabase.from("jobs").insert({
@@ -1023,7 +1039,7 @@ function Dashboard({ session, profile }) {
     if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
     await supabase.from("jobs").update({ repeat_state: "finished" }).eq("id", job.id);
     await logAction("Повтор", `Создана повторная заявка · ${job.pest} · ${job.address}`);
-    showToast("Повторная заявка создана"); load();
+    showToast("Повторная заявка создана"); reloadJobs();
   }
   async function assignJob(job, techId) {
     const newStatus = job.status === "done" ? "done" : (techId ? "assigned" : "new");
@@ -1034,7 +1050,7 @@ function Dashboard({ session, profile }) {
     const to = techId ? (techById(techId)?.full_name || "—") : "не назначен";
     await logAction("Назначение", `${job.pest} · ${from} → ${to}`);
     await recordClientEvent(job, "assignment", techId ? "Назначен исполнитель" : "Исполнитель снят", techId ? to : actorName);
-    setModal(null); showToast("Дезинфектор назначен"); load();
+    setModal(null); showToast("Дезинфектор назначен"); reloadJobs();
   }
   async function submitReport(job, report, chems, docs) {
     if (blockedByClosedPeriod(job.scheduled_date)) return false;
@@ -1050,7 +1066,7 @@ function Dashboard({ session, profile }) {
       p_job: job.id, p_cash: Number(report.cash) || 0, p_qr: Number(report.qr) || 0,
       p_transfer: Number(report.transfer) || 0, p_method: report.method,
     });
-    if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); load(); return false; }
+    if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); reloadJobs(); return false; }
     await recordClientEvent(job, "done", "Работа выполнена", `Оплата: ${fmt((Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0))} ₸`);
     // Причина скидки пишется отдельной записью: сумма уходит защищённой
     // функцией, а причину указывает тот, кто скидку дал.
@@ -1065,7 +1081,7 @@ function Dashboard({ session, profile }) {
       }, { onConflict: "job_id" });
       if (dError) showToast("Отчёт сохранён, но причина скидки не записалась: " + dError.message);
     }
-    setModal({ kind: "reportSuccess" }); load(); return true;
+    setModal({ kind: "reportSuccess" }); reloadJobs(); return true;
   }
   async function markTransferPaid(job, accountId, paidDate) {
     const { error } = await supabase.from("jobs").update({ transfer_paid: true, transfer_account_id: accountId || null, transfer_paid_date: paidDate || new Date().toISOString().slice(0, 10) }).eq("id", job.id);
@@ -1080,7 +1096,7 @@ function Dashboard({ session, profile }) {
       }
     }
     await logAction("Оплата", `Перечисление оплачено ${fmt(job.report_transfer)} ₸${accountId ? " → " + (accountById(accountId)?.name || "") : ""}`);
-    setModal(null); showToast("Оплата зачтена"); load();
+    setModal(null); showToast("Оплата зачтена"); reloadMoney();
   }
   async function saveTechExtras(job, bonus, travel, helpers = []) {
     if (blockedByClosedPeriod(job.scheduled_date)) return;
@@ -1098,7 +1114,7 @@ function Dashboard({ session, profile }) {
     }
     const names = helpers.map((h) => `${techById(h.tech_id)?.full_name || "?"} ${fmt(h.amount)} ₸`).join(", ");
     await logAction("Бонусы", `${job.pest} · ${techById(job.assigned_to)?.full_name || "?"}: бонус ${fmt(bonus)} ₸, дорожные ${fmt(travel)} ₸${names ? " · помощь: " + names : ""}`);
-    setModal(null); showToast("Сохранено"); load();
+    setModal(null); showToast("Сохранено"); reloadJobs();
   }
   // П.3: мы отдали заявку партнёру; он выполнил — админ фиксирует сумму и как прошла оплата
   async function markExecutorDone(job, fullAmount, settlement, accountId, payDate) {
@@ -1160,7 +1176,7 @@ function Dashboard({ session, profile }) {
     const { error } = await supabase.from("jobs").delete().eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Удаление", `${job.pest} · ${job.address}`);
-    showToast("Заявка в корзине"); load();
+    showToast("Заявка в корзине"); reloadJobs();
   }
   async function restore(row) {
     const j = row.job; const chems = j.chemicals || []; const { chemicals: _c, ...jobRow } = j;
@@ -1169,18 +1185,18 @@ function Dashboard({ session, profile }) {
     if (chems.length) await supabase.from("report_chemicals").insert(chems.map((c) => ({ job_id: j.id, chemical_id: c.chemical_id || null, name: c.name, amount: c.amount ?? c.ml, ml: c.ml ?? c.amount })));
     await supabase.from("trash").delete().eq("id", row.id);
     await logAction("Восстановление", `${j.pest} · ${j.address}`);
-    showToast("Заявка восстановлена"); load();
+    showToast("Заявка восстановлена"); reloadJobs();
   }
   async function purge(row) {
     await supabase.from("trash").delete().eq("id", row.id);
     await logAction("Удалено навсегда", `${row.job.pest} · ${row.job.address}`);
-    showToast("Удалено навсегда"); load();
+    showToast("Удалено навсегда"); reloadJobs();
   }
   async function addChem(c) {
     const { error } = await supabase.from("chemicals").insert(c);
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Склад", `Новый препарат: ${c.name} (${fmtAmount(c.purchased_ml, c.unit_kind)})`);
-    setModal(null); showToast("Препарат добавлен"); load();
+    setModal(null); showToast("Препарат добавлен"); reloadStock();
   }
   async function stockIn(chem, addMl, newPrice, extra = {}) {
     const patch = { purchased_ml: (Number(chem.purchased_ml) || 0) + addMl };
@@ -1200,12 +1216,12 @@ function Dashboard({ session, profile }) {
     if (pError) showToast("Приход оформлен, но в историю закупа не попал: " + pError.message);
     const supplierNote = extra.supplier ? ` · ${extra.supplier}` : "";
     await logAction("Склад", `Приход: ${chem.name} +${fmtAmount(addMl, chem.unit_kind)}${price != null ? ` по ${fmt(price)} ₸` : ""}${supplierNote}`);
-    setModal(null); showToast("Приход оформлен"); load();
+    setModal(null); showToast("Приход оформлен"); reloadStock();
   }
   async function removeChem(chem) {
     await supabase.from("chemicals").delete().eq("id", chem.id);
     await logAction("Склад", `Удалён препарат: ${chem.name}`);
-    showToast("Препарат удалён"); load();
+    showToast("Препарат удалён"); reloadStock();
   }
   // Отметка об ознакомлении ставится только за себя — в этом весь смысл
   // подтверждения, и база это же требует политикой.
@@ -1213,7 +1229,7 @@ function Dashboard({ session, profile }) {
     const { error } = await supabase.from("safety_acknowledgements").insert({ person_id: session.user.id, doc_key: docKey });
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Инструктаж", `Ознакомлен: ${DRIVE_LINKS.find((l) => l.key === docKey)?.label || docKey}`);
-    showToast("Отмечено"); load();
+    showToast("Отмечено"); reloadPeople();
   }
 
   async function savePeopleEvent(payload) {
@@ -1223,7 +1239,7 @@ function Dashboard({ session, profile }) {
       : await supabase.from("employee_events").insert(row);
     if (error) { showToast("Ошибка: " + error.message); return error.message; }
     await logAction("Кадры", `${personName(payload.person_id)} · ${EMPLOYEE_EVENTS[payload.kind] || payload.kind}${payload.amount != null ? ` · ${fmt(payload.amount)} ₸` : ""}`);
-    setModal(null); showToast("Сохранено"); load(); return null;
+    setModal(null); showToast("Сохранено"); reloadPeople(); return null;
   }
 
   async function saveTraining(payload) {
@@ -1233,7 +1249,7 @@ function Dashboard({ session, profile }) {
       : await supabase.from("training_records").insert(row);
     if (error) { showToast("Ошибка: " + error.message); return error.message; }
     await logAction("Обучение", `${personName(payload.person_id)} · ${payload.topic}${payload.score != null ? ` · ${payload.score} баллов` : ""}`);
-    setModal(null); showToast("Сохранено"); load(); return null;
+    setModal(null); showToast("Сохранено"); reloadPeople(); return null;
   }
 
   async function saveTechDoc(payload) {
@@ -1243,14 +1259,14 @@ function Dashboard({ session, profile }) {
       : await supabase.from("tech_documents").insert(row);
     if (error) { showToast("Ошибка: " + error.message); return error.message; }
     await logAction("Допуски", `${techById(payload.tech_id)?.full_name || personName(payload.tech_id)} · ${TECH_DOC_KINDS[payload.kind] || payload.kind}${payload.expires_on ? ` до ${isoToRu(payload.expires_on)}` : ""}`);
-    setModal(null); showToast("Сохранено"); load(); return null;
+    setModal(null); showToast("Сохранено"); reloadPeople(); return null;
   }
 
   async function removeTechDoc(doc) {
     const { error } = await supabase.from("tech_documents").delete().eq("id", doc.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Допуски", `Удалён документ: ${personName(doc.tech_id)} · ${TECH_DOC_KINDS[doc.kind] || doc.kind}`);
-    showToast("Удалено"); load();
+    showToast("Удалено"); reloadPeople();
   }
 
   async function addHandout(payload) {
@@ -1259,7 +1275,7 @@ function Dashboard({ session, profile }) {
     const t = techById(payload.tech_id); const c = chemById(payload.chemical_id);
     const kindLabel = payload.kind === "opening" ? "стартовый остаток" : "выдача";
     await logAction("Выдача", `${t?.full_name || "?"} · ${c?.name || "?"} +${fmtAmount(payload.amount, c?.unit_kind)} (${kindLabel})`);
-    setModal(null); showToast("Записано"); load();
+    setModal(null); showToast("Записано"); reloadStock();
   }
   const partnerById = (id) => partners.find((p) => p.id === id);
   function partnerNameOf(job) {
@@ -1408,7 +1424,7 @@ function Dashboard({ session, profile }) {
       try {
         await logAction("Выплата", `${tech.full_name || "?"} · ${EXPENSE_TYPES[payload.type] || payload.type} · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
       } catch { /* журнал не должен мешать выплате */ }
-      setModal(null); showToast("Выплата проведена"); load(); return null;
+      setModal(null); showToast("Выплата проведена"); reloadMoney(); return null;
     } catch (e) {
       return payoutCrash(e, "Зарплата · выплата");
     }
@@ -1428,7 +1444,7 @@ function Dashboard({ session, profile }) {
       try {
         await logAction("Выплата", `${tech?.full_name || "?"} · проведено по кассе · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
       } catch { /* журнал не должен мешать выплате */ }
-      setModal(null); showToast("Выплата проведена"); load(); return null;
+      setModal(null); showToast("Выплата проведена"); reloadMoney(); return null;
     } catch (e) {
       return payoutCrash(e, "Зарплата · проведение выплаты");
     }
@@ -1439,7 +1455,7 @@ function Dashboard({ session, profile }) {
     await supabase.from("money_moves").delete().eq("source", "payroll").eq("ref_id", e.id);
     await supabase.from("tech_expenses").delete().eq("id", e.id);
     await logAction("Выплата", `Удалено: ${techById(e.tech_id)?.full_name || "?"} · ${fmt(e.amount)} ₸`);
-    showToast("Удалено"); load();
+    showToast("Удалено"); reloadMoney();
   }
   async function editTechProfile(tech, payload) {
     const { error } = await supabase.from("profiles").update(payload).eq("id", tech.id);
@@ -1456,7 +1472,7 @@ function Dashboard({ session, profile }) {
       if (evError) showToast("Данные сохранены, но в историю запись не попала: " + evError.message);
     }
     await logAction("Дезинфектор", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
-    setModal(null); showToast("Сохранено"); load();
+    setModal(null); showToast("Сохранено"); reloadPeople();
   }
   async function savePriceRow(row, existing) {
     const payload = { pest: row.pest, area_from: Number(row.area_from) || 0, area_to: row.area_to === "" || row.area_to === null ? null : Number(row.area_to), price: Number(row.price) || 0, updated_at: new Date().toISOString() };
@@ -1516,7 +1532,7 @@ function Dashboard({ session, profile }) {
     const res = existing ? await supabase.from("opex").update(payload).eq("id", existing.id) : await supabase.from("opex").insert({ ...payload, created_by: session.user.id });
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
     await logAction("Расходы", `${existing ? "Изменено" : "Добавлено"}: ${fmt(payload.amount)} ₸`);
-    setModal(null); showToast("Сохранено"); load();
+    setModal(null); showToast("Сохранено"); reloadMoney();
   }
   async function removeOpex(o) {
     if (blockedByClosedPeriod(o.spent_date)) return;
@@ -1543,7 +1559,7 @@ function Dashboard({ session, profile }) {
     const res = existing ? await supabase.from("accounts").update(payload).eq("id", existing.id) : await supabase.from("accounts").insert(payload);
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
     await logAction("Финансы", `Счёт ${existing ? "изменён" : "добавлен"}: ${payload.name}`);
-    setModal(null); showToast("Сохранено"); load();
+    setModal(null); showToast("Сохранено"); reloadMoney();
   }
   async function removeAccount(acc) {
     const { error } = await supabase.from("accounts").delete().eq("id", acc.id);
@@ -1795,12 +1811,12 @@ function Dashboard({ session, profile }) {
     const res = existing ? await supabase.from("client_followups").update(data).eq("id", existing.id) : await supabase.from("client_followups").insert(data);
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
     await logAction("Касание", `${payload.phone} · ${payload.kind} · ${isoToRu(payload.due_date)}`);
-    setModal(null); showToast("Касание запланировано"); load();
+    setModal(null); showToast("Касание запланировано"); reloadJobs();
   }
   async function setFollowupDone(item, result = "Связались") {
     const { error } = await supabase.from("client_followups").update({ status: "done", result, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", item.id);
     if (error) { showToast("Ошибка: " + error.message); return; }
-    await logAction("Касание", `Завершено: ${item.phone} · ${result}`); showToast("Касание завершено"); load();
+    await logAction("Касание", `Завершено: ${item.phone} · ${result}`); showToast("Касание завершено"); reloadJobs();
   }
   async function saveQualityCheck(job, payload, existing) {
     const data = { ...payload, checked_by: session.user.id, updated_at: new Date().toISOString() };
@@ -1808,7 +1824,7 @@ function Dashboard({ session, profile }) {
     if (res.error) { showToast("Ошибка: " + res.error.message); return; }
     if (payload.result === "repeat" && !job.repeat_state) await supabase.from("jobs").update({ repeat_state: "on_repeat", repeat_since: new Date().toISOString() }).eq("id", job.id);
     await logAction("Контроль качества", `${job.client_phone} · оценка ${payload.rating || "—"} · ${payload.result}`);
-    setModal(null); showToast(payload.result === "repeat" ? "Сохранено и отправлено в «Повторы»" : "Контроль качества сохранён"); load();
+    setModal(null); showToast(payload.result === "repeat" ? "Сохранено и отправлено в «Повторы»" : "Контроль качества сохранён"); reloadJobs();
   }
   async function saveContract(payload, existing) {
     const data = { ...payload, created_by: existing?.created_by || session.user.id, updated_at: new Date().toISOString() };
@@ -1833,7 +1849,7 @@ function Dashboard({ session, profile }) {
     const next = parseIso(contract.next_service_date) || new Date(); next.setDate(next.getDate() + (Number(contract.interval_days) || 30));
     await supabase.from("service_contracts").update({ last_generated_date: contract.next_service_date, next_service_date: isoOf(next), updated_at: new Date().toISOString() }).eq("id", contract.id);
     await logAction("Абонент", `Создана плановая заявка: ${contract.client_name} · ${isoToRu(contract.next_service_date)}`);
-    showToast("Плановая заявка создана"); setTab("jobs"); load();
+    showToast("Плановая заявка создана"); setTab("jobs"); reloadJobs();
   }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
