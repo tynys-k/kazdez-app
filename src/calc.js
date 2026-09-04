@@ -770,6 +770,50 @@ export function comparePeriods(now, before) {
   };
 }
 
+// --- разбор повторных выездов --------------------------------------------
+
+// Свод по причинам возвратов и по тому, на ком ответственность.
+//
+// Возврат берётся по дате повторного выезда: разбирается сам выезд, а не
+// работа полугодовой давности, которая его вызвала.
+//
+// Неразобранные считаются отдельно и намеренно на виду: пока причина не
+// названа, возврат нельзя ни отнести к браку, ни списать на клиента, и любые
+// проценты по остальным получаются от неполной картины.
+export function repeatCauseReport(jobs = [], causes = [], { inPeriod = () => true, causeMeta = {} } = {}) {
+  const byJob = new Map(causes.map((c) => [String(c.job_id), c]));
+  const repeats = jobs.filter((j) => j.repeat_of && j.status === "done" && inPeriod(j.scheduled_date));
+
+  const byCause = new Map();
+  const byFault = new Map();
+  let unreviewed = 0;
+
+  for (const job of repeats) {
+    const row = byJob.get(String(job.id));
+    if (!row) { unreviewed += 1; continue; }
+    const cause = row.cause || "other";
+    const fault = row.fault || causeMeta[cause]?.fault || "none";
+    byCause.set(cause, (byCause.get(cause) || 0) + 1);
+    byFault.set(fault, (byFault.get(fault) || 0) + 1);
+  }
+
+  const reviewed = repeats.length - unreviewed;
+  const list = (map) => [...map.entries()]
+    .map(([key, count]) => ({ key, count, share: reviewed ? Math.round(count / reviewed * 100) : 0 }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    total: repeats.length,
+    reviewed,
+    unreviewed,
+    byCause: list(byCause),
+    byFault: list(byFault),
+    // Повторные выезды, которые ещё никто не разобрал, — с них и начинается работа.
+    pending: repeats.filter((j) => !byJob.has(String(j.id)))
+      .sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || ""))),
+  };
+}
+
 // --- чем работали и что из этого вышло -----------------------------------
 
 // Возвраты по гарантии в разрезе оборудования и препаратов.

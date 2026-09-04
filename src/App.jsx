@@ -10,11 +10,11 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { REPEAT_CAUSES, REPEAT_FAULTS, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -310,6 +310,7 @@ function Dashboard({ session, profile }) {
   const [chemSales, setChemSales] = useState([]);
   const [jobEquipment, setJobEquipment] = useState([]);
   const [debts, setDebts] = useState([]);
+  const [repeatCauses, setRepeatCauses] = useState([]);
   const [paperworkJobs, setPaperworkJobs] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -541,6 +542,7 @@ function Dashboard({ session, profile }) {
         if (canEditJobs) await supabase.rpc("kd_scan_alerts");
         return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
       } },
+    { key: "repeat_causes", label: "Разбор повторных выездов", run: () => supabase.from("repeat_causes").select("*"), set: setRepeatCauses },
     { key: "job_debts", label: "Долги клиентов", run: () => supabase.from("job_debts").select("*").order("due_on"), set: setDebts },
     { key: "job_equipment", label: "Оборудование на заявках", run: () => supabase.from("job_equipment").select("*"), set: setJobEquipment },
     { key: "chemical_sales", label: "Продажа препаратов", run: () => supabase.from("chemical_sales").select("*").order("sold_on", { ascending: false }), set: setChemSales },
@@ -650,7 +652,7 @@ function Dashboard({ session, profile }) {
   // обслуживания по договору и справочники, которые пополняются на лету.
   const reloadJobs = () => load([
     "jobs", "job_proofs", "job_helpers", "job_discounts",
-    "client_followups", "quality_checks", "service_contracts", "job_equipment", "job_debts",
+    "client_followups", "quality_checks", "service_contracts", "job_equipment", "job_debts", "repeat_causes",
     "client_sources", "pest_types", "objects", "clients",
   ]);
   const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
@@ -1057,6 +1059,15 @@ function Dashboard({ session, profile }) {
   // Если забрали у дезинфектора — сразу снимаем препарат с его остатка
   // корректировкой. Иначе у человека навсегда останется недостача, которую
   // он не делал, а разбираться с ней будем на ревизии через месяц.
+  async function saveRepeatCause(job, patch) {
+    const { error } = await supabase.from("repeat_causes").upsert({
+      job_id: job.id, ...patch, created_by: session.user.id, updated_at: new Date().toISOString(),
+    }, { onConflict: "job_id" });
+    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+    await logAction("Качество", `Разбор повтора: ${job.pest || "заявка"} · ${REPEAT_CAUSES[patch.cause]?.label || patch.cause}`);
+    setModal(null); showToast("Разбор сохранён"); load(["repeat_causes"]); return null;
+  }
+
   async function closeDebt(debt, accountId, paidOn) {
     const { error } = await supabase.from("job_debts")
       .update({ paid_on: paidOn, paid_account_id: accountId || null }).eq("id", debt.id);
@@ -2782,7 +2793,8 @@ function Dashboard({ session, profile }) {
     overdueJobs.length ? { id: "overdue-jobs", label: "Просроченные заявки", value: overdueJobs.length, tab: "jobs", tone: "danger" } : null,
     unassignedSoon.length ? { id: "unassigned", label: "Не назначены на сегодня/завтра", value: unassignedSoon.length, tab: "jobs", tone: "warning" } : null,
     overdueTaskList.length ? { id: "tasks", label: "Просроченные задачи", value: overdueTaskList.length, tab: "tasks", tone: "danger" } : null,
-    leadSla.lateReaction ? { id: "lead-sla", label: `Лиды без ответа дольше ${leadSla.reactionHours} ч`, value: leadSla.lateReaction, tab: "leads", tone: "danger" } : null,
+    // Лиды — работа менеджера: у исполнителя это лишний шум и чужие данные.
+    canEditJobs && leadSla.lateReaction ? { id: "lead-sla", label: `Лиды без ответа дольше ${leadSla.reactionHours} ч`, value: leadSla.lateReaction, tab: "leads", tone: "danger" } : null,
     pendingDeposits.length ? { id: "cash", label: "Наличка ждёт подтверждения", value: pendingDeposits.length, tab: "cash", tone: "warning" } : null,
     isAdmin && lowCount ? { id: "stock", label: "Заканчиваются препараты", value: lowCount, tab: "stock", tone: "danger" } : null,
     // Предупреждение до того, как остаток стал критическим: по расходу видно,
@@ -4405,6 +4417,67 @@ function Dashboard({ session, profile }) {
               })()}
             </div>
 
+            {(() => {
+              const rep = calc.repeatCauseReport(jobs, repeatCauses, { inPeriod: inPeriodIso, causeMeta: REPEAT_CAUSES });
+              if (rep.total === 0) return null;
+              return (
+                <div className="kd-card" style={{ marginTop: 14 }}>
+                  <div className="kd-section">Разбор повторных выездов · {range.label}</div>
+                  <div className="kd-muted" style={{ marginBottom: 10 }}>
+                    Брак обработки, неподготовленный клиент и новый занос — три разных явления с разными выводами.
+                    Пока они в одной куче, доля возвратов ничем не управляет.
+                  </div>
+                  <div className="kd-row">
+                    <span>Повторных выездов</span>
+                    <span className="kd-twoval">
+                      {rep.unreviewed > 0 && <em style={{ color: "var(--rust)" }}>не разобрано {rep.unreviewed}</em>}
+                      <strong>{rep.total}</strong>
+                    </span>
+                  </div>
+
+                  {rep.reviewed > 0 && (
+                    <>
+                      <div className="kd-section" style={{ marginTop: 10 }}>На ком ответственность</div>
+                      {rep.byFault.map((f) => (
+                        <div className="kd-row" key={f.key}>
+                          <span>{REPEAT_FAULTS[f.key] || f.key}</span>
+                          <span className="kd-twoval"><em>{f.share}%</em><strong>{f.count}</strong></span>
+                        </div>
+                      ))}
+                      <div className="kd-section" style={{ marginTop: 10 }}>Причины</div>
+                      {rep.byCause.map((c) => (
+                        <div className="kd-row" key={c.key}>
+                          <span>{REPEAT_CAUSES[c.key]?.label || c.key}</span>
+                          <span className="kd-twoval"><em>{c.share}%</em><strong>{c.count}</strong></span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {rep.pending.length > 0 && (
+                    <>
+                      <div className="kd-section" style={{ marginTop: 12 }}>Ждут разбора · {rep.pending.length}</div>
+                      <div className="kd-muted" style={{ marginBottom: 6 }}>
+                        Пока причина не названа, возврат нельзя ни отнести к браку, ни списать на клиента — и проценты выше считаются от неполной картины.
+                      </div>
+                      {rep.pending.slice(0, 15).map((j) => (
+                        <div className="kd-ledgerrow" key={j.id} style={{ gridTemplateColumns: "1.6fr 1.2fr auto" }}>
+                          <span className="kd-ledgername">{j.pest || "заявка"}
+                            <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{j.address || ""}</em>
+                          </span>
+                          <span className="kd-muted">{isoToRu(j.scheduled_date)}</span>
+                          {canEditJobs
+                            ? <button className="kd-btn primary sm" onClick={() => setModal({ kind: "repeatCause", job: j })}>Разобрать</button>
+                            : <span />}
+                        </div>
+                      ))}
+                      {rep.pending.length > 15 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 15 из {rep.pending.length}.</div>}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Из-за чего возвращаемся · {range.label}</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>
@@ -5537,6 +5610,11 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
+      {modal?.kind === "repeatCause" && <RepeatCauseModal job={modal.job}
+        origin={jobs.find((j) => String(j.id) === String(modal.job.repeat_of))}
+        cause={repeatCauses.find((c) => String(c.job_id) === String(modal.job.id))}
+        techs={techs} techName={(id) => techById(id)?.full_name || personName(id)}
+        onClose={() => setModal(null)} onSave={saveRepeatCause} />}
       {modal?.kind === "debtPay" && <DebtPayModal debt={modal.debt} job={modal.job} accounts={accounts}
         onClose={() => setModal(null)} onSave={closeDebt} />}
       {modal?.kind === "chemSale" && <ChemSaleModal sale={modal.sale} partners={partners} chemicals={chemicals} techs={techs} accounts={accounts}

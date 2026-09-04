@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
-import { WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -1375,6 +1375,93 @@ function BlockClientModal({ client, onClose, onSave }) {
           </div>
         </>
       )}
+    </ModalShell>
+  );
+}
+
+function RepeatCauseModal({ job, origin, cause, techs = [], techName, onClose, onSave }) {
+  const [code, setCode] = useState(cause?.cause || "weak_treatment");
+  const [fault, setFault] = useState(cause?.fault || REPEAT_CAUSES.weak_treatment.fault);
+  const [personId, setPersonId] = useState(cause?.person_id || origin?.assigned_to || "");
+  const [action, setAction] = useState(cause?.action || "");
+  const [note, setNote] = useState(cause?.note || "");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Меняя причину, подставляем ответственного по умолчанию — но оставляем
+  // возможность поправить: бывает брак, за которым стоит не исполнитель.
+  const pickCause = (next) => {
+    setCode(next);
+    setFault(REPEAT_CAUSES[next]?.fault || "none");
+  };
+
+  const needsPerson = fault === "tech";
+  const ok = code && fault && (!needsPerson || personId);
+
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave(job, {
+      cause: code, fault,
+      person_id: needsPerson ? personId : null,
+      action: action.trim() || null,
+      note: note.trim() || null,
+    });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+
+  return (
+    <ModalShell title="Почему выехали повторно" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить разбор"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+
+      <div className="kd-muted" style={{ marginBottom: 12 }}>
+        {job.pest || "Заявка"} · {isoToRu(job.scheduled_date)}
+        {origin && (
+          <>
+            <br />
+            Первичная: {isoToRu(origin.scheduled_date)}
+            {origin.assigned_to ? ` · ${techName(origin.assigned_to) || "исполнитель"}` : ""}
+          </>
+        )}
+      </div>
+
+      <Field label="Причина">
+        <select value={code} onChange={(e) => pickCause(e.target.value)}>
+          {Object.entries(REPEAT_CAUSES).map(([v, c]) => <option key={v} value={v}>{c.label}</option>)}
+        </select>
+      </Field>
+
+      <Field label="На ком ответственность">
+        <select value={fault} onChange={(e) => setFault(e.target.value)}>
+          {Object.entries(REPEAT_FAULTS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </Field>
+      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+        Подставляется по причине, но поправить можно: бывает брак, за которым стоит не исполнитель.
+      </div>
+
+      {needsPerson && (
+        <Field label="Кто выполнял первичную">
+          <select value={personId} onChange={(e) => setPersonId(e.target.value)}>
+            <option value="">— выбери сотрудника —</option>
+            {techs.map((t) => <option key={t.id} value={t.id}>{t.full_name || "сотрудник"}</option>)}
+          </select>
+        </Field>
+      )}
+
+      <Field label="Что сделали, чтобы не повторилось">
+        <input value={action} onChange={(e) => setAction(e.target.value)} placeholder="разобрали с исполнителем / усилили памятку / сменили препарат" />
+      </Field>
+      <Field label="Примечание">
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="подробности, если нужны" />
+      </Field>
+
+      <div className="kd-muted" style={{ marginTop: 8 }}>
+        Разбор виден исполнителю. Он должен узнавать о претензии здесь, а не в разговоре о премии.
+      </div>
     </ModalShell>
   );
 }
@@ -3685,4 +3772,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
