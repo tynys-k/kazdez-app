@@ -17,7 +17,10 @@ create table if not exists public.alerts (
   id          bigserial primary key,
   rule        text not null,
   entity      text,
-  entity_id   uuid,
+  -- Текст, а не uuid: тревога ссылается на разные таблицы, и типы
+  -- идентификаторов у них разные. Приложение это поле только сравнивает,
+  -- соединений по нему нет.
+  entity_id   text,
   severity    text not null default 'warning',
   title       text not null,
   detail      text,
@@ -33,6 +36,9 @@ create unique index if not exists alerts_open_uniq
   on public.alerts (rule, entity_id) where resolved_at is null;
 create index if not exists alerts_open_idx
   on public.alerts (created_at desc) where resolved_at is null;
+
+-- Если таблица создавалась ранней версией файла, поле было uuid.
+alter table public.alerts alter column entity_id type text using entity_id::text;
 
 alter table public.alerts enable row level security;
 
@@ -68,6 +74,10 @@ begin
     return 0;
   end if;
 
+  -- На случай двух вызовов в одной сессии: временная таблица исчезает при
+  -- фиксации, но в SQL Editor можно позвать функцию дважды подряд.
+  drop table if exists kd_current;
+
   create temporary table kd_current on commit drop as
 
   -- Лида никто не тронул больше получаса.
@@ -75,7 +85,7 @@ begin
   -- «Не тронул» определяем по updated_at: он двигается и при касании, и при
   -- смене этапа воронки. Отдельного поля со статусом у лида нет, и выдумывать
   -- его не нужно — как только с лидом что-то сделали, тревога снимается сама.
-  select 'lead_no_reply' as rule, 'leads' as entity, l.id as entity_id, 'critical' as severity,
+  select 'lead_no_reply' as rule, 'leads' as entity, l.id::text as entity_id, 'critical' as severity,
          'Лид без ответа' as title,
          coalesce(l.name, l.phone, 'без имени') || ' · ' ||
            (extract(epoch from (now() - l.created_at))::int / 60)::text || ' мин' as detail,
@@ -87,7 +97,7 @@ begin
 
   union all
   -- Завтра выезд, а исполнителя нет
-  select 'job_unassigned', 'jobs', j.id, 'critical',
+  select 'job_unassigned', 'jobs', j.id::text, 'critical',
          'Завтра выезд без исполнителя',
          coalesce(j.pest, 'заявка') || ' · ' || coalesce(j.address, 'адрес не указан'),
          'Координатор'
@@ -98,7 +108,7 @@ begin
 
   union all
   -- Заявку закрыли, доказательств нет
-  select 'job_no_proof', 'jobs', j.id, 'warning',
+  select 'job_no_proof', 'jobs', j.id::text, 'warning',
          'Заявка закрыта без фото',
          coalesce(j.pest, 'заявка') || ' · ' || coalesce(j.address, ''),
          'Контроль качества'
@@ -110,7 +120,7 @@ begin
 
   union all
   -- Скидка ниже прайса, причина не названа
-  select 'discount_no_reason', 'jobs', j.id, 'critical',
+  select 'discount_no_reason', 'jobs', j.id::text, 'critical',
          'Скидка без объяснения',
          'прайс ' || round(j.quoted_price)::text || ' тг, получено ' ||
            round(coalesce(j.report_paid, 0))::text || ' тг',
@@ -125,7 +135,7 @@ begin
 
   union all
   -- Допуск просрочен у работающего сотрудника
-  select 'doc_expired', 'tech_documents', td.id, 'critical',
+  select 'doc_expired', 'tech_documents', td.id::text, 'critical',
          'Просрочен допуск',
          coalesce(p.full_name, 'сотрудник') || ' · ' || td.kind ||
            ' · до ' || to_char(td.expires_on, 'DD.MM.YYYY'),
@@ -138,7 +148,7 @@ begin
 
   union all
   -- Допуск истекает в ближайший месяц
-  select 'doc_soon', 'tech_documents', td.id, 'warning',
+  select 'doc_soon', 'tech_documents', td.id::text, 'warning',
          'Допуск скоро истекает',
          coalesce(p.full_name, 'сотрудник') || ' · ' || td.kind ||
            ' · до ' || to_char(td.expires_on, 'DD.MM.YYYY'),
@@ -150,7 +160,7 @@ begin
 
   union all
   -- Обучение пора перепроверить
-  select 'training_due', 'training_records', t.id, 'warning',
+  select 'training_due', 'training_records', t.id::text, 'warning',
          'Пора перепроверить обучение',
          coalesce(p.full_name, 'сотрудник') || ' · ' || t.topic,
          'Руководитель продаж'
@@ -162,7 +172,7 @@ begin
 
   union all
   -- Низкая оценка, а звонка так и нет
-  select 'low_rating_no_call', 'jobs', f.job_id, 'critical',
+  select 'low_rating_no_call', 'jobs', f.job_id::text, 'critical',
          'Низкая оценка без звонка',
          'оценка ' || f.rating::text || '/5' || coalesce(' · ' || f.comment, ''),
          'Контроль качества'
@@ -175,7 +185,7 @@ begin
 
   union all
   -- Плановое обслуживание по договору просрочено
-  select 'contract_due', 'service_contracts', c.id, 'warning',
+  select 'contract_due', 'service_contracts', c.id::text, 'warning',
          'Плановое обслуживание не создано',
          coalesce(c.client_name, 'абонент') || ' · на ' ||
            to_char(c.next_service_date, 'DD.MM.YYYY'),
@@ -191,7 +201,7 @@ begin
 
   union all
   -- Просроченная партия, а препарат ещё числится на складе
-  select 'batch_expired', 'chemical_purchases', cp.id, 'warning',
+  select 'batch_expired', 'chemical_purchases', cp.id::text, 'warning',
          'Просроченная партия на складе',
          ch.name || coalesce(' · партия ' || cp.batch_no, '') ||
            ' · до ' || to_char(cp.expires_on, 'DD.MM.YYYY'),
