@@ -313,6 +313,76 @@ export function executorShareAmt(job) {
   return Math.round((Number(job.report_paid) || 0) * (Number(job.executor_share_pct) || 0) / 100);
 }
 
+// --- проведение документов -----------------------------------------------
+
+// Где именно застрял комплект документов.
+//
+// Шаги идут по порядку, и следующим считается первый незакрытый. Это важнее
+// процента готовности: вопрос всегда звучит как «у кого сейчас бумага»,
+// а не «на сколько мы продвинулись».
+//
+// Чек за наличные — шаг только для наличной оплаты. При перечислении он
+// пропускается, иначе комплект никогда не станет закрытым.
+export function paperworkProgress(row, steps = []) {
+  const applicable = steps.filter((st) => !st.cashOnly || row?.payment_method === "cash");
+  const doneSteps = applicable.filter((st) => !!row?.[st.key]);
+  const next = applicable.find((st) => !row?.[st.key]) || null;
+  return {
+    total: applicable.length,
+    done: doneSteps.length,
+    percent: applicable.length ? Math.round(doneSteps.length / applicable.length * 100) : 0,
+    next,
+    complete: !next,
+    // Деньги пришли, а бумага ещё в пути — самое частое место, где всё
+    // и зависает.
+    paidButOpen: !!row?.paid_at && !!next,
+  };
+}
+
+// Деньги по комплекту: сколько удерживаем и сколько должно уйти второй
+// стороне (или прийти от неё).
+//
+// Знак направления зависит от схемы, и это не формальность: при «для
+// партнёра» деньги у нас и мы должны, при «через партнёра» деньги у партнёра
+// и должен он. Перепутать — значит получить неверную дебиторку.
+export function paperworkMoney(row) {
+  const amount = Number(row?.amount) || 0;
+  const percent = Number(row?.percent) || 0;
+  const withheld = Math.round(amount * percent / 100);
+  const payout = amount - withheld;
+  const scheme = row?.scheme || "own";
+  return {
+    amount, percent, withheld, payout,
+    // own: расчёта со второй стороной нет вовсе
+    direction: scheme === "for_partner" ? "out" : scheme === "via_partner" ? "in" : null,
+    ourShare: scheme === "for_partner" ? withheld : scheme === "via_partner" ? payout : amount,
+    settled: !!row?.settled_at,
+  };
+}
+
+// Свод по проведениям за период: что заработали, что зависло и где.
+export function paperworkTotals(rows = [], { inPeriod = () => true, steps = [] } = {}) {
+  let ourMoney = 0, oweOut = 0, oweIn = 0, unpaid = 0;
+  const stuck = [];
+
+  for (const row of rows) {
+    const when = row.paid_at || row.created_at;
+    if (!inPeriod(String(when || "").slice(0, 10))) continue;
+    const money = paperworkMoney(row);
+    const progress = paperworkProgress(row, steps);
+    ourMoney += money.ourShare;
+    if (!row.paid_at) unpaid += money.amount;
+    if (!money.settled && money.direction === "out") oweOut += money.payout;
+    if (!money.settled && money.direction === "in") oweIn += money.payout;
+    if (!progress.complete) stuck.push({ row, progress, money });
+  }
+
+  return {
+    ourMoney, oweOut, oweIn, unpaid,
+    stuck: stuck.sort((a, b) => String(a.row.created_at).localeCompare(String(b.row.created_at))),
+  };
+}
+
 // --- объект обработки ----------------------------------------------------
 
 // Что происходило на объекте: сколько раз обрабатывали, от чего, на какую

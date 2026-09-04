@@ -2,8 +2,8 @@
 // Модальные окна Этапа 3: клиент 360 и единый жизненный цикл заявки.
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
-import { priceFor as calcPriceFor } from "./calc";
-import { BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
+import { PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -1320,6 +1320,245 @@ function BlockClientModal({ client, onClose, onSave }) {
           <div className="kd-muted">
             Это увидит любой, кто будет оформлять заявку на этот номер. Пишите так, чтобы через полгода было понятно без вас.
           </div>
+        </>
+      )}
+    </ModalShell>
+  );
+}
+
+function SettleModal({ row, money, accounts = [], partnerName, onClose, onSave }) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [method, setMethod] = useState(SETTLE_METHODS[0]);
+  const [to, setTo] = useState("");
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+  const [note, setNote] = useState("");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  const outgoing = money.direction === "out";
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave(row, money, { date, method, to: to.trim(), accountId, note: note.trim() });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={outgoing ? "Отдать партнёру" : "Получить от партнёра"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Назад</button>
+      <button className="kd-btn primary" disabled={saving || !date} onClick={save}>{saving ? "…" : "Провести"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <div className="kd-row" style={{ marginBottom: 12 }}>
+        <span>{partnerName || "Партнёр"}</span>
+        <strong>{fmt(money.payout)} ₸</strong>
+      </div>
+      <div className="kd-grid2">
+        <Field label="Дата"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Способ">
+          <select value={method} onChange={(e) => setMethod(e.target.value)}>
+            {SETTLE_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </Field>
+      </div>
+      <Field label={outgoing ? "На кого отправили" : "От кого получили"}>
+        <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="если просили на другое лицо — впишите на кого" />
+      </Field>
+      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+        Это поле и защищает от разговора «я не получал»: видно, кому именно ушли деньги.
+      </div>
+      <Field label={outgoing ? "С какого счёта" : "На какой счёт"}>
+        <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+          <option value="">— не проводить по кассе —</option>
+          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="номер перевода, кто передал" /></Field>
+      {!accountId && <div className="kd-hint">Без счёта расчёт останется отметкой и по кассе не пройдёт.</div>}
+    </ModalShell>
+  );
+}
+
+function PaperworkModal({ row, partners = [], accounts = [], jobs = [], clients = [], onClose, onSave, onSettle }) {
+  const [scheme, setScheme] = useState(row?.scheme || "own");
+  const [partnerId, setPartnerId] = useState(row?.partner_id || "");
+  const [clientName, setClientName] = useState(row?.client_name || "");
+  const [clientBin, setClientBin] = useState(row?.client_bin || "");
+  const [requisites, setRequisites] = useState(row?.requisites || "");
+  const [amount, setAmount] = useState(row?.amount != null ? String(row.amount) : "");
+  const [percent, setPercent] = useState(row?.percent != null ? String(row.percent) : "");
+  const [method, setMethod] = useState(row?.payment_method || "transfer");
+  const [note, setNote] = useState(row?.note || "");
+  const [steps, setSteps] = useState(() => {
+    const map = {};
+    PAPERWORK_STEPS.forEach((st) => { map[st.key] = row?.[st.key] || ""; });
+    return map;
+  });
+  const [linkedJobs, setLinkedJobs] = useState(row?.jobIds || []);
+  const [jobSearch, setJobSearch] = useState("");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const money = calcPaperworkMoney({ amount: Number(amount) || 0, percent: Number(percent) || 0, scheme });
+  const needsPartner = scheme !== "own";
+  const ok = (Number(amount) || 0) > 0 && (!needsPartner || partnerId);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const toggleStep = (key) => setSteps((prev) => ({ ...prev, [key]: prev[key] ? "" : today }));
+  const setStepDate = (key, value) => setSteps((prev) => ({ ...prev, [key]: value }));
+
+  const jobOptions = jobs
+    .filter((j) => {
+      if (linkedJobs.includes(j.id)) return false;
+      const q = jobSearch.trim().toLowerCase();
+      if (!q) return false;
+      return `${j.client_phone || ""} ${j.address || ""} ${j.pest || ""}`.toLowerCase().includes(q);
+    })
+    .slice(0, 8);
+
+  async function save() {
+    setSaving(true); setProblem("");
+    const payload = {
+      id: row?.id,
+      scheme,
+      partner_id: needsPartner ? partnerId : null,
+      client_name: clientName.trim() || null,
+      client_bin: clientBin.trim() || null,
+      requisites: requisites.trim() || null,
+      amount: Number(amount) || 0,
+      percent: Number(percent) || 0,
+      payment_method: method,
+      note: note.trim() || null,
+      ...Object.fromEntries(PAPERWORK_STEPS.map((st) => [st.key, steps[st.key] || null])),
+    };
+    const failed = await onSave(payload, linkedJobs);
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+
+  return (
+    <ModalShell wide title={row ? "Проведение документов" : "Новое проведение"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+
+      <Field label="Схема">
+        <select value={scheme} onChange={(e) => setScheme(e.target.value)}>
+          {Object.entries(PAPERWORK_SCHEMES).map(([v, s]) => <option key={v} value={v}>{s.label}</option>)}
+        </select>
+      </Field>
+      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 12 }}>{PAPERWORK_SCHEMES[scheme].hint}</div>
+
+      {needsPartner && (
+        <Field label={scheme === "for_partner" ? "Чей клиент" : "Через кого проводим"}>
+          <select value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
+            <option value="">— выбери партнёра —</option>
+            {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Field>
+      )}
+
+      <div className="kd-grid2">
+        <Field label="Клиент по документам"><input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="ТОО «Пример»" /></Field>
+        <Field label="БИН"><input value={clientBin} onChange={(e) => setClientBin(e.target.value)} placeholder="если известен" /></Field>
+      </div>
+      <Field label="Реквизиты"><input value={requisites} onChange={(e) => setRequisites(e.target.value)} placeholder="счёт, банк, адрес — как прислал клиент" /></Field>
+
+      <div className="kd-grid2">
+        <Field label="Сумма по документам (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="250000" /></Field>
+        <Field label={scheme === "via_partner" ? "Процент партнёра" : "Наш процент"}>
+          <input value={percent} onChange={(e) => setPercent(e.target.value)} inputMode="decimal" placeholder="41" />
+        </Field>
+      </div>
+      <Field label="Как платит клиент">
+        <select value={method} onChange={(e) => setMethod(e.target.value)}>
+          <option value="transfer">Перечислением</option>
+          <option value="cash">Наличными</option>
+        </select>
+      </Field>
+      {method === "cash" && (
+        <div className="kd-hint" style={{ marginBottom: 12 }}>
+          За наличные нужен чек — он появится отдельным шагом в пути документов.
+        </div>
+      )}
+
+      {scheme !== "own" && (Number(amount) || 0) > 0 && (
+        <div className="kd-card" style={{ marginBottom: 14, background: "var(--surface-sunk)", boxShadow: "none" }}>
+          <div className="kd-row"><span>Сумма по документам</span><strong>{fmt(money.amount)} ₸</strong></div>
+          <div className="kd-row"><span>Удержание {money.percent}%</span><strong>{fmt(money.withheld)} ₸</strong></div>
+          <div className="kd-row total">
+            <span>{scheme === "for_partner" ? "Отдать партнёру" : "Получить от партнёра"}</span>
+            <strong>{fmt(money.payout)} ₸</strong>
+          </div>
+          <div className="kd-muted" style={{ marginTop: 6 }}>
+            {scheme === "for_partner"
+              ? "Деньги приходят нам, партнёру отдаём остаток после удержания."
+              : "Деньги приходят партнёру, он возвращает остаток после своего удержания."}
+          </div>
+        </div>
+      )}
+
+      <div className="kd-section">Путь документов</div>
+      <div className="kd-muted" style={{ marginBottom: 8 }}>
+        Отметка ставит сегодняшнюю дату, её можно поправить. Пустой шаг — значит ещё не сделан.
+      </div>
+      {PAPERWORK_STEPS.filter((st) => !st.cashOnly || method === "cash").map((st) => (
+        <div className="kd-ledgerrow" key={st.key} style={{ gridTemplateColumns: "28px 1fr 150px" }}>
+          <span>
+            <input type="checkbox" checked={!!steps[st.key]} onChange={() => toggleStep(st.key)} aria-label={st.label} />
+          </span>
+          <span style={{ textAlign: "left", opacity: steps[st.key] ? 1 : 0.65 }}>{st.label}</span>
+          <span>
+            {steps[st.key]
+              ? <input type="date" value={steps[st.key]} onChange={(e) => setStepDate(st.key, e.target.value)} />
+              : <em className="kd-muted" style={{ fontStyle: "normal" }}>не сделано</em>}
+          </span>
+        </div>
+      ))}
+
+      <div className="kd-section" style={{ marginTop: 16 }}>Заявки в этом комплекте</div>
+      <div className="kd-muted" style={{ marginBottom: 8 }}>
+        Один АВР может закрывать несколько выездов. Можно оставить пустым: бывает, что документы проводим по работе, которой у нас в системе нет.
+      </div>
+      {linkedJobs.length > 0 && linkedJobs.map((id) => {
+        const j = jobs.find((x) => x.id === id);
+        return (
+          <div className="kd-ledgerrow" key={id} style={{ gridTemplateColumns: "1fr auto" }}>
+            <span style={{ textAlign: "left" }}>{j ? `${j.pest || "заявка"} · ${isoToRu(j.scheduled_date)} · ${j.address || ""}` : id}</span>
+            <button className="kd-btn ghost sm" onClick={() => setLinkedJobs(linkedJobs.filter((x) => x !== id))}>Убрать</button>
+          </div>
+        );
+      })}
+      <Field label="Найти заявку">
+        <input value={jobSearch} onChange={(e) => setJobSearch(e.target.value)} placeholder="телефон, адрес или вид работ" />
+      </Field>
+      {jobOptions.map((j) => (
+        <div className="kd-ledgerrow" key={j.id} style={{ gridTemplateColumns: "1fr auto" }}>
+          <span style={{ textAlign: "left" }}>{j.pest || "заявка"} · {isoToRu(j.scheduled_date)} · {j.address || ""}</span>
+          <button className="kd-btn ghost sm" onClick={() => { setLinkedJobs([...linkedJobs, j.id]); setJobSearch(""); }}>Добавить</button>
+        </div>
+      ))}
+
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="что важно помнить по этому комплекту" /></Field>
+
+      {row && scheme !== "own" && (
+        <>
+          <div className="kd-section" style={{ marginTop: 16 }}>Расчёт с партнёром</div>
+          {row.settled_at ? (
+            <div className="kd-row">
+              <span>Рассчитались {isoToRu(row.settled_at)}</span>
+              <strong>{row.settle_method || "способ не указан"}{row.settle_to ? ` · ${row.settle_to}` : ""}</strong>
+            </div>
+          ) : (
+            <>
+              <div className="kd-muted" style={{ marginBottom: 8 }}>
+                {money.direction === "out"
+                  ? `Отдать партнёру ${fmt(money.payout)} ₸.`
+                  : `Получить от партнёра ${fmt(money.payout)} ₸.`}
+                {" "}Отметка проведёт сумму по кассе и оставит след: когда, сколько, каким способом и на кого.
+              </div>
+              <button className="kd-btn primary sm" onClick={() => onSettle(row, money)}>Провести расчёт</button>
+            </>
+          )}
         </>
       )}
     </ModalShell>
@@ -3206,4 +3445,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
