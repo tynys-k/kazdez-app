@@ -17,6 +17,7 @@ import {
   soldFromStock, chemicalSalesSummary,
   qualityByFactor,
   debtAging, clientDebt,
+  repeatCauseReport,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1686,5 +1687,63 @@ describe("долги клиентов", () => {
     const key = (p) => String(p || "").replace(/\D/g, "").slice(-10);
     expect(clientDebt("id:c1", debts, jobs, key)).toBe(50000);
     expect(clientDebt("id:c2", debts, jobs, key)).toBe(15000);
+  });
+});
+
+describe("разбор повторных выездов", () => {
+  const meta = {
+    weak_treatment: { fault: "tech" },
+    client_prep: { fault: "client" },
+    reinfestation: { fault: "none" },
+  };
+  const jobs = [
+    { id: "o1", status: "done", scheduled_date: "2026-08-01" },
+    { id: "r1", status: "done", repeat_of: "o1", scheduled_date: "2026-08-10", pest: "Клопы" },
+    { id: "r2", status: "done", repeat_of: "o1", scheduled_date: "2026-08-12", pest: "Клопы" },
+    { id: "r3", status: "done", repeat_of: "o1", scheduled_date: "2026-08-15", pest: "Тараканы" },
+    { id: "r4", status: "new", repeat_of: "o1", scheduled_date: "2026-08-20" },
+  ];
+  const causes = [
+    { job_id: "r1", cause: "weak_treatment", fault: "tech" },
+    { job_id: "r2", cause: "client_prep", fault: "client" },
+  ];
+
+  it("считает разобранные и неразобранные отдельно", () => {
+    const rep = repeatCauseReport(jobs, causes, { causeMeta: meta });
+    expect(rep.total).toBe(3);
+    expect(rep.reviewed).toBe(2);
+    expect(rep.unreviewed).toBe(1);
+  });
+
+  it("доли считаются от разобранных, а не от всех", () => {
+    // иначе неразобранные тихо занижали бы каждую причину
+    const rep = repeatCauseReport(jobs, causes, { causeMeta: meta });
+    expect(rep.byFault.find((f) => f.key === "tech").share).toBe(50);
+  });
+
+  it("невыполненный повтор ещё не событие", () => {
+    const rep = repeatCauseReport(jobs, causes, { causeMeta: meta });
+    expect(rep.pending.map((j) => j.id)).toEqual(["r3"]);
+  });
+
+  it("ответственность берётся из разбора, а не из справочника", () => {
+    // разбор мог поправить: бывает брак, за которым стоит не исполнитель
+    const custom = [{ job_id: "r1", cause: "weak_treatment", fault: "object" }];
+    const rep = repeatCauseReport(jobs, custom, { causeMeta: meta });
+    expect(rep.byFault[0].key).toBe("object");
+  });
+
+  it("без разбора справочник подсказывает ответственного", () => {
+    const noFault = [{ job_id: "r1", cause: "client_prep" }];
+    const rep = repeatCauseReport(jobs, noFault, { causeMeta: meta });
+    expect(rep.byFault[0].key).toBe("client");
+  });
+
+  it("период считается по дате повторного выезда", () => {
+    const rep = repeatCauseReport(jobs, causes, {
+      causeMeta: meta,
+      inPeriod: (iso) => String(iso) >= "2026-08-12",
+    });
+    expect(rep.total).toBe(2);
   });
 });

@@ -198,6 +198,29 @@ const WORK_EQUIPMENT = [
 
 const equipmentLabel = (code) => WORK_EQUIPMENT.find((e) => e.code === code)?.label || code;
 
+// Почему пришлось выехать повторно.
+//
+// У каждой причины есть тот, на ком ответственность, — и это главное в
+// списке. Пока брак обработки и новый занос лежат в одной куче, показатель
+// «4% возвратов» ничем не управляет.
+const REPEAT_CAUSES = {
+  weak_treatment: { label: "Обработали недостаточно", fault: "tech" },
+  wrong_diagnosis: { label: "Ошиблись с диагностикой", fault: "tech" },
+  wrong_chem: { label: "Препарат не подошёл", fault: "none" },
+  client_prep: { label: "Клиент не подготовил объект", fault: "client" },
+  client_broke: { label: "Клиент нарушил рекомендации", fault: "client" },
+  reinfestation: { label: "Новый занос извне", fault: "none" },
+  hidden_source: { label: "Скрытый источник на объекте", fault: "object" },
+  other: { label: "Другое", fault: "none" },
+};
+
+const REPEAT_FAULTS = {
+  tech: "Исполнитель",
+  client: "Клиент",
+  object: "Объект",
+  none: "Никто",
+};
+
 // Темы обучения менеджеров. Список закрытый намеренно: свободный ввод темы
 // превращает отчёт в кашу, где «Возражения» и «работа с возражениями» — две
 // разные строки, и сравнить людей между собой уже нельзя.
@@ -620,4 +643,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  TECH_DOC_KINDS, TRAINING_TOPICS, WORK_EQUIPMENT, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  TECH_DOC_KINDS, TRAINING_TOPICS, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
