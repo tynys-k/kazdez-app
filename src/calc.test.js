@@ -11,6 +11,7 @@ import {
   planProgress, parseTargets,
   trainingSummary, trainingDue,
   lastAcknowledgement, notAcknowledged, employeeHistory,
+  discountCheck, discountReport,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1321,5 +1322,54 @@ describe("история сотрудника", () => {
 
   it("чужие события не попадают в историю", () => {
     expect(employeeHistory(events, "p2").rows.map((e) => e.id)).toEqual(["e4"]);
+  });
+});
+
+describe("контроль скидок", () => {
+  const base = { status: "done", scheduled_date: "2026-08-10", assigned_to: "t1" };
+
+  it("считает отклонение от зафиксированной прайсовой цены", () => {
+    const c = discountCheck({ ...base, quoted_price: 30000, report_paid: 21000 });
+    expect(c).toMatchObject({ pct: -30, state: "under", diff: -9000 });
+  });
+
+  it("работа дороже прайса — это не претензия", () => {
+    expect(discountCheck({ ...base, quoted_price: 30000, report_paid: 36000 }).state).toBe("over");
+  });
+
+  it("в пределах порога вопросов нет", () => {
+    expect(discountCheck({ ...base, quoted_price: 30000, report_paid: 27000 }).state).toBe("ok");
+  });
+
+  it("без прайсовой цены сравнивать не с чем", () => {
+    // подсвечивать такие заявки красным — значит приучить смотреть мимо
+    expect(discountCheck({ ...base, report_paid: 10000 })).toBeNull();
+    expect(discountCheck({ ...base, quoted_price: 0, report_paid: 10000 })).toBeNull();
+  });
+
+  it("невыполненная заявка ещё ничего не стоила", () => {
+    expect(discountCheck({ ...base, status: "new", quoted_price: 30000, report_paid: 0 })).toBeNull();
+  });
+
+  it("сводка считает сумму, заявки и скидки без причины", () => {
+    const jobs = [
+      { ...base, id: "j1", quoted_price: 30000, report_paid: 21000 },
+      { ...base, id: "j2", quoted_price: 20000, report_paid: 12000 },
+      { ...base, id: "j3", quoted_price: 20000, report_paid: 20000 },
+    ];
+    const reasons = [{ job_id: "j1", reason: "repeat_client", note: null }];
+    const rep = discountReport(jobs, { reasons });
+    expect(rep.count).toBe(2);
+    expect(rep.total).toBe(17000);
+    expect(rep.unexplained).toBe(1);
+    expect(rep.byTech[0]).toMatchObject({ techId: "t1", count: 2, amount: 17000, unexplained: 1 });
+  });
+
+  it("сверху заявка с самой большой скидкой", () => {
+    const jobs = [
+      { ...base, id: "small", quoted_price: 10000, report_paid: 7000 },
+      { ...base, id: "big", quoted_price: 100000, report_paid: 60000 },
+    ];
+    expect(discountReport(jobs, {}).rows[0].job.id).toBe("big");
   });
 });
