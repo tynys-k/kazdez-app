@@ -2,72 +2,66 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
-// Загрузка данных в App.jsx — это Promise.all из сорока с лишним запросов,
-// результат которого разбирается ПОЗИЦИОННО: const [jr, cr, chr, ...] = responses.
-// Стоит вставить новый запрос не туда или переставить два соседних — и переменная
-// молча начинает держать чужую таблицу. Сборка проходит, тесты проходят, линтер
-// молчит, а в интерфейсе просто нет данных.
+// Раньше загрузка была массивом из сорока с лишним запросов, результат которого
+// разбирался по позициям, и этот тест держал соответствие «имя переменной →
+// таблица». Позиционного разбора больше нет: запрос, подпись и обработчик
+// стоят в одной строке реестра SOURCES, и перепутать их местами невозможно.
 //
-// Так уже случилось: price_list и job_helpers стояли в массиве в обратном порядке
-// относительно имён jhr/plr, из-за чего доплаты помощникам читались как строки
-// прайса и не попадали в зарплату — по этому расчёту людям платили деньги.
-//
-// Этот тест фиксирует соответствие «имя переменной → таблица». Он не проверяет,
-// что порядок правильный сам по себе, — он требует, чтобы любое изменение порядка
-// было осознанным: правку списка ниже придётся сделать руками.
+// Проверять теперь надо другое — что реестр остался связным: у каждой записи
+// свой ключ, ключ совпадает с таблицей запроса, есть человеческая подпись для
+// сообщений об ошибках, а редко нужные таблицы в общую загрузку не вернулись.
 
-const EXPECTED = [
-  ["jr","jobs"], ["cr","report_chemicals"], ["chr","chemicals"], ["ar","deferred"],
-  ["tr","deferred"], ["pr","profiles"], ["hr","handouts"], ["ptr","partners"],
-  ["dsr","doc_services"], ["exr","tech_expenses"], ["eqr","equipment"], ["ehr","equipment_handouts"],
-  ["scr","client_sources"], ["ptyr","pest_types"], ["str","app_settings"], ["ecr","expense_categories"],
-  ["opr","opex"], ["dpr","cash_deposits"], ["tkr","tasks"], ["accr","accounts"],
-  ["mvr","money_moves"], ["tndr","tenders"], ["tgr","tender_guarantees"], ["tsr","tender_services"],
-  ["grr","guarantee_returns"], ["ldr","leads"], ["lsr","lead_stages"], ["mcr","mkt_channels"],
-  ["mtr","mkt_topups"], ["dofr","tech_days_off"], ["fur","client_followups"], ["qcr","quality_checks"],
-  ["cor","service_contracts"], ["cer","deferred"], ["pfr","client_public_feedback"], ["jpr","job_proofs"],
-  ["car","cash_adjustments"], ["iar","inventory_adjustments"], ["errr","deferred"], ["jhr","job_helpers"],
-  ["plr","price_list"], ["cpr","chemical_purchases"], ["tdr","tech_documents"], ["trr","training_records"], ["sar","safety_acknowledgements"], ["evr","employee_events"], ["dsr2","job_discounts"],
-];
-
-function readLoadOrder() {
+function readSources() {
   const file = fs.readFileSync(path.join(process.cwd(), "src/App.jsx"), "utf8");
-  const start = file.indexOf("const responses = await Promise.all([");
-  const end = file.indexOf("] = responses;");
-  if (start < 0 || end < 0) throw new Error("не найден блок загрузки в App.jsx");
+  const start = file.indexOf("const SOURCES = [");
+  const end = file.indexOf("\n  ];", start);
+  if (start < 0 || end < 0) throw new Error("реестр SOURCES не найден в App.jsx");
   const block = file.slice(start, end);
-  const array = block.slice(0, block.indexOf("]);"));
 
-  const tables = [];
-  const re = /(?:supabase\.from|fetchAllRows)\("([a-z_]+)"|(Promise\.resolve)/g;
-  let m;
-  while ((m = re.exec(array))) tables.push(m[1] || "deferred");
-
-  const listEnd = file.indexOf("] = responses;");
-  const listStart = file.lastIndexOf("const [", listEnd);
-  const names = file
-    .slice(listStart + "const [".length, listEnd)
-    .replace(/\s+/g, " ")
-    .split(",")
-    .map((s) => s.trim());
-
-  return { tables, names };
+  return block
+    .split("\n")
+    .filter((line) => line.trim().startsWith("{ key:"))
+    .map((line) => {
+      const key = /key: "([a-z_]+)"/.exec(line);
+      const label = /label: "([^"]+)"/.exec(line);
+      const table = /(?:from|fetchAllRows)\("([a-z_]+)"/.exec(line);
+      return { key: key && key[1], label: label && label[1], table: table && table[1], line };
+    });
 }
 
-describe("порядок запросов в load()", () => {
-  const { tables, names } = readLoadOrder();
+describe("реестр источников данных", () => {
+  const sources = readSources();
 
-  it("имён в разборе ровно столько же, сколько запросов", () => {
-    expect(names.length).toBe(tables.length);
+  it("в реестре есть записи", () => {
+    expect(sources.length).toBeGreaterThan(30);
   });
 
-  it("подписи для сообщений об ошибках покрывают все запросы", () => {
-    const file = fs.readFileSync(path.join(process.cwd(), "src/App.jsx"), "utf8");
-    const labels = /const tableNames = \[(.*?)\];/s.exec(file)[1].match(/"[^"]+"/g);
-    expect(labels.length).toBe(tables.length);
+  it("ключ каждой записи совпадает с таблицей её запроса", () => {
+    // именно это расхождение раньше приводило к тому, что переменная молча
+    // держала чужую таблицу
+    const mismatched = sources.filter((s) => s.key !== s.table);
+    expect(mismatched.map((s) => `${s.key} ≠ ${s.table}`)).toEqual([]);
   });
 
-  it("каждая переменная держит свою таблицу", () => {
-    expect(names.map((n, i) => [n, tables[i]])).toEqual(EXPECTED);
+  it("ключи не повторяются", () => {
+    const keys = sources.map((s) => s.key);
+    expect(keys.length).toBe(new Set(keys).size);
+  });
+
+  it("у каждой записи есть подпись для сообщений об ошибках", () => {
+    expect(sources.filter((s) => !s.label).map((s) => s.key)).toEqual([]);
+  });
+
+  it("редкие таблицы в общую загрузку не возвращены", () => {
+    // журнал, корзина, сбои и хронология клиентов грузятся при открытии
+    // раздела: вместе они весят больше, чем всё остальное
+    const deferred = ["audit_log", "trash", "client_errors", "client_events"];
+    const leaked = sources.filter((s) => deferred.includes(s.key));
+    expect(leaked.map((s) => s.key)).toEqual([]);
+  });
+
+  it("тяжёлые картинки компании не попадают в общую загрузку", () => {
+    const settings = sources.find((s) => s.key === "app_settings");
+    expect(settings.line).toContain("COMPANY_IMAGE_KEYS");
   });
 });
