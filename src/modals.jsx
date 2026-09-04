@@ -668,13 +668,19 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
   const [moreEquip, setMoreEquip] = useState(() => (draft.equipment || []).some((c) => !WORK_EQUIPMENT.find((e) => e.code === c)?.common));
   const [discountReason, setDiscountReason] = useState(draft.discountReason || "");
   const [discountNote, setDiscountNote] = useState(draft.discountNote || "");
+  // Долг — это не скидка: скидку дали, долг обещали вернуть. Поэтому у него
+  // спрашивается срок, и дальше он живёт в дебиторке, а не в отчёте о скидках.
+  const [debtDue, setDebtDue] = useState(draft.debtDue || "");
   const total = (Number(cash) || 0) + (Number(qr) || 0) + (Number(transfer) || 0);
   // Прайсовая цена зафиксирована при оформлении заявки. Если её нет — сравнивать
   // не с чем, и мешать сдать отчёт мы не имеем права.
   const quoted = Number(job.quoted_price) || 0;
   const gap = quoted > 0 && total > 0 ? Math.round((total - quoted) / quoted * 100) : null;
   const needsReason = gap !== null && gap <= -Math.abs(discountThreshold);
-  const reasonMissing = needsReason && (!discountReason || (discountReason === "other" && !discountNote.trim()));
+  const isDebt = needsReason && discountReason === "debt";
+  const reasonMissing = needsReason && (!discountReason
+    || (discountReason === "other" && !discountNote.trim())
+    || (discountReason === "debt" && !debtDue));
   // Без отметки об оборудовании отчёт не сохранится: ради этих данных всё и
   // затевалось, а «заполню потом» не наступает никогда. Отказаться можно
   // честно — есть вариант «без оборудования».
@@ -689,7 +695,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
     });
   };
   useEffect(() => {
-    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, discountReason, discountNote, savedAt: new Date().toISOString() }));
+    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, discountReason, discountNote, debtDue, savedAt: new Date().toISOString() }));
   }, [draftKey, cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote]);
   const setChem = (i, k) => (e) => { const n = chems.slice(); n[i] = { ...n[i], [k]: e.target.value }; setChems(n); };
   function methodLabel() {
@@ -708,7 +714,8 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
       const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
       return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
     });
-    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, equipment, discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "" }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
+    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, equipment, discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "",
+      debt: isDebt ? { amount: quoted - total, dueOn: debtDue, note: discountNote.trim() } : null }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
     if (ok !== false) localStorage.removeItem(draftKey);
     setSaving(false);
   }
@@ -765,6 +772,17 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
               {Object.entries(DISCOUNT_REASONS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </Field>
+          {isDebt && (
+            <>
+              <div className="kd-row"><span>Клиент остался должен</span><strong style={{ color: "var(--rust)" }}>{fmt(quoted - total)} ₸</strong></div>
+              <Field label="Когда обещал заплатить">
+                <input type="date" value={debtDue} onChange={(e) => setDebtDue(e.target.value)} />
+              </Field>
+              <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+                Долг попадёт в дебиторку и будет висеть, пока не закроют. Это не скидка — в отчёте о скидках он не появится.
+              </div>
+            </>
+          )}
           <Field label={discountReason === "other" ? "Пояснение (обязательно)" : "Пояснение"}>
             <input value={discountNote} onChange={(e) => setDiscountNote(e.target.value)} placeholder="коротко, своими словами" />
           </Field>
@@ -1357,6 +1375,41 @@ function BlockClientModal({ client, onClose, onSave }) {
           </div>
         </>
       )}
+    </ModalShell>
+  );
+}
+
+function DebtPayModal({ debt, job, accounts = [], onClose, onSave }) {
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+  const [paidOn, setPaidOn] = useState(new Date().toISOString().slice(0, 10));
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave(debt, accountId, paidOn);
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+  return (
+    <ModalShell title="Клиент рассчитался" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving || !paidOn} onClick={save}>{saving ? "…" : "Закрыть долг"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <div className="kd-row" style={{ marginBottom: 12 }}>
+        <span>{job ? `${job.pest || "заявка"} · ${job.client_phone || ""}` : "Долг по заявке"}</span>
+        <strong>{fmt(debt.amount)} ₸</strong>
+      </div>
+      <div className="kd-grid2">
+        <Field label="Дата оплаты"><input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} /></Field>
+        <Field label="На какой счёт">
+          <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <option value="">— не проводить по кассе —</option>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      {!accountId && <div className="kd-hint">Без счёта долг закроется отметкой, но деньги по кассе не появятся.</div>}
     </ModalShell>
   );
 }
@@ -3632,4 +3685,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };

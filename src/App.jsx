@@ -14,7 +14,7 @@ import { equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJ
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -309,6 +309,7 @@ function Dashboard({ session, profile }) {
   const [paperwork, setPaperwork] = useState([]);
   const [chemSales, setChemSales] = useState([]);
   const [jobEquipment, setJobEquipment] = useState([]);
+  const [debts, setDebts] = useState([]);
   const [paperworkJobs, setPaperworkJobs] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -540,6 +541,7 @@ function Dashboard({ session, profile }) {
         if (canEditJobs) await supabase.rpc("kd_scan_alerts");
         return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
       } },
+    { key: "job_debts", label: "Долги клиентов", run: () => supabase.from("job_debts").select("*").order("due_on"), set: setDebts },
     { key: "job_equipment", label: "Оборудование на заявках", run: () => supabase.from("job_equipment").select("*"), set: setJobEquipment },
     { key: "chemical_sales", label: "Продажа препаратов", run: () => supabase.from("chemical_sales").select("*").order("sold_on", { ascending: false }), set: setChemSales },
     { key: "paperwork", label: "Проведение документов", run: () => supabase.from("paperwork").select("*").order("created_at", { ascending: false }), set: setPaperwork },
@@ -648,7 +650,7 @@ function Dashboard({ session, profile }) {
   // обслуживания по договору и справочники, которые пополняются на лету.
   const reloadJobs = () => load([
     "jobs", "job_proofs", "job_helpers", "job_discounts",
-    "client_followups", "quality_checks", "service_contracts", "job_equipment",
+    "client_followups", "quality_checks", "service_contracts", "job_equipment", "job_debts",
     "client_sources", "pest_types", "objects", "clients",
   ]);
   const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
@@ -1055,6 +1057,24 @@ function Dashboard({ session, profile }) {
   // Если забрали у дезинфектора — сразу снимаем препарат с его остатка
   // корректировкой. Иначе у человека навсегда останется недостача, которую
   // он не делал, а разбираться с ней будем на ревизии через месяц.
+  async function closeDebt(debt, accountId, paidOn) {
+    const { error } = await supabase.from("job_debts")
+      .update({ paid_on: paidOn, paid_account_id: accountId || null }).eq("id", debt.id);
+    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+    if (accountId) {
+      const already = moves.some((m) => m.source === "job_debt" && m.ref_id === debt.id);
+      if (!already) {
+        const { error: mError } = await supabase.from("money_moves").insert({
+          account_id: accountId, direction: "income", amount: Number(debt.amount) || 0, move_date: paidOn,
+          note: `Погашен долг по заявке`, source: "job_debt", ref_id: debt.id, created_by: session.user.id,
+        });
+        if (mError) showToast("Долг закрыт, но по кассе не провёлся: " + mError.message);
+      }
+    }
+    await logAction("Долги", `Погашен долг ${fmt(debt.amount)} ₸`);
+    setModal(null); showToast("Долг закрыт"); load(["job_debts", "accounts", "money_moves"]); return null;
+  }
+
   async function saveChemSale(payload) {
     const { id, ...fields } = payload;
     const res = id
@@ -1261,9 +1281,18 @@ function Dashboard({ session, profile }) {
       }, { onConflict: "job_id" });
       if (eqError) showToast("Отчёт сохранён, но оборудование не записалось: " + eqError.message);
     }
+    // Долг записывается отдельно от скидки: скидку дали осознанно, долг
+    // обещали вернуть. Смешивать их — значит потерять и то и другое.
+    if (report.debt && report.debt.amount > 0) {
+      const { error: dError } = await supabase.from("job_debts").upsert({
+        job_id: job.id, amount: report.debt.amount, due_on: report.debt.dueOn || null,
+        note: report.debt.note || null, created_by: session.user.id,
+      }, { onConflict: "job_id" });
+      if (dError) showToast("Отчёт сохранён, но долг не записался: " + dError.message);
+    }
     // Причина скидки пишется отдельной записью: сумма уходит защищённой
     // функцией, а причину указывает тот, кто скидку дал.
-    if (report.discountReason) {
+    if (report.discountReason && report.discountReason !== "debt") {
       const { error: dError } = await supabase.from("job_discounts").upsert({
         job_id: job.id,
         quoted: Number(job.quoted_price) || 0,
@@ -2598,7 +2627,12 @@ function Dashboard({ session, profile }) {
   // Порог, ниже которого скидка требует объяснения. Настраивается: у разных
   // компаний разная норма торга.
   const discountThreshold = Number(settings.discount_threshold_pct) || 20;
-  const discountStats = calc.discountReport(jobs, { inPeriod: inPeriodIso, threshold: discountThreshold, reasons: discounts });
+  // Заявки с долгом из отчёта о скидках исключаются: это не скидка, и
+  // считать её недополученной выручкой дважды нельзя.
+  const debtJobIds = new Set(debts.map((d) => String(d.job_id)));
+  const discountStats = calc.discountReport(jobs.filter((j) => !debtJobIds.has(String(j.id))),
+    { inPeriod: inPeriodIso, threshold: discountThreshold, reasons: discounts });
+  const aging = calc.debtAging(debts, { jobs });
   const discountsNoReason = calc.discountReport(jobs, {
     inPeriod: (iso) => { const d = parseIso(iso); return !!d && Date.now() - d.getTime() < 30 * 86400000; },
     threshold: discountThreshold, reasons: discounts,
@@ -2762,6 +2796,7 @@ function Dashboard({ session, profile }) {
     docsSoon ? { id: "docssoon", label: "Допуски истекают в этом месяце", value: docsSoon, tab: "team", tone: "warning" } : null,
     // Скидка без объяснения — не «дал скидку», а «никому не сказал».
     isAdmin && discountsNoReason ? { id: "discounts", label: "Скидки без объяснения за 30 дней", value: discountsNoReason, tab: "growth", tone: "danger" } : null,
+    canManageCash && aging.overdue > 0 ? { id: "debts", label: "Просроченные долги клиентов", value: `${fmt(aging.overdue)} ₸`, tab: "opex", tone: "danger" } : null,
     trainingAlerts.length ? { id: "training", label: "Пора перепроверить обучение", value: trainingAlerts.length, tab: "team", tone: "warning" } : null,
     isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
     isAdmin && dueFollowups.length ? { id: "client-followups", label: "Пора связаться с клиентами", value: dueFollowups.length, tab: "retention", tone: "warning" } : null,
@@ -4545,6 +4580,45 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "opex" && (
           <>
+            {aging.rows.length > 0 && (
+              <div className="kd-card" style={{ marginBottom: 14 }}>
+                <div className="kd-section" style={{ marginTop: 0 }}>Клиенты должны · {fmt(aging.total)} ₸</div>
+                <div className="kd-muted" style={{ marginBottom: 10 }}>
+                  Возраст считается от обещанной даты, а не от даты работы: тот, кто обещал заплатить через месяц, ещё не должник.
+                  Долг без срока считается просроченным сразу — обещание без даты не обещание.
+                </div>
+                <div className="kd-stockgrid" style={{ marginBottom: 12 }}>
+                  <div><span>Срок не наступил</span><strong>{fmt(aging.future)} ₸</strong></div>
+                  <div><span>До 14 дней</span><strong style={{ color: aging.over0 ? "var(--amber)" : undefined }}>{fmt(aging.over0)} ₸</strong></div>
+                  <div><span>15–30 дней</span><strong style={{ color: aging.over14 ? "var(--rust)" : undefined }}>{fmt(aging.over14)} ₸</strong></div>
+                  <div><span>Больше 30 дней</span><strong style={{ color: aging.over30 ? "var(--rust)" : undefined }}>{fmt(aging.over30)} ₸</strong></div>
+                </div>
+                {aging.rows.slice(0, 40).map(({ debt, job, amount, overdue }) => (
+                  <div className="kd-ledgerrow" key={debt.id} style={{ gridTemplateColumns: "1.6fr 1.2fr 1fr auto" }}>
+                    <span className="kd-ledgername">
+                      {job ? (job.contact_name || job.client_phone || "клиент") : "заявка удалена"}
+                      <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>
+                        {job ? `${job.pest || ""} · ${isoToRu(job.scheduled_date)}` : ""}
+                      </em>
+                    </span>
+                    <span style={{ textAlign: "left" }}>
+                      {debt.due_on
+                        ? <>обещал {isoToRu(debt.due_on)}
+                            <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>
+                              {overdue > 0 ? `просрочка ${overdue} дн.` : `осталось ${-overdue} дн.`}
+                            </em>
+                          </>
+                        : <strong style={{ color: "var(--rust)" }}>срок не назван</strong>}
+                    </span>
+                    <strong>{fmt(amount)} ₸</strong>
+                    {canManageCash
+                      ? <button className="kd-btn primary sm" onClick={() => setModal({ kind: "debtPay", debt, job })}>Рассчитался</button>
+                      : <span />}
+                  </div>
+                ))}
+                {aging.rows.length > 40 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 40 из {aging.rows.length} — сначала самые старые.</div>}
+              </div>
+            )}
             <div className="kd-seg" style={{ marginBottom: 14 }}>
               <button className={`kd-segbtn ${opexView === "accounts" ? "on" : ""}`} onClick={() => setOpexView("accounts")}>Счета и движения</button>
               <button className={`kd-segbtn ${opexView === "marketing" ? "on" : ""}`} onClick={() => setOpexView("marketing")}>Маркетинг</button>
@@ -5463,6 +5537,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
+      {modal?.kind === "debtPay" && <DebtPayModal debt={modal.debt} job={modal.job} accounts={accounts}
+        onClose={() => setModal(null)} onSave={closeDebt} />}
       {modal?.kind === "chemSale" && <ChemSaleModal sale={modal.sale} partners={partners} chemicals={chemicals} techs={techs} accounts={accounts}
         techBalance={(techId, chemId) => {
           const row = techLedger(techId).find((r) => String(r.chem.id) === String(chemId));
