@@ -70,7 +70,11 @@ begin
 
   create temporary table kd_current on commit drop as
 
-  -- Лида никто не тронул больше получаса
+  -- Лида никто не тронул больше получаса.
+  --
+  -- «Не тронул» определяем по updated_at: он двигается и при касании, и при
+  -- смене этапа воронки. Отдельного поля со статусом у лида нет, и выдумывать
+  -- его не нужно — как только с лидом что-то сделали, тревога снимается сама.
   select 'lead_no_reply' as rule, 'leads' as entity, l.id as entity_id, 'critical' as severity,
          'Лид без ответа' as title,
          coalesce(l.name, l.phone, 'без имени') || ' · ' ||
@@ -78,7 +82,6 @@ begin
          'Менеджер' as target
     from public.leads l
    where l.converted_job_id is null
-     and coalesce(l.status, '') not in ('lost', 'closed', 'done')
      and l.created_at < now() - interval '30 minutes'
      and coalesce(l.updated_at, l.created_at) <= l.created_at + interval '1 minute'
 
