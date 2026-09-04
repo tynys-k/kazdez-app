@@ -305,6 +305,7 @@ function Dashboard({ session, profile }) {
   const [discounts, setDiscounts] = useState([]);
   const [objects, setObjects] = useState([]);
   const [clients, setClients] = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -525,6 +526,8 @@ function Dashboard({ session, profile }) {
     { key: "training_records", label: "Обучение", run: () => supabase.from("training_records").select("*").order("passed_on", { ascending: false }), set: setTraining },
     { key: "safety_acknowledgements", label: "Инструктаж", run: () => supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }), set: setSafetyAcks },
     { key: "employee_events", label: "История сотрудников", run: () => supabase.from("employee_events").select("*").order("happened_on", { ascending: false }), set: setPeopleEvents },
+    // Тревоги считает база по расписанию, приложение их только показывает.
+    { key: "alerts", label: "Тревоги", run: () => supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false }), set: setAlerts },
     { key: "clients", label: "Клиенты (карточки)", run: () => supabase.from("clients").select("*"), set: setClients },
     { key: "objects", label: "Объекты", run: () => supabase.from("objects").select("*").order("address"), set: setObjects },
     { key: "job_discounts", label: "Скидки", run: () => supabase.from("job_discounts").select("*").order("created_at", { ascending: false }), set: setDiscounts },
@@ -986,6 +989,15 @@ function Dashboard({ session, profile }) {
       .select().single();
     if (error) { showToast("Заявка сохранится, но объект не завёлся: " + error.message); return null; }
     return data?.id || null;
+  }
+
+  async function resolveAlert(alert) {
+    const { error } = await supabase.from("alerts")
+      .update({ resolved_at: new Date().toISOString(), resolved_by: session.user.id })
+      .eq("id", alert.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Тревога", `Закрыта: ${alert.title}${alert.detail ? ` · ${alert.detail}` : ""}`);
+    load(["alerts"]);
   }
 
   async function saveObject(object, patch) {
@@ -2799,6 +2811,38 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "today" && (
           <div className="kd-today">
+            {alerts.length > 0 && (
+              <section className="kd-card kd-alerts">
+                <div className="kd-tabbar" style={{ marginBottom: 10 }}>
+                  <div>
+                    <div className="kd-section" style={{ margin: 0 }}>Требует решения · {alerts.length}</div>
+                    <div className="kd-muted">
+                      Считает база по расписанию, а не открытая вкладка: тревога появляется, даже когда приложение никто не открывал.
+                      Причина ушла — тревога закроется сама.
+                    </div>
+                  </div>
+                </div>
+                {[...alerts]
+                  .sort((a, b) => (a.severity === b.severity ? String(a.created_at).localeCompare(String(b.created_at)) : a.severity === "critical" ? -1 : 1))
+                  .slice(0, 20)
+                  .map((al) => (
+                    <div className="kd-alertrow" key={al.id}>
+                      <span className={`kd-alertdot ${al.severity === "critical" ? "crit" : ""}`} />
+                      <span>
+                        <strong>{al.title}</strong>
+                        {al.detail && <em>{al.detail}</em>}
+                        <small>{al.target || "без адресата"} · {fmtTs(al.created_at)}</small>
+                      </span>
+                      {canEditJobs && (
+                        <button className="kd-btn ghost sm" onClick={() => resolveAlert(al)} title="Проблема решена — убрать из списка">
+                          Разобрался
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                {alerts.length > 20 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 20 из {alerts.length}.</div>}
+              </section>
+            )}
             <section className="kd-todayhero">
               <div>
                 <div className="kd-eyebrow">{WEEKDAYS[new Date().getDay()]} · {isoToRu(todayIso)}</div>
