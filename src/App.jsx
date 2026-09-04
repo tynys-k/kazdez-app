@@ -14,7 +14,7 @@ import { PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addre
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { SettleModal, PaperworkModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -1064,6 +1064,27 @@ function Dashboard({ session, profile }) {
     }
     await logAction("Документы", `${PAPERWORK_SCHEMES[payload.scheme]?.label || payload.scheme} · ${payload.client_name || "клиент"} · ${fmt(payload.amount)} ₸`);
     setModal(null); showToast("Сохранено"); load(["paperwork", "paperwork_jobs"]); return null;
+  }
+
+  // Клиент в чёрном списке: не запрет, а предупреждение. Решение остаётся за
+  // человеком — бывают случаи, когда работать всё равно надо.
+  const clientByPhone = (phone) => {
+    const key = phoneKey(phone);
+    return key ? clients.find((c) => c.phone_key === key) : null;
+  };
+  const blockedClient = (phone) => {
+    const c = clientByPhone(phone);
+    return c && c.blocked ? c : null;
+  };
+
+  async function saveClientBlock(client, patch) {
+    const payload = { ...patch, updated_at: new Date().toISOString() };
+    if (patch.blocked) { payload.blocked_at = new Date().toISOString(); payload.blocked_by = session.user.id; }
+    else { payload.blocked_by = null; }
+    const { error } = await supabase.from("clients").update(payload).eq("id", client.id);
+    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+    await logAction("Чёрный список", `${client.name || client.phone}: ${patch.blocked ? `внесён — ${patch.blocked_reason}` : "убран"}`);
+    setModal(null); showToast("Сохранено"); load(["clients"]); return null;
   }
 
   async function saveObject(object, patch) {
@@ -3039,6 +3060,7 @@ function Dashboard({ session, profile }) {
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
                         onHistory={() => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
                       onObject={j.object_id ? () => setModal({ kind: "object", objectId: j.object_id }) : null}
+                      blocked={blockedClient(j.client_phone)}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                         onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
@@ -3172,6 +3194,7 @@ function Dashboard({ session, profile }) {
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
                       onHistory={() => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
                       onObject={j.object_id ? () => setModal({ kind: "object", objectId: j.object_id }) : null}
+                      blocked={blockedClient(j.client_phone)}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                       onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
@@ -3591,6 +3614,7 @@ function Dashboard({ session, profile }) {
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
                   onHistory={() => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
                       onObject={j.object_id ? () => setModal({ kind: "object", objectId: j.object_id }) : null}
+                      blocked={blockedClient(j.client_phone)}
                   onOpenDetails={() => setModal({ kind: "details", job: j })}
                   onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину.`, () => deleteJob(j))} />
               ))}
@@ -5212,8 +5236,8 @@ function Dashboard({ session, profile }) {
       </main>
       </div>
 
-      {modal?.kind === "new" && <JobFormModal title="Новая заявка" submitLabel="Создать" partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
-      {modal?.kind === "edit" && <JobFormModal title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
+      {modal?.kind === "new" && <JobFormModal findBlocked={blockedClient} title="Новая заявка" submitLabel="Создать" partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
+      {modal?.kind === "edit" && <JobFormModal findBlocked={blockedClient} title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} assignInfo={(techId) => {
         const d = modal.job.scheduled_date;
         if (!d) return { off: false, night: false, count: 0, score: 50, reasons: ["дата ещё не задана"] };
@@ -5255,6 +5279,10 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} partnerName={partnerNameOf(modal.job)} onReport={() => setModal({ kind: "report", job: modal.job })} onClose={() => setModal(null)} />}
       {modal?.kind === "proof" && <ProofModal job={modal.job} proof={proofByJob(modal.job.id)} media={proofMedia} onClose={() => setModal(null)} onSave={saveJobProof} />}
       {modal?.kind === "history" && <HistoryModal
+        blockedInfo={blockedClient(modal.job.client_phone)}
+        onBlock={canEditJobs && clientByPhone(modal.job.client_phone)
+          ? () => setModal({ kind: "blockClient", client: clientByPhone(modal.job.client_phone) })
+          : null}
         job={modal.job} jobs={jobs} followups={followups} qualityChecks={qualityChecks} contracts={contracts}
         events={clientEvents} feedback={publicFeedback} profiles={allProfiles} canPlanFollowup={canEditJobs} partnerNameOf={partnerNameOf}
         onAddNote={addClientNote} onCopyPublicLink={copyPublicJobLink}
@@ -5273,6 +5301,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "settle" && <SettleModal row={modal.row} money={modal.money} accounts={accounts}
         partnerName={partnerById(modal.row.partner_id)?.name}
         onClose={() => setModal({ kind: "paperwork", row: modal.row })} onSave={settlePaperwork} />}
+      {modal?.kind === "blockClient" && <BlockClientModal client={modal.client} onClose={() => setModal(null)} onSave={saveClientBlock} />}
       {modal?.kind === "object" && (() => {
         const obj = objects.find((o) => String(o.id) === String(modal.objectId));
         if (!obj) return null;
