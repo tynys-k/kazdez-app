@@ -313,6 +313,43 @@ export function executorShareAmt(job) {
   return Math.round((Number(job.report_paid) || 0) * (Number(job.executor_share_pct) || 0) / 100);
 }
 
+// --- продажа препаратов партнёрам ----------------------------------------
+
+// Сколько препарата ушло партнёрам со склада.
+//
+// Считаем только продажи со склада: то, что забрали у дезинфектора, склад уже
+// покинуло в момент выдачи, и вычитать второй раз — значит показать недостачу
+// там, где её нет.
+export function soldFromStock(chemId, sales = []) {
+  return sales
+    .filter((s) => String(s.chemical_id) === String(chemId) && !s.from_tech_id)
+    .reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+}
+
+// Долг партнёров за препараты и что вообще происходило.
+export function chemicalSalesSummary(sales = [], { inPeriod = () => true } = {}) {
+  let revenue = 0, unpaid = 0;
+  const byPartner = new Map();
+
+  for (const s of sales) {
+    if (!inPeriod(s.sold_on)) continue;
+    const total = Number(s.total) || 0;
+    revenue += total;
+    const key = String(s.partner_id || "");
+    const cur = byPartner.get(key) || { partnerId: s.partner_id, total: 0, owed: 0, count: 0 };
+    cur.total += total;
+    cur.count += 1;
+    if (!s.paid_on) { cur.owed += total; unpaid += total; }
+    byPartner.set(key, cur);
+  }
+
+  return {
+    revenue, unpaid,
+    // Сверху те, кто должен больше: с них и начинается разговор.
+    byPartner: [...byPartner.values()].sort((a, b) => b.owed - a.owed || b.total - a.total),
+  };
+}
+
 // --- проведение документов -----------------------------------------------
 
 // Где именно застрял комплект документов.

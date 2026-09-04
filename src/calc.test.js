@@ -14,6 +14,7 @@ import {
   discountCheck, discountReport,
   objectSummary, clientKeyOf,
   paperworkProgress, paperworkMoney, paperworkTotals,
+  soldFromStock, chemicalSalesSummary,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1541,5 +1542,41 @@ describe("проведение документов", () => {
   it("рассчитанные комплекты в долгах не висят", () => {
     const rows = [{ scheme: "for_partner", amount: 100000, percent: 30, paid_at: "2026-08-01", settled_at: "2026-08-05", created_at: "2026-08-01" }];
     expect(paperworkTotals(rows, { steps }).oweOut).toBe(0);
+  });
+});
+
+describe("продажа препаратов партнёрам", () => {
+  const sales = [
+    { partner_id: "p1", chemical_id: "c1", amount: 5000, total: 100000, sold_on: "2026-08-05", paid_on: "2026-08-06" },
+    { partner_id: "p1", chemical_id: "c1", amount: 1000, total: 20000, sold_on: "2026-08-10", from_tech_id: "t1" },
+    { partner_id: "p2", chemical_id: "c2", amount: 2000, total: 40000, sold_on: "2026-08-12" },
+  ];
+
+  it("со склада списывается только то, что забрали со склада", () => {
+    // взятое у дезинфектора склад уже покинуло в момент выдачи
+    expect(soldFromStock("c1", sales)).toBe(5000);
+  });
+
+  it("чужой препарат в списание не попадает", () => {
+    expect(soldFromStock("c2", sales)).toBe(2000);
+    expect(soldFromStock("нет", sales)).toBe(0);
+  });
+
+  it("считает выручку и неоплаченное", () => {
+    const sum = chemicalSalesSummary(sales);
+    expect(sum.revenue).toBe(160000);
+    expect(sum.unpaid).toBe(60000);
+  });
+
+  it("сверху тот партнёр, кто должен больше", () => {
+    const sum = chemicalSalesSummary(sales);
+    expect(sum.byPartner[0].partnerId).toBe("p2");
+    expect(sum.byPartner[0].owed).toBe(40000);
+    expect(sum.byPartner[1].owed).toBe(20000);
+  });
+
+  it("оплаченные в долг не идут", () => {
+    const paid = [{ partner_id: "p1", chemical_id: "c1", amount: 1, total: 50000, sold_on: "2026-08-01", paid_on: "2026-08-02" }];
+    expect(chemicalSalesSummary(paid).unpaid).toBe(0);
   });
 });
