@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clientMemoFor, monthLabel, phoneKey, samePhone, waLink, winbackMsg } from "./shared";
+import { clientMemoFor, describeChange, monthLabel, phoneKey, samePhone, waLink, winbackMsg } from "./shared";
 
 describe("phoneKey", () => {
   it("склеивает записи одного номера в разных формах", () => {
@@ -96,5 +96,50 @@ describe("подпись месяца", () => {
   it("мусор возвращает как есть, а не падает", () => {
     expect(monthLabel("")).toBe("");
     expect(monthLabel("что-то")).toBe("что-то");
+  });
+});
+
+describe("журнал изменений", () => {
+  it("переводит таблицу и поле на человеческий язык", () => {
+    const d = describeChange({ entity: "jobs", action: "update", field: "report_paid", before: "40000", after: "15000" });
+    expect(d.entity).toBe("Заявка");
+    expect(d.title).toBe("Сумма оплаты");
+    expect(d.before).toContain("40");
+    expect(d.after).toContain("15");
+  });
+
+  it("идентификатор человека показывает именем", () => {
+    const d = describeChange(
+      { entity: "jobs", action: "update", field: "assigned_to", before: "u1", after: "u2" },
+      { nameOf: (id) => ({ u1: "Байсеит", u2: "Егинбай" })[id] },
+    );
+    expect(d.before).toBe("Байсеит");
+    expect(d.after).toBe("Егинбай");
+  });
+
+  it("пустое значение называется пустым, а не превращается в ноль", () => {
+    const d = describeChange({ entity: "jobs", action: "update", field: "tech_bonus", before: null, after: "5000" });
+    expect(d.before).toBe("пусто");
+  });
+
+  it("даты и флаги читаются по-человечески", () => {
+    expect(describeChange({ entity: "jobs", action: "update", field: "scheduled_date", before: "2026-08-01", after: "2026-08-05" }).before).toBe("01.08.2026");
+    expect(describeChange({ entity: "profiles", action: "update", field: "is_active", before: "true", after: "false" }).after).toBe("нет");
+  });
+
+  it("создание и удаление не показывают несуществующее «было»", () => {
+    expect(describeChange({ entity: "jobs", action: "insert" }).before).toBeNull();
+    expect(describeChange({ entity: "jobs", action: "delete" }).title).toBe("удалено");
+  });
+
+  it("длинное значение обрезается, а не ломает строку", () => {
+    const long = "я".repeat(200);
+    expect(describeChange({ entity: "app_settings", action: "update", field: "value", before: long, after: "x" }).before.length).toBeLessThan(100);
+  });
+
+  it("незнакомая таблица не роняет журнал", () => {
+    const d = describeChange({ entity: "чего_то_новое", action: "update", field: "какое_то_поле", before: "1", after: "2" });
+    expect(d.entity).toBe("чего_то_новое");
+    expect(d.title).toBe("какое_то_поле");
   });
 });

@@ -39,6 +39,65 @@ const EMPLOYEE_EVENTS = {
   other: "Другое",
 };
 
+// Человеческие имена для журнала изменений. Без них строка выглядит как
+// «jobs.report_paid: 40000 → 15000» — технически полно, читать невозможно.
+const CHANGE_ENTITIES = {
+  jobs: "Заявка",
+  tech_expenses: "Выплата сотруднику",
+  money_moves: "Движение по счёту",
+  profiles: "Сотрудник",
+  price_list: "Прайс",
+  chemicals: "Препарат",
+  app_settings: "Настройка",
+  job_discounts: "Скидка",
+};
+
+const CHANGE_FIELDS = {
+  report_paid: "Сумма оплаты", report_cash: "Наличными", report_qr: "По QR",
+  report_transfer: "Перечислением", quoted_price: "Цена по прайсу",
+  status: "Статус", assigned_to: "Исполнитель", scheduled_date: "Дата выезда",
+  tech_bonus: "Бонус исполнителю", tech_travel: "Дорожные",
+  partner_id: "Партнёр", partner_share: "Доля партнёра",
+  transport_cost: "Транспорт", other_cost: "Прочие расходы",
+  amount: "Сумма", type: "Тип", expense_date: "Дата", account_id: "Счёт",
+  direction: "Направление", move_date: "Дата", source: "Основание",
+  role: "Роль", is_active: "Доступ", salary_monthly: "Оклад",
+  work_schedule: "График", access_overrides: "Персональные права",
+  cash_opening_balance: "Начальный остаток", cash_opening_date: "Дата остатка",
+  pest: "Вредитель", area_from: "Площадь от", area_to: "Площадь до", price: "Цена",
+  name: "Название", price_per_liter: "Цена за единицу",
+  purchased_ml: "Куплено", min_ml: "Минимальный остаток",
+  key: "Параметр", value: "Значение",
+};
+
+// Поля, где хранится идентификатор человека или счёта: их надо переводить в
+// имя, иначе в журнале останутся нечитаемые строки из тридцати шести знаков.
+const CHANGE_ID_FIELDS = new Set(["assigned_to", "partner_id", "account_id", "created_by"]);
+
+function describeChangeValue(field, raw, nameOf) {
+  if (raw === null || raw === undefined || raw === "") return "пусто";
+  if (CHANGE_ID_FIELDS.has(field) && typeof nameOf === "function") return nameOf(raw) || "—";
+  if (raw === "true") return "есть";
+  if (raw === "false") return "нет";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return isoToRu(raw);
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return fmt(Math.round(Number(raw)));
+  return raw.length > 90 ? `${raw.slice(0, 90)}…` : raw;
+}
+
+// Одна строка журнала изменений, готовая к показу.
+function describeChange(row, { nameOf } = {}) {
+  const entity = CHANGE_ENTITIES[row?.entity] || row?.entity || "Запись";
+  if (row?.action === "insert") return { entity, title: "создано", before: null, after: null };
+  if (row?.action === "delete") return { entity, title: "удалено", before: null, after: null };
+  const field = CHANGE_FIELDS[row?.field] || row?.field || "поле";
+  return {
+    entity,
+    title: field,
+    before: describeChangeValue(row?.field, row?.before, nameOf),
+    after: describeChangeValue(row?.field, row?.after, nameOf),
+  };
+}
+
 // Темы обучения менеджеров. Список закрытый намеренно: свободный ввод темы
 // превращает отчёт в кашу, где «Возражения» и «работа с возражениями» — две
 // разные строки, и сравнить людей между собой уже нельзя.
@@ -461,4 +520,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  TECH_DOC_KINDS, TRAINING_TOPICS, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  TECH_DOC_KINDS, TRAINING_TOPICS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
