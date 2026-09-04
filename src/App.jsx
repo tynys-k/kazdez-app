@@ -527,7 +527,15 @@ function Dashboard({ session, profile }) {
     { key: "safety_acknowledgements", label: "Инструктаж", run: () => supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }), set: setSafetyAcks },
     { key: "employee_events", label: "История сотрудников", run: () => supabase.from("employee_events").select("*").order("happened_on", { ascending: false }), set: setPeopleEvents },
     // Тревоги считает база по расписанию, приложение их только показывает.
-    { key: "alerts", label: "Тревоги", run: () => supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false }), set: setAlerts },
+    // Сканер правил запускается здесь же, перед чтением: фонового расписания
+    // намеренно нет — единственный читатель тревог это приложение, и заход
+    // человека полностью заменяет запуск по таймеру. База не работает
+    // впустую, пока никто не смотрит.
+    { key: "alerts", label: "Тревоги", set: setAlerts,
+      run: async () => {
+        if (canEditJobs) await supabase.rpc("kd_scan_alerts");
+        return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
+      } },
     { key: "clients", label: "Клиенты (карточки)", run: () => supabase.from("clients").select("*"), set: setClients },
     { key: "objects", label: "Объекты", run: () => supabase.from("objects").select("*").order("address"), set: setObjects },
     { key: "job_discounts", label: "Скидки", run: () => supabase.from("job_discounts").select("*").order("created_at", { ascending: false }), set: setDiscounts },

@@ -18,10 +18,15 @@ function readSources() {
   if (start < 0 || end < 0) throw new Error("реестр SOURCES не найден в App.jsx");
   const block = file.slice(start, end);
 
+  // Запись реестра может занимать несколько строк, поэтому режем по началу
+  // записи, а не по переводам строки.
+  // Запись реестра может занимать несколько строк, поэтому режем по началу
+  // записи, а не по переводам строки.
   return block
-    .split("\n")
-    .filter((line) => line.trim().startsWith("{ key:"))
-    .map((line) => {
+    .split("{ key: ")
+    .slice(1)
+    .map((chunk) => {
+      const line = `{ key: ${chunk}`;
       const key = /key: "([a-z_]+)"/.exec(line);
       const label = /label: "([^"]+)"/.exec(line);
       const table = /(?:from|fetchAllRows)\("([a-z_]+)"/.exec(line);
