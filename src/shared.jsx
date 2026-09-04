@@ -39,6 +39,17 @@ const EMPLOYEE_EVENTS = {
   other: "Другое",
 };
 
+// Почему клиента внесли в чёрный список. Список закрытый: «плохой клиент» в
+// свободном поле ничего не объясняет тому, кто читает это через полгода.
+const BLOCK_REASONS = {
+  no_pay: "Не оплатил выполненную работу",
+  refund: "Требовал возврат после работы",
+  aggressive: "Хамство или угрозы сотруднику",
+  fraud: "Обман: другой объём или площадь на месте",
+  free: "Требует всё бесплатно, торг до нуля",
+  other: "Другое",
+};
+
 // Причины скидки. Список закрытый: свободный ввод превращает контроль в
 // отписки вида «договорились», по которым ничего не разобрать и не сравнить.
 const DISCOUNT_REASONS = {
@@ -562,4 +573,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  TECH_DOC_KINDS, TRAINING_TOPICS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  TECH_DOC_KINDS, TRAINING_TOPICS, BLOCK_REASONS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
