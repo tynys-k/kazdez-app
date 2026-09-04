@@ -16,6 +16,7 @@ import {
   paperworkProgress, paperworkMoney, paperworkTotals,
   soldFromStock, chemicalSalesSummary,
   qualityByFactor,
+  debtAging, clientDebt,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1629,5 +1630,61 @@ describe("из-за чего возвращаемся", () => {
     const rows = qualityByFactor(many, { factorsOf: (j) => (j.id === "rare" ? ["hot_fog"] : ["sprayer"]) });
     // у редкого процент может быть выше, но выводов по нему не делают
     expect(rows[0].key).toBe("sprayer");
+  });
+});
+
+describe("долги клиентов", () => {
+  const today = "2026-09-04";
+  const jobs = [
+    { id: "j1", client_id: "c1", scheduled_date: "2026-07-01", pest: "Клопы" },
+    { id: "j2", client_id: "c1", scheduled_date: "2026-08-20", pest: "Тараканы" },
+    { id: "j3", client_id: "c2", scheduled_date: "2026-08-25", pest: "Мыши" },
+  ];
+  const debts = [
+    { id: "d1", job_id: "j1", amount: 30000, due_on: "2026-07-15" },
+    { id: "d2", job_id: "j2", amount: 20000, due_on: "2026-09-20" },
+    { id: "d3", job_id: "j3", amount: 15000 },
+    { id: "d4", job_id: "j1", amount: 99000, due_on: "2026-01-01", paid_on: "2026-01-05" },
+  ];
+
+  it("возраст считается от обещанной даты, а не от даты работы", () => {
+    const a = debtAging(debts, { jobs, todayIso: today });
+    const d1 = a.rows.find((r) => r.debt.id === "d1");
+    expect(d1.overdue).toBe(51);
+    expect(d1.bucket).toBe("over30");
+  });
+
+  it("обещал через месяц — ещё не должник", () => {
+    const a = debtAging(debts, { jobs, todayIso: today });
+    expect(a.rows.find((r) => r.debt.id === "d2").bucket).toBe("future");
+    expect(a.future).toBe(20000);
+  });
+
+  it("долг без срока просрочен сразу", () => {
+    // обещание без даты — это не обещание, тихо висеть оно не должно
+    const a = debtAging(debts, { jobs, todayIso: today });
+    expect(a.rows.find((r) => r.debt.id === "d3").bucket).toBe("over30");
+  });
+
+  it("закрытые долги в дебиторку не идут", () => {
+    const a = debtAging(debts, { jobs, todayIso: today });
+    expect(a.rows.map((r) => r.debt.id)).not.toContain("d4");
+    expect(a.total).toBe(65000);
+  });
+
+  it("просроченное считается отдельно от будущего", () => {
+    const a = debtAging(debts, { jobs, todayIso: today });
+    expect(a.overdue).toBe(45000);
+  });
+
+  it("самые старые сверху", () => {
+    const a = debtAging(debts, { jobs, todayIso: today });
+    expect(a.rows[0].debt.id).toBe("d3"); // без срока — самый горящий
+  });
+
+  it("долг клиента складывается по всем его заявкам", () => {
+    const key = (p) => String(p || "").replace(/\D/g, "").slice(-10);
+    expect(clientDebt("id:c1", debts, jobs, key)).toBe(50000);
+    expect(clientDebt("id:c2", debts, jobs, key)).toBe(15000);
   });
 });

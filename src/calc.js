@@ -1341,6 +1341,64 @@ export function dayLoad(jobsOfDay = [], durations = null, { workdayMinutes = WOR
   };
 }
 
+// --- долги клиентов ------------------------------------------------------
+
+// Дебиторка с разбивкой по возрасту долга.
+//
+// Возраст считается от обещанной даты, а не от даты работы: клиент, который
+// обещал заплатить через месяц, ещё не должник. А тот, кто обещал вчера,
+// уже да — и разница между ними принципиальная.
+//
+// Долг без срока считаем просроченным сразу: обещание без даты — это не
+// обещание, и висеть тихо оно не должно.
+export function debtAging(debts = [], { jobs = [], todayIso } = {}) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const jobById = new Map(jobs.map((j) => [String(j.id), j]));
+  const days = (iso) => Math.round((new Date(`${today}T00:00:00`) - new Date(`${String(iso).slice(0, 10)}T00:00:00`)) / 86400000);
+
+  const rows = debts
+    .filter((d) => !d.paid_on)
+    .map((d) => {
+      const overdue = d.due_on ? days(d.due_on) : Infinity;
+      return {
+        debt: d,
+        job: jobById.get(String(d.job_id)) || null,
+        amount: Number(d.amount) || 0,
+        overdue: Number.isFinite(overdue) ? overdue : null,
+        bucket: !d.due_on || overdue > 30 ? "over30"
+          : overdue > 14 ? "over14"
+          : overdue > 0 ? "over0"
+          : "future",
+      };
+    })
+    .sort((a, b) => (b.overdue ?? 1e9) - (a.overdue ?? 1e9));
+
+  const sum = (b) => rows.filter((r) => r.bucket === b).reduce((s, r) => s + r.amount, 0);
+  return {
+    rows,
+    total: rows.reduce((s, r) => s + r.amount, 0),
+    future: sum("future"),
+    over0: sum("over0"),
+    over14: sum("over14"),
+    over30: sum("over30"),
+    // Просроченное — то, ради чего вообще смотрят в этот отчёт.
+    overdue: sum("over0") + sum("over14") + sum("over30"),
+  };
+}
+
+// Сколько должен конкретный клиент по всем его заявкам. Нужно там, где
+// решают, брать ли следующий заказ.
+export function clientDebt(clientKey, debts = [], jobs = [], phoneKeyOf) {
+  const jobById = new Map(jobs.map((j) => [String(j.id), j]));
+  return debts
+    .filter((d) => !d.paid_on)
+    .filter((d) => {
+      const job = jobById.get(String(d.job_id));
+      return job && clientKeyOf(job, phoneKeyOf) === clientKey;
+    })
+    .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+}
+
 // --- контроль скидок -----------------------------------------------------
 
 // Насколько отпустили дешевле прайса.
