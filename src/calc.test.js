@@ -15,6 +15,7 @@ import {
   objectSummary, clientKeyOf,
   paperworkProgress, paperworkMoney, paperworkTotals,
   soldFromStock, chemicalSalesSummary,
+  qualityByFactor,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1578,5 +1579,55 @@ describe("продажа препаратов партнёрам", () => {
   it("оплаченные в долг не идут", () => {
     const paid = [{ partner_id: "p1", chemical_id: "c1", amount: 1, total: 50000, sold_on: "2026-08-01", paid_on: "2026-08-02" }];
     expect(chemicalSalesSummary(paid).unpaid).toBe(0);
+  });
+});
+
+describe("из-за чего возвращаемся", () => {
+  const jobs = [
+    { id: "a", status: "done", scheduled_date: "2026-08-01" },
+    { id: "b", status: "done", scheduled_date: "2026-08-02" },
+    { id: "c", status: "done", scheduled_date: "2026-08-03" },
+    // возврат по заявке «a»
+    { id: "r1", status: "done", scheduled_date: "2026-08-20", repeat_of: "a" },
+  ];
+  const equip = { a: ["cold_fog"], b: ["cold_fog"], c: ["hot_fog"] };
+  const by = (j) => (equip[j.id] || []);
+
+  it("возврат считается по исходной заявке, а не по повторной", () => {
+    const rows = qualityByFactor(jobs, { factorsOf: by });
+    const cold = rows.find((r) => r.key === "cold_fog");
+    expect(cold).toMatchObject({ jobs: 2, returns: 1, rate: 50 });
+  });
+
+  it("повторные заявки сами в статистику не идут", () => {
+    // иначе оборудование повторного выезда портило бы картину дважды
+    const rows = qualityByFactor(jobs, { factorsOf: (j) => (j.repeat_of ? ["cold_fog"] : by(j)) });
+    expect(rows.find((r) => r.key === "cold_fog").jobs).toBe(2);
+  });
+
+  it("оборудование без возвратов показывает ноль, а не исчезает", () => {
+    const rows = qualityByFactor(jobs, { factorsOf: by });
+    expect(rows.find((r) => r.key === "hot_fog")).toMatchObject({ jobs: 1, returns: 0, rate: 0 });
+  });
+
+  it("на одной заявке несколько единиц техники считаются каждой", () => {
+    const mixed = [{ id: "m", status: "done", scheduled_date: "2026-08-01" }];
+    const rows = qualityByFactor(mixed, { factorsOf: () => ["cold_fog", "sprayer"] });
+    expect(rows.map((r) => r.key).sort()).toEqual(["cold_fog", "sprayer"]);
+  });
+
+  it("повтор одного кода дважды на заявке не удваивает счёт", () => {
+    const one = [{ id: "m", status: "done", scheduled_date: "2026-08-01" }];
+    const rows = qualityByFactor(one, { factorsOf: () => ["sprayer", "sprayer"] });
+    expect(rows[0].jobs).toBe(1);
+  });
+
+  it("надёжные данные идут выше редких", () => {
+    const many = [];
+    for (let i = 0; i < 6; i += 1) many.push({ id: `x${i}`, status: "done", scheduled_date: "2026-08-01" });
+    many.push({ id: "rare", status: "done", scheduled_date: "2026-08-02" });
+    const rows = qualityByFactor(many, { factorsOf: (j) => (j.id === "rare" ? ["hot_fog"] : ["sprayer"]) });
+    // у редкого процент может быть выше, но выводов по нему не делают
+    expect(rows[0].key).toBe("sprayer");
   });
 });

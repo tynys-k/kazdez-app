@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
-import { PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -664,6 +664,8 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
   const [docNeeded, setDocNeeded] = useState(!!draft.docNeeded); const [avr, setAvr] = useState(!!draft.avr); const [dogovor, setDogovor] = useState(!!draft.dogovor); const [docNote, setDocNote] = useState(draft.docNote || "");
   const [saving, setSaving] = useState(false);
   const [offlineSaved, setOfflineSaved] = useState(false);
+  const [equipment, setEquipment] = useState(draft.equipment || []);
+  const [moreEquip, setMoreEquip] = useState(() => (draft.equipment || []).some((c) => !WORK_EQUIPMENT.find((e) => e.code === c)?.common));
   const [discountReason, setDiscountReason] = useState(draft.discountReason || "");
   const [discountNote, setDiscountNote] = useState(draft.discountNote || "");
   const total = (Number(cash) || 0) + (Number(qr) || 0) + (Number(transfer) || 0);
@@ -673,8 +675,21 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
   const gap = quoted > 0 && total > 0 ? Math.round((total - quoted) / quoted * 100) : null;
   const needsReason = gap !== null && gap <= -Math.abs(discountThreshold);
   const reasonMissing = needsReason && (!discountReason || (discountReason === "other" && !discountNote.trim()));
+  // Без отметки об оборудовании отчёт не сохранится: ради этих данных всё и
+  // затевалось, а «заполню потом» не наступает никогда. Отказаться можно
+  // честно — есть вариант «без оборудования».
+  const equipMissing = equipment.length === 0;
+  const toggleEquip = (code) => {
+    const item = WORK_EQUIPMENT.find((e) => e.code === code);
+    setEquipment((prev) => {
+      if (prev.includes(code)) return prev.filter((c) => c !== code);
+      // «Без оборудования» несовместимо с остальным в обе стороны.
+      if (item?.exclusive) return [code];
+      return [...prev.filter((c) => !WORK_EQUIPMENT.find((e) => e.code === c)?.exclusive), code];
+    });
+  };
   useEffect(() => {
-    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, discountReason, discountNote, savedAt: new Date().toISOString() }));
+    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, discountReason, discountNote, savedAt: new Date().toISOString() }));
   }, [draftKey, cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote]);
   const setChem = (i, k) => (e) => { const n = chems.slice(); n[i] = { ...n[i], [k]: e.target.value }; setChems(n); };
   function methodLabel() {
@@ -693,19 +708,39 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
       const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
       return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
     });
-    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "" }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
+    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, equipment, discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "" }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
     if (ok !== false) localStorage.removeItem(draftKey);
     setSaving(false);
   }
   return (
     <ModalShell title="Отчёт по заявке" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={saving || reasonMissing} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
+      <button className="kd-btn primary" disabled={saving || reasonMissing || equipMissing} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
     </>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
       <PartnerOrigin name={partnerName || job.partner_name} />
       {!navigator.onLine && <div className="kd-offline-draft"><Info size={17} /><div><strong>Нет связи</strong><span>Заполняйте отчёт — черновик сохраняется на этом устройстве. Отправьте его после восстановления интернета.</span></div></div>}
       {offlineSaved && <div className="kd-allgood"><CheckCircle2 size={18} />Черновик сохранён на устройстве</div>}
+
+      <div className="kd-section" style={{ marginTop: 0 }}>Чем работали</div>
+      <div className="kd-muted" style={{ marginBottom: 8 }}>
+        Можно отметить несколько. Это нужно, чтобы понять, из-за чего клиенты вызывают по гарантии — техника, препарат или что-то ещё.
+      </div>
+      <div className="kd-equiplist">
+        {WORK_EQUIPMENT.filter((e) => e.common || moreEquip || equipment.includes(e.code)).map((e) => (
+          <button key={e.code} type="button"
+            className={`kd-equipchip ${equipment.includes(e.code) ? "on" : ""}`}
+            onClick={() => toggleEquip(e.code)}>
+            {e.label}
+          </button>
+        ))}
+        {!moreEquip && (
+          <button type="button" className="kd-equipchip more" onClick={() => setMoreEquip(true)}>
+            Ещё оборудование
+          </button>
+        )}
+      </div>
+      {equipMissing && <div className="kd-hint" style={{ marginBottom: 12 }}>Отметьте, чем работали. Если оборудование не использовали — так и выберите.</div>}
 
       {quoted > 0 && (
         <div className="kd-row" style={{ marginBottom: 10 }}>

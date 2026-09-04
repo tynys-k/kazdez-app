@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
@@ -308,6 +308,7 @@ function Dashboard({ session, profile }) {
   const [alerts, setAlerts] = useState([]);
   const [paperwork, setPaperwork] = useState([]);
   const [chemSales, setChemSales] = useState([]);
+  const [jobEquipment, setJobEquipment] = useState([]);
   const [paperworkJobs, setPaperworkJobs] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -539,6 +540,7 @@ function Dashboard({ session, profile }) {
         if (canEditJobs) await supabase.rpc("kd_scan_alerts");
         return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
       } },
+    { key: "job_equipment", label: "Оборудование на заявках", run: () => supabase.from("job_equipment").select("*"), set: setJobEquipment },
     { key: "chemical_sales", label: "Продажа препаратов", run: () => supabase.from("chemical_sales").select("*").order("sold_on", { ascending: false }), set: setChemSales },
     { key: "paperwork", label: "Проведение документов", run: () => supabase.from("paperwork").select("*").order("created_at", { ascending: false }), set: setPaperwork },
     { key: "paperwork_jobs", label: "Заявки в комплектах", run: () => supabase.from("paperwork_jobs").select("*"), set: setPaperworkJobs },
@@ -646,7 +648,7 @@ function Dashboard({ session, profile }) {
   // обслуживания по договору и справочники, которые пополняются на лету.
   const reloadJobs = () => load([
     "jobs", "job_proofs", "job_helpers", "job_discounts",
-    "client_followups", "quality_checks", "service_contracts",
+    "client_followups", "quality_checks", "service_contracts", "job_equipment",
     "client_sources", "pest_types", "objects", "clients",
   ]);
   const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
@@ -1249,6 +1251,16 @@ function Dashboard({ session, profile }) {
     });
     if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); reloadJobs(); return false; }
     await recordClientEvent(job, "done", "Работа выполнена", `Оплата: ${fmt((Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0))} ₸`);
+    // Оборудование пишется отдельной записью по той же причине, что и скидка:
+    // отчёт уходит защищённой функцией, куда поля не добавить, а писать в
+    // заявку напрямую исполнителю запрещено политикой.
+    if (Array.isArray(report.equipment) && report.equipment.length) {
+      const { error: eqError } = await supabase.from("job_equipment").upsert({
+        job_id: job.id, codes: report.equipment,
+        created_by: session.user.id, updated_at: new Date().toISOString(),
+      }, { onConflict: "job_id" });
+      if (eqError) showToast("Отчёт сохранён, но оборудование не записалось: " + eqError.message);
+    }
     // Причина скидки пишется отдельной записью: сумма уходит защищённой
     // функцией, а причину указывает тот, кто скидку дал.
     if (report.discountReason) {
@@ -4353,6 +4365,60 @@ function Dashboard({ session, profile }) {
                       </div>
                     ))}
                     {rows.length > 25 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 25 из {rows.length} — с наибольшим отклонением.</div>}
+                  </>
+                );
+              })()}
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Из-за чего возвращаемся · {range.label}</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>
+                Доля заявок, после которых пришлось выехать по гарантии, в разрезе оборудования и препаратов.
+                Возврат считается по исходной заявке: он следствие того, чем работали в первый раз.
+              </div>
+              {(() => {
+                const equipByJob = new Map(jobEquipment.map((e) => [String(e.job_id), e.codes || []]));
+                const byEquip = calc.qualityByFactor(jobs, {
+                  inPeriod: inPeriodIso,
+                  factorsOf: (j) => (equipByJob.get(String(j.id)) || []).map((c) => `equip:${c}`),
+                });
+                const byChem = calc.qualityByFactor(jobs, {
+                  inPeriod: inPeriodIso,
+                  factorsOf: (j) => (j.chemicals || []).map((l) => {
+                    const chem = calc.lineChem(l, chemicals);
+                    return chem ? `chem:${chem.id}` : null;
+                  }),
+                });
+                const nameOf = (key) => (key.startsWith("equip:")
+                  ? equipmentLabel(key.slice(6))
+                  : chemById(key.slice(5))?.name || "препарат");
+                const rows = [...byEquip, ...byChem];
+                if (rows.length === 0) {
+                  return <div className="kd-muted">Данных пока нет. Оборудование отмечается в отчёте исполнителя — цифры появятся, когда накопятся отчёты.</div>;
+                }
+                const table = (title, list) => (
+                  <>
+                    <div className="kd-section" style={{ marginTop: 10 }}>{title}</div>
+                    {list.length === 0 && <div className="kd-muted">Пока нечего показать.</div>}
+                    {list.map((r) => (
+                      <div className="kd-ledgerrow" key={r.key} style={{ gridTemplateColumns: "1.8fr 1fr 1fr 1fr" }}>
+                        <span className="kd-ledgername">{nameOf(r.key)}</span>
+                        <span className="kd-muted">{r.jobs} заявок</span>
+                        <span>{r.returns} возвратов</span>
+                        <strong style={{ color: r.jobs < 5 ? "var(--muted)" : r.rate >= 15 ? "var(--rust)" : r.rate >= 8 ? "var(--amber)" : "var(--primary)" }}>
+                          {r.rate}%{r.jobs < 5 ? " ·  мало данных" : ""}
+                        </strong>
+                      </div>
+                    ))}
+                  </>
+                );
+                return (
+                  <>
+                    {table("По оборудованию", byEquip)}
+                    {table("По препаратам", byChem)}
+                    <div className="kd-muted" style={{ marginTop: 8 }}>
+                      Там, где заявок меньше пяти, процент помечен как ненадёжный: три заявки с одним возвратом дают «33%» и не значат ничего.
+                    </div>
                   </>
                 );
               })()}
