@@ -304,6 +304,7 @@ function Dashboard({ session, profile }) {
   const [peopleEvents, setPeopleEvents] = useState([]);
   const [discounts, setDiscounts] = useState([]);
   const [objects, setObjects] = useState([]);
+  const [clients, setClients] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -524,6 +525,7 @@ function Dashboard({ session, profile }) {
     { key: "training_records", label: "Обучение", run: () => supabase.from("training_records").select("*").order("passed_on", { ascending: false }), set: setTraining },
     { key: "safety_acknowledgements", label: "Инструктаж", run: () => supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }), set: setSafetyAcks },
     { key: "employee_events", label: "История сотрудников", run: () => supabase.from("employee_events").select("*").order("happened_on", { ascending: false }), set: setPeopleEvents },
+    { key: "clients", label: "Клиенты (карточки)", run: () => supabase.from("clients").select("*"), set: setClients },
     { key: "objects", label: "Объекты", run: () => supabase.from("objects").select("*").order("address"), set: setObjects },
     { key: "job_discounts", label: "Скидки", run: () => supabase.from("job_discounts").select("*").order("created_at", { ascending: false }), set: setDiscounts },
   ];
@@ -628,7 +630,7 @@ function Dashboard({ session, profile }) {
   const reloadJobs = () => load([
     "jobs", "job_proofs", "job_helpers", "job_discounts",
     "client_followups", "quality_checks", "service_contracts",
-    "client_sources", "pest_types", "objects",
+    "client_sources", "pest_types", "objects", "clients",
   ]);
   const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
   const reloadStock = () => load(["chemicals", "handouts", "inventory_adjustments", "chemical_purchases"]);
@@ -2416,7 +2418,21 @@ function Dashboard({ session, profile }) {
   });
   // Ушедшие клиенты: обработались и не появлялись дольше выбранного срока.
   // Считается по ключу телефона, поэтому «+7 701 …» и «8 701 …» — один человек.
-  const dormant = calc.dormantClients(jobs, { months: dormantMonths, phoneKeyOf: phoneKey });
+  // Имя берём из карточки клиента, а не из последней заявки: в карточке его
+  // правят руками, а в заявке оно могло быть записано как придётся.
+  const clientCards = (() => {
+    const map = new Map();
+    for (const c of clients) {
+      map.set(`id:${c.id}`, c);
+      if (c.phone_key) map.set(`tel:${c.phone_key}`, c);
+    }
+    return map;
+  })();
+  const dormant = calc.dormantClients(jobs, { months: dormantMonths, phoneKeyOf: phoneKey })
+    .map((row) => {
+      const card = clientCards.get(row.key);
+      return card ? { ...row, name: card.name || row.name, phone: card.phone || row.phone } : row;
+    });
   // Порог, ниже которого скидка требует объяснения. Настраивается: у разных
   // компаний разная норма торга.
   const discountThreshold = Number(settings.discount_threshold_pct) || 20;

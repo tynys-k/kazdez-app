@@ -12,7 +12,7 @@ import {
   trainingSummary, trainingDue,
   lastAcknowledgement, notAcknowledged, employeeHistory,
   discountCheck, discountReport,
-  objectSummary,
+  objectSummary, clientKeyOf,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1414,5 +1414,66 @@ describe("объект обработки", () => {
     expect(sum.done).toBe(1);
     expect(sum.recent).toBe(0);
     expect(sum.persistent).toBe(false);
+  });
+});
+
+describe("кто считается одним клиентом", () => {
+  // как настоящий phoneKey: короткий номер ключа не даёт
+  const key = (p) => { const d = String(p || "").replace(/\D/g, ""); return d.length >= 10 ? d.slice(-10) : ""; };
+
+  it("связь из базы важнее телефона", () => {
+    // человек сменил номер — история должна остаться одной
+    const a = { client_id: "c1", client_phone: "+7 701 111 1111" };
+    const b = { client_id: "c1", client_phone: "+7 707 999 9999" };
+    expect(clientKeyOf(a, key)).toBe(clientKeyOf(b, key));
+  });
+
+  it("один номер у разных клиентов не склеивает их", () => {
+    const a = { client_id: "c1", client_phone: "+7 701 111 1111" };
+    const b = { client_id: "c2", client_phone: "+7 701 111 1111" };
+    expect(clientKeyOf(a, key)).not.toBe(clientKeyOf(b, key));
+  });
+
+  it("у старых заявок без связи работает телефон", () => {
+    const a = { client_phone: "+7 701 111 1111" };
+    const b = { client_phone: "8 701 111 1111" };
+    expect(clientKeyOf(a, key)).toBe(clientKeyOf(b, key));
+    expect(clientKeyOf(a, key)).toContain("tel:");
+  });
+
+  it("заявка без клиента и без номера ключа не даёт", () => {
+    expect(clientKeyOf({}, key)).toBe("");
+    expect(clientKeyOf({ client_phone: "123" }, key)).toBe("");
+  });
+
+  it("ключи по связи и по телефону не пересекаются", () => {
+    // иначе клиент с id «7013821617» слился бы с чужим номером
+    expect(clientKeyOf({ client_id: "7013821617" }, key)).not.toBe(clientKeyOf({ client_phone: "+7 701 382 1617" }, key));
+  });
+});
+
+describe("возвращаемость и ушедшие считаются по клиенту", () => {
+  const key = (p) => String(p || "").replace(/\D/g, "").slice(-10);
+
+  it("две заявки одного клиента с разных номеров — один клиент", () => {
+    const jobs = [
+      { client_id: "c1", client_phone: "+7 701 111 1111", status: "done", scheduled_date: "2026-01-10", report_paid: 20000 },
+      { client_id: "c1", client_phone: "+7 707 222 2222", status: "done", scheduled_date: "2026-05-10", report_paid: 30000 },
+    ];
+    const st = clientStats(jobs, { phoneKeyOf: key });
+    expect(st.clients).toBe(1);
+    expect(st.returned).toBe(1);
+    expect(st.revenue).toBe(50000);
+  });
+
+  it("ушедшим считается клиент, а не номер", () => {
+    const jobs = [
+      { client_id: "c1", client_phone: "+7 701 111 1111", status: "done", scheduled_date: "2024-01-10", report_paid: 20000 },
+      { client_id: "c1", client_phone: "+7 707 222 2222", status: "done", scheduled_date: "2024-06-10", report_paid: 30000 },
+    ];
+    const rows = dormantClients(jobs, { months: 12, todayIso: "2026-09-04", phoneKeyOf: key });
+    expect(rows.length).toBe(1);
+    expect(rows[0].revenue).toBe(50000);
+    expect(rows[0].lastDone).toBe("2024-06-10");
   });
 });

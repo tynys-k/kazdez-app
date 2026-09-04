@@ -877,8 +877,13 @@ function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const digits = (job.client_phone || "").replace(/\D/g, "");
+  // История клиента собирается по связи из базы, а не по телефону: человек
+  // мог сменить номер, и по телефону его история распалась бы надвое.
+  // Телефон остаётся запасным вариантом для старых заявок без связи.
   const list = jobs
-    .filter((j) => samePhone(j.client_phone, job.client_phone))
+    .filter((j) => (job.client_id
+      ? String(j.client_id) === String(job.client_id)
+      : samePhone(j.client_phone, job.client_phone)))
     .sort((a, b) => new Date(b.scheduled_date || b.created_at || 0) - new Date(a.scheduled_date || a.created_at || 0));
   const doneCount = list.filter((j) => j.status === "done").length;
   const revenue = list.filter((j) => j.status === "done").reduce((sum, j) => sum + (Number(j.report_paid) || 0), 0);
