@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { DISCOUNT_REASONS, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
@@ -294,6 +294,7 @@ function Dashboard({ session, profile }) {
   const [cashAdjustments, setCashAdjustments] = useState([]);
   const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
   const [clientErrors, setClientErrors] = useState([]);
+  const [changeLog, setChangeLog] = useState([]);
   const [jobHelpers, setJobHelpers] = useState([]);
   const [priceList, setPriceList] = useState([]);
   const [chemPurchases, setChemPurchases] = useState([]);
@@ -457,14 +458,16 @@ function Dashboard({ session, profile }) {
   async function loadJournalData(force = false) {
     if (journalLoaded && !force) return;
     setJournalLoaded(true);
-    const [a, t, e] = await Promise.all([
+    const [a, t, e, c] = await Promise.all([
       supabase.from("audit_log").select("*").order("ts", { ascending: false }).limit(500),
       supabase.from("trash").select("*").order("deleted_at", { ascending: false }).limit(300),
       supabase.from("client_errors").select("*").order("occurred_at", { ascending: false }).limit(200),
+      supabase.from("change_log").select("*").order("at", { ascending: false }).limit(400),
     ]);
     if (a.data) setAudit(a.data);
     if (t.data) setTrash(t.data);
     if (e.data) setClientErrors(e.data);
+    if (c.data) setChangeLog(c.data);
   }
   async function load() {
     setLoading(true);
@@ -4915,6 +4918,40 @@ function Dashboard({ session, profile }) {
         })()}
 
         {!loading && tab === "journal" && isAdmin && <ErrorsPanel errors={clientErrors} />}
+
+        {!loading && tab === "journal" && isAdmin && (
+          <div className="kd-card" style={{ marginBottom: 14 }}>
+            <div className="kd-section" style={{ marginTop: 0 }}>Что именно изменилось{changeLog.length ? ` · ${changeLog.length}` : ""}</div>
+            <div className="kd-muted" style={{ marginBottom: 10 }}>
+              Пишется в базе триггером, а не приложением: запись появляется при любом изменении, включая правку прямо в SQL Editor.
+              Отслеживаются суммы, статусы, исполнители, оклады, прайс и цены препаратов.
+            </div>
+            {changeLog.length === 0 && (
+              <div className="kd-muted">
+                Записей нет. Если раздел пуст сразу после установки — значит миграция change_log ещё не выполнена.
+              </div>
+            )}
+            {changeLog.slice(0, 120).map((c) => {
+              const d = describeChange(c, { nameOf: (id) => techById(id)?.full_name || personName(id) || accountById(id)?.name });
+              return (
+                <div className="kd-ledgerrow" key={c.id} style={{ gridTemplateColumns: "140px 150px 1fr", alignItems: "start" }}>
+                  <span className="kd-muted" style={{ textAlign: "left" }}>{fmtTs(c.at)}<br />{c.actor_name || "—"}</span>
+                  <span style={{ textAlign: "left" }}>{d.entity}<em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{d.title}</em></span>
+                  <span style={{ textAlign: "left" }}>
+                    {d.before === null
+                      ? <em className="kd-muted" style={{ fontStyle: "normal" }}>{c.action === "insert" ? "запись создана" : "запись удалена"}</em>
+                      : <>
+                          <span className="kd-muted" style={{ textDecoration: "line-through" }}>{d.before}</span>
+                          {" → "}
+                          <strong>{d.after}</strong>
+                        </>}
+                  </span>
+                </div>
+              );
+            })}
+            {changeLog.length > 120 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны последние 120 из {changeLog.length}.</div>}
+          </div>
+        )}
 
         {!loading && tab === "journal" && (
           <div className="kd-card">
