@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor } from "./calc";
-import { OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -55,7 +55,7 @@ function PartnerOrigin({ name, compact = false }) {
   );
 }
 
-function JobCard({ job, onObject, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete }) {
+function JobCard({ job, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete }) {
   const st = STATUS[job.status] || STATUS.new;
   const stageKey = jobWorkStage(job);
   const stage = WORK_STAGE[stageKey];
@@ -82,6 +82,7 @@ function JobCard({ job, onObject, isAdmin, assignedName, partnerName, partnerRep
         {(job.price_options || []).map((p, i) => (<span className="kd-price" key={i}>{fmt(p.amount)} ₸{p.label ? <em> · {p.label}</em> : null}</span>))}
         {job.source && <span className="kd-srctag">{job.source}</span>}
         {job.docs_needed && <span className="kd-doctag">{job.docs_done ? "Документы готовы" : "Нужны документы"}</span>}
+        {blocked && <span className="kd-lowtag" title={blocked.blocked_reason || ""}>клиент в чёрном списке</span>}
         {job.repeat_state === "on_repeat" && <span className="kd-repeattag">на повторе</span>}
         {job.repeat_state === "finished" && <span className="kd-muted">завершена</span>}
         {needsFollowup && <span className="kd-followuptag">💬 пора связаться · {daysSince(job.reported_at)} дн. после первичной</span>}
@@ -315,7 +316,7 @@ function jobToForm(job) {
 const JOB_DRAFT_KEY = "kazdez-new-job-draft-v2";
 const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
 
-function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, onClose, onSave }) {
+function JobFormModal({ initial, title, submitLabel, keepStatus, findBlocked, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, onClose, onSave }) {
   const draftRef = useRef(undefined);
   if (draftRef.current === undefined) {
     try { draftRef.current = !initial ? JSON.parse(localStorage.getItem(JOB_DRAFT_KEY) || "null") : null; }
@@ -412,6 +413,12 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, partners = [], 
       {draftRestored && <div className="kd-draftnotice"><span>Черновик восстановлен автоматически</span><button type="button" onClick={clearDraft}>Очистить</button></div>}
       <div className="kd-grid2">
         <Field label="Телефон клиента"><input value={f.client_phone} onChange={set("client_phone")} placeholder="+7 701 ..." inputMode="tel" autoFocus={!initial} /></Field>
+        {typeof findBlocked === "function" && findBlocked(f.client_phone) && (
+          <div className="kd-err" style={{ marginTop: -6, marginBottom: 10 }}>
+            Этот клиент в чёрном списке: {findBlocked(f.client_phone).blocked_reason || "причина не указана"}.
+            Оформить заявку можно — решение за вами.
+          </div>
+        )}
         <Field label="Имя контактного лица"><input value={f.contact_name} onChange={set("contact_name")} placeholder="Айгуль" /></Field>
       </div>
       {latestClient && <div className={`kd-clientfound ${activeGuarantee ? "warning" : ""}`}>
@@ -872,7 +879,7 @@ function ViewModal({ job, partnerName, chemicals, performedBy, chemicalsUnavaila
   );
 }
 
-function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts = [], events = [], feedback = [], profiles = [], canPlanFollowup = false, partnerNameOf = () => "", onClose, onOpen, onAddNote, onPlanFollowup, onCopyPublicLink }) {
+function HistoryModal({ job, blockedInfo, onBlock, jobs, followups = [], qualityChecks = [], contracts = [], events = [], feedback = [], profiles = [], canPlanFollowup = false, partnerNameOf = () => "", onClose, onOpen, onAddNote, onPlanFollowup, onCopyPublicLink }) {
   const [view, setView] = useState("overview");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -922,7 +929,19 @@ function HistoryModal({ job, jobs, followups = [], qualityChecks = [], contracts
   }
 
   return (
-    <ModalShell wide title={`Клиент 360° · ${job.contact_name || job.client_phone}`} onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
+    <ModalShell wide title={`Клиент 360° · ${job.contact_name || job.client_phone}`} onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>
+      {blockedInfo && (
+        <div className="kd-err" style={{ marginBottom: 12 }}>
+          Клиент в чёрном списке: {blockedInfo.blocked_reason || "причина не указана"}
+        </div>
+      )}
+      {onBlock && (
+        <div style={{ marginBottom: 12 }}>
+          <button className={blockedInfo ? "kd-btn ghost sm" : "kd-btn ghost danger sm"} onClick={onBlock}>
+            {blockedInfo ? "Убрать из чёрного списка" : "В чёрный список"}
+          </button>
+        </div>
+      )}Закрыть</button>}>
       <div className="kd-client360-head">
         <div><div className="kd-client360-name">{job.contact_name || "Клиент"}</div><a href={`tel:+${digits}`}>{job.client_phone}</a><span>{job.address}</span></div>
         <div className="kd-client360-actions">
@@ -1251,6 +1270,58 @@ function TrainingModal({ person, record = null, onClose, onSave }) {
       {badScore && <div className="kd-err" style={{ marginBottom: 10 }}>Балл должен быть числом от 0 до 100.</div>}
       {!next && <div className="kd-hint" style={{ marginBottom: 10 }}>Без даты перепроверки о теме не напомнят.</div>}
       <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="что разобрали, что осталось" /></Field>
+    </ModalShell>
+  );
+}
+
+function BlockClientModal({ client, onClose, onSave }) {
+  const blocked = !!client?.blocked;
+  const [reason, setReason] = useState(client?.blocked_reason?.split(" · ")[0] || "no_pay");
+  const [note, setNote] = useState(client?.blocked_reason?.split(" · ").slice(1).join(" · ") || "");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function save(unblock) {
+    setSaving(true); setProblem("");
+    const failed = await onSave(client, unblock
+      ? { blocked: false, blocked_reason: null, blocked_at: null }
+      : { blocked: true, blocked_reason: [reason, note.trim()].filter(Boolean).join(" · ") });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={blocked ? "Клиент в чёрном списке" : "В чёрный список"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      {blocked
+        ? <button className="kd-btn primary" disabled={saving} onClick={() => save(true)}>{saving ? "…" : "Убрать из списка"}</button>
+        : <button className="kd-btn ghost danger" disabled={saving} onClick={() => save(false)}>{saving ? "…" : "Внести в список"}</button>}
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <div className="kd-muted" style={{ marginBottom: 12 }}>
+        {client?.name || client?.phone || "Клиент"}
+        {blocked && client?.blocked_at ? ` · в списке с ${isoToRu(String(client.blocked_at).slice(0, 10))}` : ""}
+      </div>
+      {blocked ? (
+        <>
+          <div className="kd-row"><span>Причина</span><strong>{client.blocked_reason || "не указана"}</strong></div>
+          <div className="kd-muted" style={{ marginTop: 10 }}>
+            Заявки на такого клиента оформлять по-прежнему можно — система только предупреждает, а решение остаётся за человеком.
+          </div>
+        </>
+      ) : (
+        <>
+          <Field label="Причина">
+            <select value={reason} onChange={(e) => setReason(e.target.value)}>
+              {Object.entries(BLOCK_REASONS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </Field>
+          <Field label="Что именно произошло">
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="коротко: дата, сумма, чем закончилось" />
+          </Field>
+          <div className="kd-muted">
+            Это увидит любой, кто будет оформлять заявку на этот номер. Пишите так, чтобы через полгода было понятно без вас.
+          </div>
+        </>
+      )}
     </ModalShell>
   );
 }
@@ -3135,4 +3206,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
