@@ -14,7 +14,7 @@ import { PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addre
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -307,6 +307,7 @@ function Dashboard({ session, profile }) {
   const [clients, setClients] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [paperwork, setPaperwork] = useState([]);
+  const [chemSales, setChemSales] = useState([]);
   const [paperworkJobs, setPaperworkJobs] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -538,6 +539,7 @@ function Dashboard({ session, profile }) {
         if (canEditJobs) await supabase.rpc("kd_scan_alerts");
         return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
       } },
+    { key: "chemical_sales", label: "Продажа препаратов", run: () => supabase.from("chemical_sales").select("*").order("sold_on", { ascending: false }), set: setChemSales },
     { key: "paperwork", label: "Проведение документов", run: () => supabase.from("paperwork").select("*").order("created_at", { ascending: false }), set: setPaperwork },
     { key: "paperwork_jobs", label: "Заявки в комплектах", run: () => supabase.from("paperwork_jobs").select("*"), set: setPaperworkJobs },
     { key: "clients", label: "Клиенты (карточки)", run: () => supabase.from("clients").select("*"), set: setClients },
@@ -648,7 +650,7 @@ function Dashboard({ session, profile }) {
     "client_sources", "pest_types", "objects", "clients",
   ]);
   const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
-  const reloadStock = () => load(["chemicals", "handouts", "inventory_adjustments", "chemical_purchases"]);
+  const reloadStock = () => load(["chemicals", "handouts", "inventory_adjustments", "chemical_purchases", "chemical_sales"]);
   const reloadPeople = () => load(["profiles", "tech_documents", "training_records", "employee_events", "safety_acknowledgements", "tech_days_off"]);
 
   useEffect(() => { load(); }, []);
@@ -1044,6 +1046,52 @@ function Dashboard({ session, profile }) {
     }
     await logAction("Документы", `Расчёт: ${partnerById(row.partner_id)?.name || "партнёр"} · ${fmt(money.payout)} ₸ · ${form.method}${form.to ? ` · ${form.to}` : ""}`);
     setModal(null); showToast("Расчёт проведён"); load(["paperwork", "accounts", "money_moves"]); return null;
+  }
+
+  // Продажа препарата партнёру.
+  //
+  // Если забрали у дезинфектора — сразу снимаем препарат с его остатка
+  // корректировкой. Иначе у человека навсегда останется недостача, которую
+  // он не делал, а разбираться с ней будем на ревизии через месяц.
+  async function saveChemSale(payload) {
+    const { id, ...fields } = payload;
+    const res = id
+      ? await supabase.from("chemical_sales").update(fields).eq("id", id).select().single()
+      : await supabase.from("chemical_sales").insert({ ...fields, created_by: session.user.id }).select().single();
+    if (res.error) { showToast("Ошибка: " + res.error.message); return res.error.message; }
+
+    if (!id && payload.from_tech_id) {
+      const { error: adjError } = await supabase.from("inventory_adjustments").insert({
+        tech_id: payload.from_tech_id, chemical_id: payload.chemical_id,
+        amount_delta: -(Number(payload.amount) || 0), kind: "sold_partner",
+        event_date: payload.sold_on,
+        note: `Продан партнёру: ${partnerById(payload.partner_id)?.name || "партнёр"}`,
+        created_by: session.user.id,
+      });
+      if (adjError) showToast("Продажа записана, но остаток сотрудника не изменился: " + adjError.message);
+    }
+
+    await logAction("Склад", `Продажа партнёру: ${partnerById(payload.partner_id)?.name || "?"} · ${chemById(payload.chemical_id)?.name || "?"} · ${fmt(payload.total)} ₸`);
+    setModal(null); showToast("Сохранено"); reloadStock(); return null;
+  }
+
+  async function payChemSale(sale, accountId, paidOn) {
+    const { error } = await supabase.from("chemical_sales")
+      .update({ paid_on: paidOn, account_id: accountId || null }).eq("id", sale.id);
+    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+    if (accountId) {
+      const already = moves.some((m) => m.source === "chem_sale" && m.ref_id === sale.id);
+      if (!already) {
+        const { error: mError } = await supabase.from("money_moves").insert({
+          account_id: accountId, direction: "income", amount: Number(sale.total) || 0, move_date: paidOn,
+          note: `Оплата за препарат: ${partnerById(sale.partner_id)?.name || "партнёр"}`,
+          source: "chem_sale", ref_id: sale.id, created_by: session.user.id,
+        });
+        if (mError) showToast("Оплата отмечена, но по кассе не провелась: " + mError.message);
+      }
+    }
+    await logAction("Склад", `Оплата за препарат: ${partnerById(sale.partner_id)?.name || "?"} · ${fmt(sale.total)} ₸`);
+    setModal(null); showToast("Оплата проведена"); load(["chemical_sales", "accounts", "money_moves"]); return null;
   }
 
   async function savePaperwork(payload, jobIds = []) {
@@ -2501,7 +2549,10 @@ function Dashboard({ session, profile }) {
 
   const inventory = chemicals.map((c) => {
     const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => (x.chemical_id ? x.chemical_id === c.id : norm(x.name) === norm(c.name))).reduce((a, x) => a + lineAmount(x), 0), 0);
-    const remaining = (Number(c.purchased_ml) || 0) - used;
+    // Проданное партнёрам со склада тоже покидает склад, хотя ни в одной
+    // заявке не появляется.
+    const soldOff = calc.soldFromStock(c.id, chemSales);
+    const remaining = (Number(c.purchased_ml) || 0) - used - soldOff;
     // Прогноз считается по расходу за последние три месяца, а не за всю
     // историю: иначе препарат, полгода пролежавший без дела, выглядит
     // расходуемым по капле ровно перед сезоном.
@@ -5030,6 +5081,58 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "partners" && (
           <div className="kd-list">
+            {(() => {
+              const sum = calc.chemicalSalesSummary(chemSales, { inPeriod: () => true });
+              return (
+                <div className="kd-card">
+                  <div className="kd-tabbar" style={{ marginBottom: 10 }}>
+                    <div>
+                      <div className="kd-section" style={{ margin: 0 }}>Проданные препараты{chemSales.length ? ` · ${chemSales.length}` : ""}</div>
+                      <div className="kd-muted">
+                        Партнёр забрал препарат со склада или прямо у дезинфектора. Продажа снимает препарат с остатка того, у кого забрали.
+                      </div>
+                    </div>
+                    {canAccess("action.stock_edit") && <button className="kd-btn primary" onClick={() => setModal({ kind: "chemSale", sale: null })}><Plus size={15} />Продажа</button>}
+                  </div>
+
+                  {chemSales.length === 0 && <div className="kd-muted">Продаж пока не было.</div>}
+
+                  {chemSales.length > 0 && (
+                    <>
+                      <div className="kd-row">
+                        <span>Продано на</span>
+                        <span className="kd-twoval">
+                          {sum.unpaid > 0 && <em style={{ color: "var(--rust)" }}>не оплачено {fmt(sum.unpaid)} ₸</em>}
+                          <strong>{fmt(sum.revenue)} ₸</strong>
+                        </span>
+                      </div>
+                      {chemSales.slice(0, 30).map((sale) => (
+                        <div className="kd-ledgerrow" key={sale.id} style={{ gridTemplateColumns: "1.4fr 1.2fr 1fr auto" }}>
+                          <span className="kd-ledgername">
+                            {partnerById(sale.partner_id)?.name || "партнёр"}
+                            <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{isoToRu(sale.sold_on)}</em>
+                          </span>
+                          <span style={{ textAlign: "left" }}>
+                            {chemById(sale.chemical_id)?.name || "препарат"} · {fmtAmount(sale.amount, chemById(sale.chemical_id)?.unit_kind)}
+                            <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>
+                              {sale.from_tech_id ? `у ${techById(sale.from_tech_id)?.full_name || "сотрудника"}` : "со склада"}
+                            </em>
+                          </span>
+                          <span>
+                            {fmt(sale.total)} ₸
+                            <em style={{ display: "block", fontStyle: "normal", fontSize: 10.5, color: sale.paid_on ? "var(--primary)" : "var(--rust)" }}>
+                              {sale.paid_on ? `оплачено ${isoToRu(sale.paid_on)}` : "не оплачено"}
+                            </em>
+                          </span>
+                          <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "chemSale", sale })}>Открыть</button>
+                        </div>
+                      ))}
+                      {chemSales.length > 30 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 30 последних из {chemSales.length}.</div>}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
             {partners.length === 0 && <div className="kd-empty">Партнёров пока нет. Добавь через «+ Партнёр» — имя, долю в % и правило цены повтора.</div>}
             {partners.length > 0 && (
               <div className="kd-searchbar" style={{ marginBottom: 4 }}>
@@ -5295,6 +5398,16 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
+      {modal?.kind === "chemSale" && <ChemSaleModal sale={modal.sale} partners={partners} chemicals={chemicals} techs={techs} accounts={accounts}
+        techBalance={(techId, chemId) => {
+          const row = techLedger(techId).find((r) => String(r.chem.id) === String(chemId));
+          return row ? row.balance : 0;
+        }}
+        onClose={() => setModal(null)} onSave={saveChemSale}
+        onPay={(sale) => setModal({ kind: "chemSalePay", sale })} />}
+      {modal?.kind === "chemSalePay" && <ChemSalePayModal sale={modal.sale} accounts={accounts}
+        partnerName={partnerById(modal.sale.partner_id)?.name}
+        onClose={() => setModal({ kind: "chemSale", sale: modal.sale })} onSave={payChemSale} />}
       {modal?.kind === "paperwork" && <PaperworkModal row={modal.row} partners={partners} accounts={accounts} jobs={jobs} clients={clients}
         onClose={() => setModal(null)} onSave={savePaperwork}
         onSettle={(row, money) => setModal({ kind: "settle", row, money })} />}

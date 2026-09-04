@@ -1326,6 +1326,158 @@ function BlockClientModal({ client, onClose, onSave }) {
   );
 }
 
+function ChemSalePayModal({ sale, accounts = [], partnerName, onClose, onSave }) {
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+  const [paidOn, setPaidOn] = useState(new Date().toISOString().slice(0, 10));
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave(sale, accountId, paidOn);
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+  return (
+    <ModalShell title="Оплата за препарат" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Назад</button>
+      <button className="kd-btn primary" disabled={saving || !paidOn} onClick={save}>{saving ? "…" : "Провести"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <div className="kd-row" style={{ marginBottom: 12 }}>
+        <span>{partnerName || "Партнёр"}</span><strong>{fmt(sale.total)} ₸</strong>
+      </div>
+      <div className="kd-grid2">
+        <Field label="Дата оплаты"><input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} /></Field>
+        <Field label="На какой счёт">
+          <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <option value="">— не проводить по кассе —</option>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      {!accountId && <div className="kd-hint">Без счёта оплата останется отметкой и по кассе не пройдёт.</div>}
+    </ModalShell>
+  );
+}
+
+function ChemSaleModal({ sale, partners = [], chemicals = [], techs = [], accounts = [], techBalance, onClose, onSave, onPay }) {
+  const [partnerId, setPartnerId] = useState(sale?.partner_id || "");
+  const [chemId, setChemId] = useState(sale?.chemical_id || "");
+  const [fromTech, setFromTech] = useState(sale?.from_tech_id || "");
+  const [qty, setQty] = useState(sale ? String(sale.amount ?? "") : "");
+  const [unit, setUnit] = useState("big");
+  const [price, setPrice] = useState(sale?.unit_price != null ? String(sale.unit_price) : "");
+  const [soldOn, setSoldOn] = useState(sale?.sold_on || new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState(sale?.note || "");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const chem = chemicals.find((c) => c.id === chemId);
+  const u = chemUnit(chem?.unit_kind);
+  const factor = u.factor || 1000;
+  const base = unit === "big" ? (Number(qty) || 0) * factor : (Number(qty) || 0);
+  const total = Math.round((base / factor) * (Number(price) || 0));
+
+  // Сколько этого препарата сейчас числится у выбранного сотрудника: продать
+  // больше, чем у него есть, — верный способ получить недостачу на пустом месте.
+  const available = fromTech && chemId && typeof techBalance === "function" ? techBalance(fromTech, chemId) : null;
+  const tooMuch = available != null && base > available;
+
+  const ok = partnerId && chemId && base > 0 && !tooMuch;
+
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave({
+      id: sale?.id, partner_id: partnerId, chemical_id: chemId,
+      from_tech_id: fromTech || null, amount: base,
+      unit_price: Number(price) || 0, total, sold_on: soldOn,
+      note: note.trim() || null,
+    });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+
+  return (
+    <ModalShell title={sale ? "Продажа препарата" : "Продать препарат партнёру"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+
+      <div className="kd-grid2">
+        <Field label="Кому продали">
+          <select value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
+            <option value="">— партнёр —</option>
+            {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Дата"><input type="date" value={soldOn} onChange={(e) => setSoldOn(e.target.value)} /></Field>
+      </div>
+
+      <Field label="Препарат">
+        <select value={chemId} onChange={(e) => setChemId(e.target.value)}>
+          <option value="">— выбери препарат —</option>
+          {chemicals.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </Field>
+
+      <Field label="Откуда забрали">
+        <select value={fromTech} onChange={(e) => setFromTech(e.target.value)}>
+          <option value="">Со склада</option>
+          {techs.map((t) => <option key={t.id} value={t.id}>{t.full_name || "сотрудник"}</option>)}
+        </select>
+      </Field>
+      {fromTech && (
+        <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+          {available != null
+            ? `Сейчас у сотрудника ${fmtAmount(available, chem?.unit_kind)}. Продажа снимет препарат с его остатка — иначе недостача повиснет на нём.`
+            : "Продажа снимет препарат с остатка сотрудника."}
+        </div>
+      )}
+
+      <div className="kd-grid2">
+        <Field label={`Количество (${unit === "big" ? u.big : u.small})`}>
+          <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="1" />
+        </Field>
+        <Field label="Единица">
+          <select value={unit} onChange={(e) => setUnit(e.target.value)}>
+            <option value="big">{u.big}</option>
+            <option value="small">{u.small}</option>
+          </select>
+        </Field>
+      </div>
+      {tooMuch && (
+        <div className="kd-err" style={{ marginBottom: 10 }}>
+          У сотрудника столько нет: числится {fmtAmount(available, chem?.unit_kind)}.
+          Сначала разберитесь с остатком, иначе продажа уведёт его в минус.
+        </div>
+      )}
+
+      <div className="kd-grid2">
+        <Field label={`Цена за ${u.big} (₸)`}><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="20000" /></Field>
+        <Field label="К оплате"><input value={total ? `${fmt(total)} ₸` : "—"} readOnly /></Field>
+      </div>
+
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="кто забрал, при каких обстоятельствах" /></Field>
+
+      {sale && !sale.paid_on && (
+        <>
+          <div className="kd-section" style={{ marginTop: 14 }}>Оплата</div>
+          <div className="kd-muted" style={{ marginBottom: 8 }}>
+            Партнёр должен {fmt(sale.total)} ₸. Отметка проведёт приход по выбранному счёту.
+          </div>
+          <button className="kd-btn primary sm" onClick={() => onPay(sale)}>Партнёр оплатил</button>
+        </>
+      )}
+      {sale?.paid_on && (
+        <div className="kd-row" style={{ marginTop: 14 }}>
+          <span>Оплачено {isoToRu(sale.paid_on)}</span><strong>{fmt(sale.total)} ₸</strong>
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
 function SettleModal({ row, money, accounts = [], partnerName, onClose, onSave }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState(SETTLE_METHODS[0]);
@@ -3445,4 +3597,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
