@@ -10,11 +10,11 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -303,6 +303,7 @@ function Dashboard({ session, profile }) {
   const [safetyAcks, setSafetyAcks] = useState([]);
   const [peopleEvents, setPeopleEvents] = useState([]);
   const [discounts, setDiscounts] = useState([]);
+  const [objects, setObjects] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -523,6 +524,7 @@ function Dashboard({ session, profile }) {
     { key: "training_records", label: "Обучение", run: () => supabase.from("training_records").select("*").order("passed_on", { ascending: false }), set: setTraining },
     { key: "safety_acknowledgements", label: "Инструктаж", run: () => supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }), set: setSafetyAcks },
     { key: "employee_events", label: "История сотрудников", run: () => supabase.from("employee_events").select("*").order("happened_on", { ascending: false }), set: setPeopleEvents },
+    { key: "objects", label: "Объекты", run: () => supabase.from("objects").select("*").order("address"), set: setObjects },
     { key: "job_discounts", label: "Скидки", run: () => supabase.from("job_discounts").select("*").order("created_at", { ascending: false }), set: setDiscounts },
   ];
 
@@ -626,7 +628,7 @@ function Dashboard({ session, profile }) {
   const reloadJobs = () => load([
     "jobs", "job_proofs", "job_helpers", "job_discounts",
     "client_followups", "quality_checks", "service_contracts",
-    "client_sources", "pest_types",
+    "client_sources", "pest_types", "objects",
   ]);
   const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
   const reloadStock = () => load(["chemicals", "handouts", "inventory_adjustments", "chemical_purchases"]);
@@ -967,9 +969,34 @@ function Dashboard({ session, profile }) {
     return hit && hit.exact ? hit.price : null;
   }
 
+  // Объект заводится в момент оформления заявки: отдельного шага «создать
+  // объект» быть не должно, иначе его будут пропускать.
+  //
+  // upsert по ключу адреса, а не проверка «есть ли такой»: два менеджера
+  // могут оформлять заявки на одну точку одновременно.
+  async function ensureObject(payload) {
+    const key = addressKey(payload.address);
+    if (!key) return null;
+    const found = objects.find((o) => o.address_key === key);
+    if (found) return found.id;
+    const { data, error } = await supabase.from("objects")
+      .upsert({ address_key: key, address: payload.address, area: payload.area || null }, { onConflict: "address_key" })
+      .select().single();
+    if (error) { showToast("Заявка сохранится, но объект не завёлся: " + error.message); return null; }
+    return data?.id || null;
+  }
+
+  async function saveObject(object, patch) {
+    const { error } = await supabase.from("objects").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", object.id);
+    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+    await logAction("Объект", `${object.address}: ${Object.keys(patch).join(", ")}`);
+    setModal(null); showToast("Сохранено"); load(["objects"]); return null;
+  }
+
   async function createJob(payload) {
     const quoted = quotedPriceFor(payload);
-    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, quoted_price: quoted, created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
+    const objectId = await ensureObject(payload);
+    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, quoted_price: quoted, object_id: objectId, created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
     if (error) { showToast("Ошибка: " + error.message); return false; }
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
@@ -982,7 +1009,12 @@ function Dashboard({ session, profile }) {
     if (blockedByClosedPeriod(payload.scheduled_date || job.scheduled_date)) return;
     // Пересчитываем прайсовую цену, только если её ещё нет: у заявки, по
     // которой уже договорились, цена не должна меняться от правки площади.
-    const patch = job.quoted_price == null ? { ...payload, quoted_price: quotedPriceFor({ ...job, ...payload }) } : payload;
+    let patch = job.quoted_price == null ? { ...payload, quoted_price: quotedPriceFor({ ...job, ...payload }) } : { ...payload };
+    // Адрес поправили — заявка должна переехать на правильный объект,
+    // иначе история точки распадётся надвое.
+    if (payload.address && addressKey(payload.address) !== addressKey(job.address)) {
+      patch = { ...patch, object_id: await ensureObject({ ...job, ...payload }) };
+    }
     const { error } = await supabase.from("jobs").update(patch).eq("id", job.id);
     if (error) { showToast("Ошибка: " + error.message); return false; }
     await ensureCatalog("client_sources", sources, payload.source);
@@ -2880,6 +2912,7 @@ function Dashboard({ session, profile }) {
                   onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
                         onHistory={() => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
+                      onObject={j.object_id ? () => setModal({ kind: "object", objectId: j.object_id }) : null}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                         onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
@@ -3012,6 +3045,7 @@ function Dashboard({ session, profile }) {
                   onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
                       onHistory={() => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
+                      onObject={j.object_id ? () => setModal({ kind: "object", objectId: j.object_id }) : null}
                         onOpenDetails={() => setModal({ kind: "details", job: j })}
                       onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину, восстановить можно будет оттуда.`, () => deleteJob(j))} />
                     ))}
@@ -3430,6 +3464,7 @@ function Dashboard({ session, profile }) {
                   onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
                   onHistory={() => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
+                      onObject={j.object_id ? () => setModal({ kind: "object", objectId: j.object_id }) : null}
                   onOpenDetails={() => setModal({ kind: "details", job: j })}
                   onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину.`, () => deleteJob(j))} />
               ))}
@@ -5043,6 +5078,13 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
+      {modal?.kind === "object" && (() => {
+        const obj = objects.find((o) => String(o.id) === String(modal.objectId));
+        if (!obj) return null;
+        return <ObjectModal object={obj} summary={calc.objectSummary(obj.id, jobs)}
+          techName={(id) => techById(id)?.full_name || personName(id)}
+          canEdit={canEditJobs} onClose={() => setModal(null)} onSave={saveObject} />;
+      })()}
       {modal?.kind === "peopleEvent" && <PeopleEventModal person={modal.person} record={modal.record} onClose={() => setModal(null)} onSave={savePeopleEvent} />}
       {modal?.kind === "training" && <TrainingModal person={modal.person} record={modal.record} onClose={() => setModal(null)} onSave={saveTraining} />}
       {modal?.kind === "techDoc" && <TechDocModal tech={modal.tech} doc={modal.doc} onClose={() => setModal(null)} onSave={saveTechDoc} />}

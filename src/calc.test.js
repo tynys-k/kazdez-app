@@ -12,6 +12,7 @@ import {
   trainingSummary, trainingDue,
   lastAcknowledgement, notAcknowledged, employeeHistory,
   discountCheck, discountReport,
+  objectSummary,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1371,5 +1372,47 @@ describe("контроль скидок", () => {
       { ...base, id: "big", quoted_price: 100000, report_paid: 60000 },
     ];
     expect(discountReport(jobs, {}).rows[0].job.id).toBe("big");
+  });
+});
+
+describe("объект обработки", () => {
+  const jobs = [
+    { id: "1", object_id: "o1", status: "done", scheduled_date: "2026-08-20", report_paid: 30000, pest: "Тараканы", assigned_to: "t1" },
+    { id: "2", object_id: "o1", status: "done", scheduled_date: "2026-06-10", report_paid: 25000, pest: "Клопы", assigned_to: "t1" },
+    { id: "3", object_id: "o1", status: "done", scheduled_date: "2026-07-01", report_paid: 0, pest: "Клопы", repeat_of: "2" },
+    { id: "4", object_id: "o1", status: "new", scheduled_date: "2026-09-10" },
+    { id: "5", object_id: "o2", status: "done", scheduled_date: "2026-08-01", report_paid: 99000 },
+  ];
+
+  it("собирает историю точки, а не всё подряд", () => {
+    const sum = objectSummary("o1", jobs, { todayIso: "2026-09-04" });
+    expect(sum.total).toBe(4);
+    expect(sum.done).toBe(3);
+    expect(sum.revenue).toBe(55000);
+    expect(sum.repeats).toBe(1);
+  });
+
+  it("последняя обработка — сверху", () => {
+    const sum = objectSummary("o1", jobs, { todayIso: "2026-09-04" });
+    expect(sum.jobs[0].id).toBe("4");
+    expect(sum.lastDone.id).toBe("1");
+  });
+
+  it("виды вредителей перечисляются без повторов", () => {
+    expect(objectSummary("o1", jobs, { todayIso: "2026-09-04" }).pests.sort()).toEqual(["Клопы", "Тараканы"]);
+  });
+
+  it("три выезда за год — объект помечается как проблемный", () => {
+    // разовыми обработками такую точку не закрыть, ей нужен договор
+    expect(objectSummary("o1", jobs, { todayIso: "2026-09-04" }).persistent).toBe(true);
+    expect(objectSummary("o2", jobs, { todayIso: "2026-09-04" }).persistent).toBe(false);
+  });
+
+  it("старые обработки в счёт года не идут", () => {
+    const old = [{ id: "x", object_id: "o3", status: "done", scheduled_date: "2024-01-01", report_paid: 1 }];
+    const sum = objectSummary("o3", old, { todayIso: "2026-09-04" });
+    expect(sum.done).toBe(1);
+    expect(sum.recent).toBe(0);
+    expect(sum.persistent).toBe(false);
   });
 });

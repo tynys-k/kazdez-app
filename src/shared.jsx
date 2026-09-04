@@ -111,6 +111,35 @@ function describeChange(row, { nameOf } = {}) {
   };
 }
 
+// Типы объектов. От типа зависит и норма расхода, и требования проверяющих:
+// на пищевом производстве нужен журнал, в квартире — нет.
+const OBJECT_KINDS = {
+  apartment: "Квартира",
+  house: "Частный дом",
+  office: "Офис",
+  food: "Пищевое производство или общепит",
+  warehouse: "Склад",
+  production: "Производство",
+  land: "Участок или территория",
+  other: "Другое",
+};
+
+// Технический ключ адреса: нижний регистр, ё→е, всё кроме букв и цифр — в
+// пробел. «Мкр. Аксай-3, д.12, кв.45» и «мкр аксай 3 д 12 кв 45» сходятся.
+//
+// Номер квартиры намеренно остаётся частью ключа: для нас объект — это
+// конкретное помещение, а не дом. Две квартиры в одном подъезде — два разных
+// объекта с разной историей заражения.
+//
+// Правило обязано совпадать с kd_address_key в базе: по нему собирались
+// объекты при переносе, и расхождение развело бы одну точку на две.
+const addressKey = (text) => String(text || "")
+  .toLowerCase()
+  .replace(/ё/g, "е")
+  .replace(/[^a-zа-я0-9]+/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
+
 // Темы обучения менеджеров. Список закрытый намеренно: свободный ввод темы
 // превращает отчёт в кашу, где «Возражения» и «работа с возражениями» — две
 // разные строки, и сравнить людей между собой уже нельзя.
@@ -533,4 +562,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  TECH_DOC_KINDS, TRAINING_TOPICS, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  TECH_DOC_KINDS, TRAINING_TOPICS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
