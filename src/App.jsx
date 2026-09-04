@@ -10,11 +10,11 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { SettleModal, PaperworkModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -306,6 +306,8 @@ function Dashboard({ session, profile }) {
   const [objects, setObjects] = useState([]);
   const [clients, setClients] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [paperwork, setPaperwork] = useState([]);
+  const [paperworkJobs, setPaperworkJobs] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [routeTech, setRouteTech] = useState("all");
@@ -536,6 +538,8 @@ function Dashboard({ session, profile }) {
         if (canEditJobs) await supabase.rpc("kd_scan_alerts");
         return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
       } },
+    { key: "paperwork", label: "Проведение документов", run: () => supabase.from("paperwork").select("*").order("created_at", { ascending: false }), set: setPaperwork },
+    { key: "paperwork_jobs", label: "Заявки в комплектах", run: () => supabase.from("paperwork_jobs").select("*"), set: setPaperworkJobs },
     { key: "clients", label: "Клиенты (карточки)", run: () => supabase.from("clients").select("*"), set: setClients },
     { key: "objects", label: "Объекты", run: () => supabase.from("objects").select("*").order("address"), set: setObjects },
     { key: "job_discounts", label: "Скидки", run: () => supabase.from("job_discounts").select("*").order("created_at", { ascending: false }), set: setDiscounts },
@@ -1006,6 +1010,60 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Тревога", `Закрыта: ${alert.title}${alert.detail ? ` · ${alert.detail}` : ""}`);
     load(["alerts"]);
+  }
+
+  // Комплект документов и связанные с ним заявки сохраняются вместе:
+  // связь переписывается целиком, чтобы убранная заявка действительно
+  // исчезала, а не оставалась висеть.
+  // Расчёт с партнёром: отметка плюс движение по кассе.
+  //
+  // Именно здесь ломались отношения — партнёр через месяц говорит «ты мне не
+  // переводил». Поэтому пишем сумму, дату, способ, на кого отправляли и с
+  // какого счёта, а деньги сразу проводим по кассе.
+  async function settlePaperwork(row, money, form) {
+    const patch = {
+      settled_at: form.date, settle_method: form.method,
+      settle_to: form.to || null, settle_account_id: form.accountId || null,
+      settle_note: form.note || null, updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from("paperwork").update(patch).eq("id", row.id);
+    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+
+    if (form.accountId && money.payout > 0) {
+      const already = moves.some((m) => m.source === "paperwork" && m.ref_id === row.id);
+      if (!already) {
+        const { error: mError } = await supabase.from("money_moves").insert({
+          account_id: form.accountId,
+          direction: money.direction === "out" ? "expense" : "income",
+          amount: money.payout, move_date: form.date,
+          note: `Расчёт по документам: ${partnerById(row.partner_id)?.name || "партнёр"}${form.to ? ` → ${form.to}` : ""}`,
+          source: "paperwork", ref_id: row.id, created_by: session.user.id,
+        });
+        if (mError) showToast("Расчёт отмечен, но по кассе не провелся: " + mError.message);
+      }
+    }
+    await logAction("Документы", `Расчёт: ${partnerById(row.partner_id)?.name || "партнёр"} · ${fmt(money.payout)} ₸ · ${form.method}${form.to ? ` · ${form.to}` : ""}`);
+    setModal(null); showToast("Расчёт проведён"); load(["paperwork", "accounts", "money_moves"]); return null;
+  }
+
+  async function savePaperwork(payload, jobIds = []) {
+    const { id, ...fields } = payload;
+    const row = { ...fields, updated_at: new Date().toISOString() };
+    const res = id
+      ? await supabase.from("paperwork").update(row).eq("id", id).select().single()
+      : await supabase.from("paperwork").insert({ ...row, created_by: session.user.id }).select().single();
+    if (res.error) { showToast("Ошибка: " + res.error.message); return res.error.message; }
+    const pid = res.data?.id || id;
+    if (pid) {
+      await supabase.from("paperwork_jobs").delete().eq("paperwork_id", pid);
+      if (jobIds.length) {
+        const { error: linkError } = await supabase.from("paperwork_jobs")
+          .insert(jobIds.map((jid) => ({ paperwork_id: pid, job_id: jid })));
+        if (linkError) showToast("Комплект сохранён, но заявки не привязались: " + linkError.message);
+      }
+    }
+    await logAction("Документы", `${PAPERWORK_SCHEMES[payload.scheme]?.label || payload.scheme} · ${payload.client_name || "клиент"} · ${fmt(payload.amount)} ₸`);
+    setModal(null); showToast("Сохранено"); load(["paperwork", "paperwork_jobs"]); return null;
   }
 
   async function saveObject(object, patch) {
@@ -4992,6 +5050,69 @@ function Dashboard({ session, profile }) {
         {!loading && tab === "knowledge" && <KnowledgeTab settings={settings} isAdmin={isAdmin} acks={safetyAcks} myId={session.user.id} onAcknowledge={acknowledgeDoc} />}
 
         {!loading && tab === "docs" && (() => {
+          const totals = calc.paperworkTotals(paperwork, { inPeriod: () => true, steps: PAPERWORK_STEPS });
+          const linksOf = (id) => paperworkJobs.filter((l) => String(l.paperwork_id) === String(id)).map((l) => l.job_id);
+          return (
+            <div className="kd-card" style={{ marginBottom: 14 }}>
+              <div className="kd-tabbar" style={{ marginBottom: 10 }}>
+                <div>
+                  <div className="kd-section" style={{ margin: 0 }}>Проведение через фирму{paperwork.length ? ` · ${paperwork.length}` : ""}</div>
+                  <div className="kd-muted">Наши документы, документы для партнёров и наши заявки, проведённые через партнёров.</div>
+                </div>
+                {canEditDocs && <button className="kd-btn primary" onClick={() => setModal({ kind: "paperwork", row: null })}><Plus size={15} />Проведение</button>}
+              </div>
+
+              {paperwork.length > 0 && (
+                <div className="kd-stockgrid" style={{ marginBottom: 12 }}>
+                  <div><span>Наша доля</span><strong>{fmt(totals.ourMoney)} ₸</strong></div>
+                  <div><span>Не оплачено клиентом</span><strong style={{ color: totals.unpaid ? "var(--rust)" : undefined }}>{fmt(totals.unpaid)} ₸</strong></div>
+                  <div><span>Должны партнёрам</span><strong>{fmt(totals.oweOut)} ₸</strong></div>
+                  <div><span>Должны нам</span><strong style={{ color: totals.oweIn ? "var(--amber)" : undefined }}>{fmt(totals.oweIn)} ₸</strong></div>
+                </div>
+              )}
+
+              {paperwork.length === 0 && <div className="kd-muted">Проведений пока нет. Здесь ведутся документы по юрлицам и расчёты с партнёрами.</div>}
+
+              {paperwork.map((row) => {
+                const money = calc.paperworkMoney(row);
+                const progress = calc.paperworkProgress(row, PAPERWORK_STEPS);
+                const jobsCount = linksOf(row.id).length;
+                return (
+                  <div className="kd-ledgerrow" key={row.id} style={{ gridTemplateColumns: "1.6fr 1fr 1.4fr auto", alignItems: "start" }}>
+                    <span className="kd-ledgername">
+                      {row.client_name || "клиент не указан"}
+                      <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>
+                        {PAPERWORK_SCHEMES[row.scheme]?.label || row.scheme}
+                        {row.partner_id ? ` · ${partnerById(row.partner_id)?.name || "партнёр"}` : ""}
+                        {jobsCount ? ` · заявок ${jobsCount}` : ""}
+                      </em>
+                    </span>
+                    <span>
+                      {fmt(money.amount)} ₸
+                      {money.direction && <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>
+                        {money.direction === "out" ? "отдать " : "получить "}{fmt(money.payout)} ₸
+                      </em>}
+                    </span>
+                    <span style={{ textAlign: "left" }}>
+                      {progress.complete
+                        ? <strong style={{ color: "var(--primary)" }}>документы закрыты</strong>
+                        : <>
+                            <span className={progress.paidButOpen ? "kd-delta-down" : ""}>{progress.next.label}</span>
+                            <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>
+                              шаг {progress.done + 1} из {progress.total}
+                            </em>
+                          </>}
+                      {money.direction && !money.settled && <em style={{ display: "block", fontStyle: "normal", fontSize: 10.5, color: "var(--amber)" }}>расчёт не проведён</em>}
+                    </span>
+                    <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "paperwork", row: { ...row, jobIds: linksOf(row.id) } })}>Открыть</button>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+
+        {!loading && tab === "docs" && (() => {
           const total = docs.reduce((s, d) => s + (Number(d.amount) || 0), 0);
           const paid = docs.filter((d) => d.status === "paid").reduce((s, d) => s + (Number(d.amount) || 0), 0);
           const pending = total - paid;
@@ -5146,6 +5267,12 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
       {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
+      {modal?.kind === "paperwork" && <PaperworkModal row={modal.row} partners={partners} accounts={accounts} jobs={jobs} clients={clients}
+        onClose={() => setModal(null)} onSave={savePaperwork}
+        onSettle={(row, money) => setModal({ kind: "settle", row, money })} />}
+      {modal?.kind === "settle" && <SettleModal row={modal.row} money={modal.money} accounts={accounts}
+        partnerName={partnerById(modal.row.partner_id)?.name}
+        onClose={() => setModal({ kind: "paperwork", row: modal.row })} onSave={settlePaperwork} />}
       {modal?.kind === "object" && (() => {
         const obj = objects.find((o) => String(o.id) === String(modal.objectId));
         if (!obj) return null;

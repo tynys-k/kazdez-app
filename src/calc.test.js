@@ -13,6 +13,7 @@ import {
   lastAcknowledgement, notAcknowledged, employeeHistory,
   discountCheck, discountReport,
   objectSummary, clientKeyOf,
+  paperworkProgress, paperworkMoney, paperworkTotals,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1475,5 +1476,70 @@ describe("возвращаемость и ушедшие считаются по
     expect(rows.length).toBe(1);
     expect(rows[0].revenue).toBe(50000);
     expect(rows[0].lastDone).toBe("2024-06-10");
+  });
+});
+
+describe("проведение документов", () => {
+  const steps = [
+    { key: "requisites_at", label: "Реквизиты" },
+    { key: "invoice_at", label: "Счёт" },
+    { key: "paid_at", label: "Оплата" },
+    { key: "receipt_at", label: "Чек", cashOnly: true },
+    { key: "filed_at", label: "Подшит" },
+  ];
+
+  it("показывает, на каком шаге застряло", () => {
+    const row = { payment_method: "transfer", requisites_at: "2026-08-01", invoice_at: "2026-08-02" };
+    const p = paperworkProgress(row, steps);
+    expect(p.next.key).toBe("paid_at");
+    expect(p.done).toBe(2);
+    expect(p.complete).toBe(false);
+  });
+
+  it("чек спрашивается только при наличных", () => {
+    // при перечислении шаг с чеком не должен висеть незакрытым вечно
+    const transfer = { payment_method: "transfer", requisites_at: "1", invoice_at: "1", paid_at: "1", filed_at: "1" };
+    expect(paperworkProgress(transfer, steps).complete).toBe(true);
+    const cash = { ...transfer, payment_method: "cash" };
+    expect(paperworkProgress(cash, steps).next.key).toBe("receipt_at");
+  });
+
+  it("деньги пришли, а бумага в пути — это отдельная пометка", () => {
+    const row = { payment_method: "transfer", requisites_at: "1", invoice_at: "1", paid_at: "1" };
+    expect(paperworkProgress(row, steps).paidButOpen).toBe(true);
+  });
+
+  it("для партнёра: деньги у нас, отдаём остаток", () => {
+    const m = paperworkMoney({ scheme: "for_partner", amount: 100000, percent: 30 });
+    expect(m).toMatchObject({ withheld: 30000, payout: 70000, direction: "out", ourShare: 30000 });
+  });
+
+  it("через партнёра: деньги у него, получаем остаток", () => {
+    // Арсен удерживает 41% — наша доля это то, что он вернёт
+    const m = paperworkMoney({ scheme: "via_partner", amount: 100000, percent: 41 });
+    expect(m).toMatchObject({ withheld: 41000, payout: 59000, direction: "in", ourShare: 59000 });
+  });
+
+  it("свои документы: расчёта со второй стороной нет", () => {
+    const m = paperworkMoney({ scheme: "own", amount: 100000, percent: 0 });
+    expect(m.direction).toBeNull();
+    expect(m.ourShare).toBe(100000);
+  });
+
+  it("свод разделяет, кто кому должен", () => {
+    const rows = [
+      { scheme: "for_partner", amount: 100000, percent: 30, paid_at: "2026-08-01", created_at: "2026-08-01" },
+      { scheme: "via_partner", amount: 200000, percent: 40, paid_at: "2026-08-02", created_at: "2026-08-02" },
+      { scheme: "via_partner", amount: 50000, percent: 40, created_at: "2026-08-03" },
+    ];
+    const t = paperworkTotals(rows, { steps });
+    expect(t.oweOut).toBe(70000);
+    expect(t.oweIn).toBe(120000 + 30000);
+    expect(t.unpaid).toBe(50000);
+  });
+
+  it("рассчитанные комплекты в долгах не висят", () => {
+    const rows = [{ scheme: "for_partner", amount: 100000, percent: 30, paid_at: "2026-08-01", settled_at: "2026-08-05", created_at: "2026-08-01" }];
+    expect(paperworkTotals(rows, { steps }).oweOut).toBe(0);
   });
 });

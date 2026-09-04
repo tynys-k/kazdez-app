@@ -140,6 +140,35 @@ const addressKey = (text) => String(text || "")
   .replace(/\s+/g, " ")
   .trim();
 
+// Схемы проведения документов.
+const PAPERWORK_SCHEMES = {
+  own: { label: "Свои документы", hint: "Наш клиент, документы делаем сами" },
+  for_partner: { label: "Для партнёра", hint: "Клиент партнёра, проводим через нас — партнёру отдаём за вычетом нашего процента" },
+  via_partner: { label: "Через партнёра", hint: "Наш клиент, нужен ОУР с НДС — партнёр удерживает свой процент и возвращает остаток" },
+};
+
+// Путь бумаги. Порядок здесь — это и есть последовательность шагов, по нему
+// считается, где документ застрял.
+//
+// Чек нужен только за наличные, поэтому у шага стоит признак cashOnly:
+// показывать его при оплате перечислением — значит держать вечно
+// незакрытый шаг и приучить смотреть мимо.
+const PAPERWORK_STEPS = [
+  { key: "requisites_at", label: "Реквизиты получены" },
+  { key: "contract_at", label: "Договор составлен" },
+  { key: "invoice_at", label: "Счёт выставлен" },
+  { key: "paid_at", label: "Оплата пришла" },
+  { key: "receipt_at", label: "Чек выбит", cashOnly: true },
+  { key: "avr_ready_at", label: "АВР подготовлен" },
+  { key: "avr_sent_at", label: "АВР у клиента" },
+  { key: "avr_signed_at", label: "Клиент подписал" },
+  { key: "avr_returned_at", label: "Подписанный АВР забрали" },
+  { key: "avr_office_at", label: "АВР привезли в офис" },
+  { key: "filed_at", label: "Подшит в папку" },
+];
+
+const SETTLE_METHODS = ["Каспи", "Наличными", "Перевод на счёт"];
+
 // Темы обучения менеджеров. Список закрытый намеренно: свободный ввод темы
 // превращает отчёт в кашу, где «Возражения» и «работа с возражениями» — две
 // разные строки, и сравнить людей между собой уже нельзя.
@@ -562,4 +591,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  TECH_DOC_KINDS, TRAINING_TOPICS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  TECH_DOC_KINDS, TRAINING_TOPICS, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
