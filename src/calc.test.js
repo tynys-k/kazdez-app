@@ -18,6 +18,7 @@ import {
   qualityByFactor,
   debtAging, clientDebt,
   repeatCauseReport,
+  marketingPerJob, channelEconomics,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1745,5 +1746,67 @@ describe("разбор повторных выездов", () => {
       inPeriod: (iso) => String(iso) >= "2026-08-12",
     });
     expect(rep.total).toBe(2);
+  });
+});
+
+describe("маркетинг на заказ", () => {
+  const channels = [
+    { id: "ch1", name: "Instagram", source_key: "Инстаграм" },
+    { id: "ch2", name: "2ГИС", source_key: "2ГИС" },
+  ];
+  const topups = [
+    { channel_id: "ch1", topup_date: "2026-08-03", amount: 100000 },
+    { channel_id: "ch1", topup_date: "2026-08-20", amount: 50000 },
+    { channel_id: "ch2", topup_date: "2026-08-05", amount: 40000 },
+  ];
+  const jobs = [
+    { id: "1", status: "done", scheduled_date: "2026-08-10", source: "инстаграм", report_paid: 30000 },
+    { id: "2", status: "done", scheduled_date: "2026-08-11", source: "Инстаграм", report_paid: 30000 },
+    { id: "3", status: "done", scheduled_date: "2026-08-12", source: "инстаграм", report_paid: 30000 },
+    { id: "4", status: "done", scheduled_date: "2026-08-13", source: "2гис", report_paid: 40000 },
+    { id: "5", status: "done", scheduled_date: "2026-08-14", source: "Сарафан", report_paid: 50000 },
+  ];
+
+  it("расход канала делится на заказы этого канала за месяц", () => {
+    const forJob = marketingPerJob(jobs, { topups, channels });
+    expect(forJob(jobs[0])).toBe(50000); // 150 000 на три заявки
+  });
+
+  it("источник без рекламы получает ноль, а не среднюю по компании", () => {
+    // приписать сарафану чужую рекламу — значит занизить прибыль там, где её надо видеть
+    const forJob = marketingPerJob(jobs, { topups, channels });
+    expect(forJob(jobs[4])).toBe(0);
+  });
+
+  it("регистр и пробелы в источнике не разводят канал надвое", () => {
+    const forJob = marketingPerJob(jobs, { topups, channels });
+    expect(forJob(jobs[1])).toBe(forJob(jobs[2]));
+  });
+
+  it("расход другого месяца на заказ не ложится", () => {
+    const other = [{ channel_id: "ch1", topup_date: "2026-07-01", amount: 900000 }];
+    const forJob = marketingPerJob(jobs, { topups: other, channels });
+    expect(forJob(jobs[0])).toBe(0);
+  });
+
+  it("невыполненная заявка рекламу не несёт", () => {
+    const forJob = marketingPerJob(jobs, { topups, channels });
+    expect(forJob({ status: "new", scheduled_date: "2026-08-10", source: "инстаграм" })).toBe(0);
+  });
+
+  it("канал считается по полной прибыли, а возврат — от потраченного", () => {
+    const rows = channelEconomics(jobs, { topups, channels, profitOf: () => 20000 });
+    const insta = rows.find((r) => r.channelId === "ch1");
+    expect(insta).toMatchObject({ jobs: 3, spent: 150000, revenue: 90000, profit: 60000, cac: 50000, romi: 40 });
+  });
+
+  it("канал без заявок остаётся в отчёте с пустым привлечением", () => {
+    const rows = channelEconomics([], { topups, channels, profitOf: () => 0 });
+    expect(rows.find((r) => r.channelId === "ch1").cac).toBeNull();
+  });
+
+  it("убыточный канал видно по отрицательному возврату", () => {
+    const rows = channelEconomics(jobs, { topups, channels, profitOf: () => -10000 });
+    expect(rows.find((r) => r.channelId === "ch1").romi).toBeLessThan(0);
   });
 });
