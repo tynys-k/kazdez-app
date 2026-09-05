@@ -420,6 +420,83 @@ export function paperworkTotals(rows = [], { inPeriod = () => true, steps = [] }
   };
 }
 
+// --- точки контроля ------------------------------------------------------
+
+// Состояние точек объекта: когда каждую смотрели в последний раз и что нашли.
+//
+// Точка, которую давно не осматривали, опаснее точки с активностью: активность
+// хотя бы зафиксирована, а про необойдённую станцию мы просто ничего не знаем.
+// Поэтому «давно не смотрели» — отдельный признак, а не отсутствие данных.
+export function controlPointsState(points = [], checks = [], { todayIso, staleDays = 45 } = {}) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const daysSince = (iso) => Math.round((new Date(`${today}T00:00:00`) - new Date(`${String(iso).slice(0, 10)}T00:00:00`)) / 86400000);
+
+  const lastByPoint = new Map();
+  for (const c of checks) {
+    const key = String(c.point_id);
+    const prev = lastByPoint.get(key);
+    if (!prev || String(c.checked_on) > String(prev.checked_on)) lastByPoint.set(key, c);
+  }
+
+  const rows = points
+    .filter((p) => !p.removed_on)
+    .map((p) => {
+      const last = lastByPoint.get(String(p.id)) || null;
+      const age = last ? daysSince(last.checked_on) : daysSince(p.installed_on);
+      return {
+        point: p,
+        last,
+        daysAgo: age,
+        // никогда не осмотренная станция считается просроченной со дня установки
+        stale: age > staleDays,
+        alarm: !!last && !!ALARM_RESULTS[last.result],
+      };
+    })
+    .sort((a, b) => Number(b.alarm) - Number(a.alarm) || b.daysAgo - a.daysAgo);
+
+  return {
+    rows,
+    total: rows.length,
+    alarm: rows.filter((r) => r.alarm).length,
+    stale: rows.filter((r) => r.stale).length,
+    neverChecked: rows.filter((r) => !r.last).length,
+  };
+}
+
+// Какие результаты осмотра считаются тревожными. Держим здесь, чтобы расчёт
+// не зависел от интерфейсного справочника.
+const ALARM_RESULTS = { consumed: true, activity: true, damaged: true, missing: true };
+
+// Уровень заражения по объекту за период: доля точек с активностью.
+// Для промышленного клиента это главный показатель в отчёте — он показывает
+// динамику, а не разовый факт.
+export function infestationTrend(points = [], checks = [], { months = 6, todayIso } = {}) {
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  const pointIds = new Set(points.filter((p) => !p.removed_on).map((p) => String(p.id)));
+  const buckets = new Map();
+
+  for (const c of checks) {
+    if (!pointIds.has(String(c.point_id)) || !c.checked_on) continue;
+    const key = String(c.checked_on).slice(0, 7);
+    const row = buckets.get(key) || { month: key, checks: 0, alarms: 0 };
+    row.checks += 1;
+    if (ALARM_RESULTS[c.result]) row.alarms += 1;
+    buckets.set(key, row);
+  }
+
+  const keys = [];
+  const [y, m] = today.split("-").map(Number);
+  for (let i = months - 1; i >= 0; i -= 1) {
+    const d = new Date(y, m - 1 - i, 1);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+
+  return keys.map((key) => {
+    const row = buckets.get(key) || { month: key, checks: 0, alarms: 0 };
+    return { ...row, rate: row.checks ? Math.round(row.alarms / row.checks * 100) : null };
+  });
+}
+
 // --- объект обработки ----------------------------------------------------
 
 // Что происходило на объекте: сколько раз обрабатывали, от чего, на какую
