@@ -1878,3 +1878,45 @@ export function orderStats(jobs = [], { inPeriod = () => true } = {}) {
     guaranteeShare: rows.length ? Math.round(extra.length / rows.length * 100) : 0,
   };
 }
+
+// --- тревоги -------------------------------------------------------------
+
+// Недельная сводка по тревогам.
+//
+// Список открытых тревог отвечает на вопрос «что горит», но не отвечает на
+// более важный: разбирают их вообще или просто копят. Заводится десять в
+// неделю, закрывается две — значит система работает вхолостую, и дело не в
+// правилах, а в том, что за тревоги никто не отвечает.
+//
+// Отдельно считаем застоявшиеся: открытые дольше трёх дней. Это те, которые
+// база уже подняла на уровень владельца.
+export function alertDigest(alerts = [], { now = new Date(), staleDays = 3, windowDays = 7 } = {}) {
+  const ms = (d) => new Date(now).getTime() - d * 86400000;
+  const at = (v) => { const t = new Date(v).getTime(); return Number.isNaN(t) ? null : t; };
+
+  const open = alerts.filter((a) => !a.resolved_at);
+  const openedRecently = alerts.filter((a) => { const t = at(a.created_at); return t != null && t >= ms(windowDays); });
+  const resolvedRecently = alerts.filter((a) => { const t = at(a.resolved_at); return t != null && t >= ms(windowDays); });
+  const stale = open.filter((a) => { const t = at(a.created_at); return t != null && t < ms(staleDays); });
+
+  const byTarget = new Map();
+  for (const a of open) {
+    const key = (a.target || "без адресата").split(" · ")[0];
+    byTarget.set(key, (byTarget.get(key) || 0) + 1);
+  }
+
+  return {
+    open: open.length,
+    critical: open.filter((a) => a.severity === "critical").length,
+    opened: openedRecently.length,
+    resolved: resolvedRecently.length,
+    stale: stale.length,
+    escalated: open.filter((a) => a.escalated_at).length,
+    // Закрывается меньше, чем заводится — значит список растёт, и это видно
+    // числом, а не ощущением.
+    growing: openedRecently.length > resolvedRecently.length,
+    byTarget: [...byTarget.entries()]
+      .map(([target, count]) => ({ target, count }))
+      .sort((a, b) => b.count - a.count),
+  };
+}

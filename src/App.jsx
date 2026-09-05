@@ -543,10 +543,16 @@ function Dashboard({ session, profile }) {
     // намеренно нет — единственный читатель тревог это приложение, и заход
     // человека полностью заменяет запуск по таймеру. База не работает
     // впустую, пока никто не смотрит.
+    // Грузим не только открытые: без закрытых нельзя ответить на вопрос
+    // «тревоги вообще разбирают или просто копят». Неделя закрытых — это
+    // десятки строк, не нагрузка.
     { key: "alerts", label: "Тревоги", set: setAlerts,
       run: async () => {
         if (canEditJobs) await supabase.rpc("kd_scan_alerts");
-        return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
+        const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+        return supabase.from("alerts").select("*")
+          .or(`resolved_at.is.null,resolved_at.gte.${weekAgo}`)
+          .order("created_at", { ascending: false });
       } },
     { key: "control_points", label: "Точки контроля", run: () => supabase.from("control_points").select("*").order("number"), set: setControlPoints },
     { key: "control_checks", label: "Осмотры точек", run: () => supabase.from("control_checks").select("*").order("checked_on", { ascending: false }), set: setControlChecks },
@@ -2922,6 +2928,11 @@ function Dashboard({ session, profile }) {
       labor, overhead, marketing: marketingFor(j), helpers: calc.helpersTotal(j.id, jobHelpers),
     }).fullProfit;
   };
+  // В alerts теперь лежат и закрытые за неделю: они нужны сводке. Всё, что
+  // показывается как «требует решения», обязано брать openAlerts — иначе в
+  // списке появятся уже решённые проблемы.
+  const openAlerts = alerts.filter((a) => !a.resolved_at);
+  const alertDigest = calc.alertDigest(alerts);
   const orderSummary = calc.orderStats(jobs, { inPeriod: inPeriodIso });
   const multiVisitOrders = calc.orderTotals(jobs, { inPeriod: inPeriodIso, profitOf: visitProfitOf })
     .filter((r) => r.doneVisits > 1)
@@ -3185,17 +3196,24 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "today" && (
           <div className="kd-today">
-            {canEditJobs && alerts.length > 0 && (
+            {canEditJobs && openAlerts.length > 0 && (
               <section className="kd-card kd-alerts">
                 <div className="kd-tabbar" style={{ marginBottom: 10 }}>
                   <div>
-                    <div className="kd-section" style={{ margin: 0 }}>Требует решения · {alerts.length}</div>
+                    <div className="kd-section" style={{ margin: 0 }}>Требует решения · {openAlerts.length}</div>
                     <div className="kd-muted">
                       Правила считает база при заходе в приложение. Причина ушла — тревога закроется сама, отмечать ничего не нужно.
                     </div>
                   </div>
                 </div>
-                {[...alerts]
+                {/* Список открытых отвечает на вопрос «что горит». Сводка — на
+                   более важный: разбирают их вообще или просто копят. */}
+                <div className="kd-muted" style={{ marginBottom: 10 }}>
+                  За неделю: заведено {alertDigest.opened}, закрыто {alertDigest.resolved}.
+                  {alertDigest.growing && " Заводится больше, чем закрывается — список растёт."}
+                  {alertDigest.stale > 0 && ` Дольше трёх дней висит ${alertDigest.stale}${alertDigest.escalated > 0 ? `, из них поднято до владельца ${alertDigest.escalated}` : ""}.`}
+                </div>
+                {[...openAlerts]
                   .sort((a, b) => (a.severity === b.severity ? String(a.created_at).localeCompare(String(b.created_at)) : a.severity === "critical" ? -1 : 1))
                   .slice(0, 20)
                   .map((al) => (
@@ -3204,7 +3222,10 @@ function Dashboard({ session, profile }) {
                       <span>
                         <strong>{al.title}</strong>
                         {al.detail && <em>{al.detail}</em>}
-                        <small>{al.target || "без адресата"} · {fmtTs(al.created_at)}</small>
+                        <small>
+                          {al.target || "без адресата"} · {fmtTs(al.created_at)}
+                          {al.escalated_at && " · поднято: три дня без ответа"}
+                        </small>
                       </span>
                       {canEditJobs && (
                         <button className="kd-btn ghost sm" onClick={() => resolveAlert(al)} title="Проблема решена — убрать из списка">
@@ -3213,7 +3234,7 @@ function Dashboard({ session, profile }) {
                       )}
                     </div>
                   ))}
-                {alerts.length > 20 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 20 из {alerts.length}.</div>}
+                {openAlerts.length > 20 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 20 из {openAlerts.length}.</div>}
               </section>
             )}
             <section className="kd-todayhero">
