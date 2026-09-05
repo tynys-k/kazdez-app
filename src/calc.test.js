@@ -22,6 +22,7 @@ import {
   controlPointsState, infestationTrend,
   branchTotals,
   orderTotals, orderStats,
+  alertDigest,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -2002,5 +2003,52 @@ describe("заказ и визит", () => {
     expect(st.orders).toBe(2);
     expect(st.paidOrders).toBe(1);
     expect(st.avgOrder).toBe(25000);
+  });
+});
+
+describe("сводка по тревогам", () => {
+  const now = new Date("2026-09-10T12:00:00Z");
+  const ago = (days) => new Date(now.getTime() - days * 86400000).toISOString();
+  const alerts = [
+    { id: 1, severity: "critical", target: "Менеджер", created_at: ago(0.2) },
+    { id: 2, severity: "warning", target: "Склад", created_at: ago(1) },
+    { id: 3, severity: "critical", target: "Владелец · висит с 05.09", created_at: ago(5), escalated_at: ago(2) },
+    { id: 4, severity: "warning", target: "Кадры", created_at: ago(9) },
+    { id: 5, severity: "warning", target: "Склад", created_at: ago(4), resolved_at: ago(1) },
+    { id: 6, severity: "warning", target: "Склад", created_at: ago(30), resolved_at: ago(20) },
+  ];
+
+  it("считает открытые, заведённые и закрытые за неделю", () => {
+    const d = alertDigest(alerts, { now });
+    expect(d.open).toBe(4);
+    expect(d.critical).toBe(2);
+    // за неделю заведены 1, 2, 3, 5 — четвёртая старше окна, шестая тоже
+    expect(d.opened).toBe(4);
+    expect(d.resolved).toBe(1);
+  });
+
+  it("застоявшиеся — те, что висят дольше трёх дней", () => {
+    const d = alertDigest(alerts, { now });
+    expect(d.stale).toBe(2);
+    expect(d.escalated).toBe(1);
+  });
+
+  it("видно, что список растёт: заводится больше, чем закрывается", () => {
+    const d = alertDigest(alerts, { now });
+    expect(d.growing).toBe(true);
+  });
+
+  it("адресат берётся без приписки об эскалации", () => {
+    // иначе «Владелец» и «Владелец · висит с 05.09» станут двумя разными
+    // адресатами, и сводка развалится на строки по одной
+    const d = alertDigest(alerts, { now });
+    expect(d.byTarget.find((t) => t.target === "Владелец").count).toBe(1);
+    expect(d.byTarget[0]).toMatchObject({ target: "Менеджер", count: 1 });
+  });
+
+  it("пустой список не роняет сводку", () => {
+    const d = alertDigest([], { now });
+    expect(d).toMatchObject({ open: 0, opened: 0, resolved: 0, stale: 0, growing: false });
+    expect(d.byTarget).toEqual([]);
   });
 });

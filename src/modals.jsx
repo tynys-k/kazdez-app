@@ -1,6 +1,7 @@
 // KAZDEZ-USABILITY-YANDEX-MODALS-2026-07-18
 // Модальные окна Этапа 3: клиент 360 и единый жизненный цикл заявки.
 import React, { useEffect, useRef, useState } from "react";
+import { readLocalDraft, useLocalDraft } from "./useLocalDraft";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
 import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
@@ -323,8 +324,7 @@ const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", schedu
 function JobFormModal({ initial, title, submitLabel, keepStatus, findBlocked, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, onClose, onSave }) {
   const draftRef = useRef(undefined);
   if (draftRef.current === undefined) {
-    try { draftRef.current = !initial ? JSON.parse(localStorage.getItem(JOB_DRAFT_KEY) || "null") : null; }
-    catch { draftRef.current = null; }
+    draftRef.current = !initial ? readLocalDraft(JOB_DRAFT_KEY) : null;
   }
   const draft = draftRef.current;
   const startingForm = initial || draft?.form || emptyJobForm(defaultGuarantee);
@@ -360,20 +360,18 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, findBlocked, pa
   });
   const ok = phoneDigits.length >= 10 && f.address && f.pest && (f.p1amount || f.p2amount || f.type === "Осмотр");
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (initial) return undefined;
-    const meaningful = f.address || f.pest || f.p1amount || phoneDigits.length > 1;
-    const timer = setTimeout(() => {
-      if (meaningful) localStorage.setItem(JOB_DRAFT_KEY, JSON.stringify({ form: f, mode: formMode, savedAt: new Date().toISOString() }));
-      else localStorage.removeItem(JOB_DRAFT_KEY);
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [f, formMode, initial, phoneDigits.length]);
+  const savingRef = useRef(false);
+  const [saveError, setSaveError] = useState("");
+  const hasDraft = JSON.stringify(f) !== JSON.stringify(emptyJobForm(defaultGuarantee));
+  const draftStorage = useLocalDraft(JOB_DRAFT_KEY, hasDraft ? { form: f, mode: formMode } : null, !initial);
 
   function requestClose() {
+    if (savingRef.current) return;
     const dirty = JSON.stringify(f) !== initialSnapshot.current;
-    if (!dirty || window.confirm("Есть несохранённые изменения. Закрыть форму? Черновик новой заявки останется сохранённым.")) onClose();
+    const message = initial ? "Есть несохранённые изменения. Закрыть форму без сохранения?"
+      : draftStorage.error ? "Черновик не сохранён. При закрытии изменения могут быть потеряны. Закрыть форму?"
+      : "Есть несохранённые изменения. Закрыть форму? Черновик новой заявки останется сохранённым.";
+    if (!dirty || window.confirm(message)) onClose();
   }
 
   function useClientData() {
@@ -382,34 +380,42 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, findBlocked, pa
   }
 
   function clearDraft() {
-    localStorage.removeItem(JOB_DRAFT_KEY);
     setF(emptyJobForm(defaultGuarantee));
     setFormMode("quick");
     setDraftRestored(false);
   }
 
   async function save() {
+    if (savingRef.current || !ok) return;
+    savingRef.current = true;
     setSaving(true);
-    const price_options = [];
-    if (f.p1amount) price_options.push({ label: f.p1label, amount: Number(f.p1amount) });
-    if (f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
-    const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
-    const isPartner = f.brand === "partner";
-    const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
-      executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
-      executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
-    if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
-    if (!keepStatus) payload.status = payload.assigned_to ? "assigned" : "new";
-    else if (f.status === "new" || f.status === "assigned") payload.status = payload.assigned_to ? "assigned" : "new";
-    const saved = await onSave(payload);
-    if (saved !== false && !initial) localStorage.removeItem(JOB_DRAFT_KEY);
-    setSaving(false);
+    setSaveError("");
+    try {
+      const price_options = [];
+      if (f.p1amount) price_options.push({ label: f.p1label, amount: Number(f.p1amount) });
+      if (f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
+      const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
+      const isPartner = f.brand === "partner";
+      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
+        executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
+        executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
+      if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
+      if (!keepStatus) payload.status = payload.assigned_to ? "assigned" : "new";
+      else if (f.status === "new" || f.status === "assigned") payload.status = payload.assigned_to ? "assigned" : "new";
+      const saved = await onSave(payload);
+      if (saved === true && !initial) draftStorage.clear();
+      if (saved !== true) setSaveError("Заявка не сохранена. Проверьте сообщение об ошибке и повторите попытку.");
+    } catch { setSaveError("Не удалось подтвердить сохранение. Проверьте список заявок перед повторной отправкой — сервер мог принять запрос."); }
+    finally { savingRef.current = false; setSaving(false); }
   }
   return (
     <ModalShell title={title} onClose={requestClose} footer={<>
       <button className="kd-btn ghost" onClick={requestClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : submitLabel}</button>
     </>}>
+      {saveError && <div className="kd-err" role="alert">{saveError}</div>}
+      {draftStorage.error && <div className="kd-err" role="alert">{draftStorage.error}</div>}
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       {!initial && <div className="kd-formmode">
         <button type="button" className={formMode === "quick" ? "on" : ""} onClick={() => setFormMode("quick")}>Быстрая заявка</button>
         <button type="button" className={formMode === "expanded" ? "on" : ""} onClick={() => setFormMode("expanded")}>Расширенная</button>
@@ -553,6 +559,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, findBlocked, pa
       <Field label="Примечание / комментарий (видно только команде, клиенту не идёт)">
         <textarea className="kd-textarea" value={f.note} onChange={set("note")} placeholder="Напр.: домофон не работает, звонить за 30 мин, есть собака" />
       </Field>
+      </fieldset>
     </ModalShell>
   );
 }
@@ -659,7 +666,7 @@ function DocModal({ doc, partners, onClose, onSave }) {
 function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints = [], discountThreshold = 20, onClose, onSave }) {
   const draftKey = `kazdez-report-draft-v4:${job.id}`;
   const draftRef = useRef(null);
-  if (draftRef.current === null) { try { draftRef.current = JSON.parse(localStorage.getItem(draftKey) || "null") || {}; } catch { draftRef.current = {}; } }
+  if (draftRef.current === null) draftRef.current = readLocalDraft(draftKey) || {};
   const draft = draftRef.current;
   const [cash, setCash] = useState(draft.cash || ""); const [qr, setQr] = useState(draft.qr || ""); const [note, setNote] = useState(draft.note || "");
   const [transfer, setTransfer] = useState(draft.transfer || "");
@@ -668,6 +675,8 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints
   const [docNeeded, setDocNeeded] = useState(!!draft.docNeeded); const [avr, setAvr] = useState(!!draft.avr); const [dogovor, setDogovor] = useState(!!draft.dogovor); const [docNote, setDocNote] = useState(draft.docNote || "");
   const [saving, setSaving] = useState(false);
   const [offlineSaved, setOfflineSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const savingRef = useRef(false);
   const [equipment, setEquipment] = useState(draft.equipment || []);
   // Обход точек контроля. Пустой результат означает «не осматривал» — это
   // честнее, чем молча проставить «чисто» за человека.
@@ -706,9 +715,11 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints
       return [...prev.filter((c) => !WORK_EQUIPMENT.find((e) => e.code === c)?.exclusive), code];
     });
   };
-  useEffect(() => {
-    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, checks, discountReason, discountNote, debtDue, savedAt: new Date().toISOString() }));
-  }, [draftKey, cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote]);
+  const draftStorage = useLocalDraft(draftKey, { cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, checks, discountReason, discountNote, debtDue });
+  function requestClose() {
+    if (savingRef.current) return;
+    if (!draftStorage.error || window.confirm("Черновик не сохранён на устройстве. Закрыть форму с риском потери изменений?")) onClose();
+  }
   const setChem = (i, k) => (e) => { const n = chems.slice(); n[i] = { ...n[i], [k]: e.target.value }; setChems(n); };
   function methodLabel() {
     const parts = [];
@@ -718,41 +729,50 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints
     return parts.join(" + ") || "Наличные";
   }
   async function save() {
-    if (!navigator.onLine) { setOfflineSaved(true); return; }
+    if (savingRef.current || reasonMissing || equipMissing) return;
+    if (!navigator.onLine) { setOfflineSaved(draftStorage.persist()); return; }
+    savingRef.current = true;
     setSaving(true);
-    const details = chems
-      .filter((c) => c.chemical_id && Number(c.amount) > 0)
-      .map((c) => ({
-        chemical_id: c.chemical_id,
-        concentration: c.concentration === "" || c.concentration == null
-          ? (chemicals.find((x) => x.id === c.chemical_id)?.default_concentration ?? null)
-          : Number(c.concentration) || null,
-        method: c.method || defaultMethod,
-      }));
-    const lines = chems.filter((c) => c.chemical_id && Number(c.amount) > 0).map((c) => {
-      const ch = chemicals.find((x) => x.id === c.chemical_id);
-      const f = chemUnit(ch?.unit_kind).factor || 1000;
-      const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
-      return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
-    });
-    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, equipment, chemDetails: details,
-      checks: Object.entries(checks)
-        .filter(([, v]) => v && v.result)
-        .map(([pointId, v]) => ({ point_id: pointId, result: v.result, count: v.count === "" || v.count == null ? null : Number(v.count) || null, note: v.note || null })),
-      discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "",
-      debt: isDebt ? { amount: quoted - total, dueOn: debtDue, note: discountNote.trim() } : null }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
-    if (ok !== false) localStorage.removeItem(draftKey);
-    setSaving(false);
+    setSaveError("");
+    try {
+      const details = chems
+        .filter((c) => c.chemical_id && Number(c.amount) > 0)
+        .map((c) => ({
+          chemical_id: c.chemical_id,
+          concentration: c.concentration === "" || c.concentration == null
+            ? (chemicals.find((x) => x.id === c.chemical_id)?.default_concentration ?? null)
+            : Number(c.concentration) || null,
+          method: c.method || defaultMethod,
+        }));
+      const lines = chems.filter((c) => c.chemical_id && Number(c.amount) > 0).map((c) => {
+        const ch = chemicals.find((x) => x.id === c.chemical_id);
+        const f = chemUnit(ch?.unit_kind).factor || 1000;
+        const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
+        return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
+      });
+      const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, equipment, chemDetails: details,
+        checks: Object.entries(checks)
+          .filter(([, v]) => v && v.result)
+          .map(([pointId, v]) => ({ point_id: pointId, result: v.result, count: v.count === "" || v.count == null ? null : Number(v.count) || null, note: v.note || null })),
+        discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "",
+        debt: isDebt ? { amount: quoted - total, dueOn: debtDue, note: discountNote.trim() } : null }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
+      if (ok === true) draftStorage.clear();
+      else setSaveError("Сохранение отчёта не подтверждено. Проверьте сообщение об ошибке; черновик оставлен в форме.");
+    } catch { setSaveError("Не удалось подтвердить сохранение. Черновик оставлен в форме. Перед повторной отправкой проверьте статус заявки — сервер мог принять запрос."); }
+    finally { savingRef.current = false; setSaving(false); }
   }
   return (
-    <ModalShell title="Отчёт по заявке" onClose={onClose} footer={<>
-      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+    <ModalShell title="Отчёт по заявке" onClose={requestClose} footer={<>
+      <button className="kd-btn ghost" disabled={saving} onClick={requestClose}>Отмена</button>
       <button className="kd-btn primary" disabled={saving || reasonMissing || equipMissing} onClick={save}>{saving ? "Сохраняем…" : "Сохранить отчёт"}</button>
     </>}>
+      {saveError && <div className="kd-err" role="alert">{saveError}</div>}
+      {draftStorage.error && <div className="kd-err" role="alert">{draftStorage.error}</div>}
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
       <PartnerOrigin name={partnerName || job.partner_name} />
       {!navigator.onLine && <div className="kd-offline-draft"><Info size={17} /><div><strong>Нет связи</strong><span>Заполняйте отчёт — черновик сохраняется на этом устройстве. Отправьте его после восстановления интернета.</span></div></div>}
-      {offlineSaved && <div className="kd-allgood"><CheckCircle2 size={18} />Черновик сохранён на устройстве</div>}
+      {offlineSaved && !draftStorage.error && <div className="kd-allgood"><CheckCircle2 size={18} />Черновик сохранён на устройстве</div>}
 
       <div className="kd-section" style={{ marginTop: 0 }}>Чем работали</div>
       <div className="kd-muted" style={{ marginBottom: 8 }}>
@@ -914,6 +934,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints
         </div>
         <Field label="Кому / реквизиты"><input value={docNote} onChange={(e) => setDocNote(e.target.value)} placeholder="ТОО «...», БИН ..." /></Field>
       </>)}
+      </fieldset>
     </ModalShell>
   );
 }
