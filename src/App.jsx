@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
-import { REPEAT_CAUSES, REPEAT_FAULTS, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
+import { TREATMENT_METHODS, REPEAT_CAUSES, REPEAT_FAULTS, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
@@ -311,6 +311,7 @@ function Dashboard({ session, profile }) {
   const [jobEquipment, setJobEquipment] = useState([]);
   const [debts, setDebts] = useState([]);
   const [repeatCauses, setRepeatCauses] = useState([]);
+  const [chemDetails, setChemDetails] = useState([]);
   const [paperworkJobs, setPaperworkJobs] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -542,6 +543,7 @@ function Dashboard({ session, profile }) {
         if (canEditJobs) await supabase.rpc("kd_scan_alerts");
         return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
       } },
+    { key: "job_chem_details", label: "Протокол обработки", run: () => supabase.from("job_chem_details").select("*"), set: setChemDetails },
     { key: "repeat_causes", label: "Разбор повторных выездов", run: () => supabase.from("repeat_causes").select("*"), set: setRepeatCauses },
     { key: "job_debts", label: "Долги клиентов", run: () => supabase.from("job_debts").select("*").order("due_on"), set: setDebts },
     { key: "job_equipment", label: "Оборудование на заявках", run: () => supabase.from("job_equipment").select("*"), set: setJobEquipment },
@@ -652,7 +654,7 @@ function Dashboard({ session, profile }) {
   // обслуживания по договору и справочники, которые пополняются на лету.
   const reloadJobs = () => load([
     "jobs", "job_proofs", "job_helpers", "job_discounts",
-    "client_followups", "quality_checks", "service_contracts", "job_equipment", "job_debts", "repeat_causes",
+    "client_followups", "quality_checks", "service_contracts", "job_equipment", "job_debts", "repeat_causes", "job_chem_details",
     "client_sources", "pest_types", "objects", "clients",
   ]);
   const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
@@ -1282,6 +1284,14 @@ function Dashboard({ session, profile }) {
     });
     if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); reloadJobs(); return false; }
     await recordClientEvent(job, "done", "Работа выполнена", `Оплата: ${fmt((Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0))} ₸`);
+    // Концентрация и метод — в отдельную таблицу: строки расхода пишет
+    // защищённая функция, куда поля не добавить.
+    if (Array.isArray(report.chemDetails) && report.chemDetails.length) {
+      const { error: cdError } = await supabase.from("job_chem_details").upsert(
+        report.chemDetails.map((d) => ({ ...d, job_id: job.id, created_by: session.user.id })),
+        { onConflict: "job_id,chemical_id" });
+      if (cdError) showToast("Отчёт сохранён, но концентрация не записалась: " + cdError.message);
+    }
     // Оборудование пишется отдельной записью по той же причине, что и скидка:
     // отчёт уходит защищённой функцией, куда поля не добавить, а писать в
     // заявку напрямую исполнителю запрещено политикой.
@@ -5637,7 +5647,26 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "object" && (() => {
         const obj = objects.find((o) => String(o.id) === String(modal.objectId));
         if (!obj) return null;
-        return <ObjectModal object={obj} summary={calc.objectSummary(obj.id, jobs)}
+        // Журнал применения: строки расхода плюс вещество из карточки препарата
+        // и концентрация с методом из протокола обработки.
+        const detailByKey = new Map(chemDetails.map((d) => [`${d.job_id}:${d.chemical_id}`, d]));
+        const protocol = jobs
+          .filter((j) => String(j.object_id) === String(obj.id) && j.status === "done")
+          .sort((a, b2) => String(b2.scheduled_date || "").localeCompare(String(a.scheduled_date || "")))
+          .flatMap((j) => (j.chemicals || []).map((line) => {
+            const chem = calc.lineChem(line, chemicals);
+            const det = chem ? detailByKey.get(`${j.id}:${chem.id}`) : null;
+            return {
+              date: j.scheduled_date,
+              name: chem?.name || line.name || "препарат",
+              substance: chem?.active_substance || "",
+              concentration: det?.concentration ?? chem?.default_concentration ?? null,
+              method: det?.method ? TREATMENT_METHODS[det.method] || det.method : "",
+              amount: fmtAmount(lineAmount(line), chem?.unit_kind),
+              tech: techById(j.assigned_to)?.full_name || "",
+            };
+          }));
+        return <ObjectModal object={obj} protocol={protocol} summary={calc.objectSummary(obj.id, jobs)}
           techName={(id) => techById(id)?.full_name || personName(id)}
           canEdit={canEditJobs} onClose={() => setModal(null)} onSave={saveObject} />;
       })()}
