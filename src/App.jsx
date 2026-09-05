@@ -14,7 +14,7 @@ import { TREATMENT_METHODS, REPEAT_CAUSES, REPEAT_FAULTS, equipmentLabel, PAPERW
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -312,6 +312,7 @@ function Dashboard({ session, profile }) {
   const [debts, setDebts] = useState([]);
   const [repeatCauses, setRepeatCauses] = useState([]);
   const [branches, setBranches] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [branchFilter, setBranchFilter] = useState("all");
   const [chemDetails, setChemDetails] = useState([]);
   const [controlPoints, setControlPoints] = useState([]);
@@ -551,6 +552,7 @@ function Dashboard({ session, profile }) {
     { key: "control_checks", label: "Осмотры точек", run: () => supabase.from("control_checks").select("*").order("checked_on", { ascending: false }), set: setControlChecks },
     { key: "job_chem_details", label: "Протокол обработки", run: () => supabase.from("job_chem_details").select("*"), set: setChemDetails },
     { key: "branches", label: "Филиалы", run: () => supabase.from("branches").select("*").order("name"), set: setBranches },
+    { key: "orders", label: "Заказы", run: () => supabase.from("orders").select("*"), set: setOrders },
     { key: "repeat_causes", label: "Разбор повторных выездов", run: () => supabase.from("repeat_causes").select("*"), set: setRepeatCauses },
     { key: "job_debts", label: "Долги клиентов", run: () => supabase.from("job_debts").select("*").order("due_on"), set: setDebts },
     { key: "job_equipment", label: "Оборудование на заявках", run: () => supabase.from("job_equipment").select("*"), set: setJobEquipment },
@@ -1220,11 +1222,52 @@ function Dashboard({ session, profile }) {
     || branches[0]?.id
     || null;
 
+  // Заказ — то, за что клиент платит; визит — выезд. Заказ заводится вместе с
+  // первым визитом, дальше все выезды по нему цепляются к тому же заказу.
+  //
+  // Если заказ завести не удалось (миграция ещё не прогнана, прав не хватило),
+  // заявка всё равно создаётся. Остановить приём заявок из-за отчётности —
+  // худшее, что программа может сделать с работающим бизнесом.
+  async function ensureOrder(job) {
+    const { data, error } = await supabase.from("orders").insert({
+      address: job.address || null, object_id: job.object_id || null,
+      client_phone: job.client_phone || null, contact_name: job.contact_name || null,
+      branch_id: job.branch_id || defaultBranchId(),
+      agreed_price: job.quoted_price ?? null,
+      status: "open", opened_on: job.scheduled_date || null,
+      created_by: session.user.id,
+    }).select("id").single();
+    if (error) { logClientError(error, "ensureOrder"); return null; }
+    return data?.id || null;
+  }
+
+  // Номер визита внутри заказа. Считаем по уже загруженным заявкам: заказ —
+  // это единицы визитов, а не тысячи, и лишний запрос к базе тут не нужен.
+  function nextVisitNo(orderId) {
+    if (!orderId) return 1;
+    const mine = jobs.filter((j) => String(j.order_id || "") === String(orderId));
+    return mine.reduce((max, j) => Math.max(max, Number(j.visit_no) || 0), 0) + 1;
+  }
+
+  // Все визиты заказа по порядку. Заявка без заказа — заказ из одного визита:
+  // так она не выпадает из карточки, пока перенос ещё не прогнали.
+  function visitsOfOrder(job) {
+    if (!job?.order_id) return job ? [job] : [];
+    return jobs
+      .filter((j) => String(j.order_id || "") === String(job.order_id))
+      .sort((a, b) => (Number(a.visit_no) || 0) - (Number(b.visit_no) || 0)
+        || String(a.scheduled_date || "").localeCompare(String(b.scheduled_date || "")));
+  }
+
   async function createJob(payload) {
     const quoted = quotedPriceFor(payload);
     const objectId = await ensureObject(payload);
-    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, quoted_price: quoted, object_id: objectId, branch_id: payload.branch_id || defaultBranchId(), created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
+    const orderId = await ensureOrder({ ...payload, object_id: objectId, quoted_price: quoted });
+    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, quoted_price: quoted, object_id: objectId, branch_id: payload.branch_id || defaultBranchId(), order_id: orderId, visit_no: 1, visit_kind: payload.service_contract_id ? "contract" : "primary", created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
     if (error) { showToast("Ошибка: " + error.message); return false; }
+    // Корневой визит записывается в заказ: по нему повторный запуск переноса
+    // видит, что заказ уже заведён, и не плодит дубли.
+    if (orderId && created?.id) await supabase.from("orders").update({ root_job_id: created.id }).eq("id", orderId);
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
@@ -1290,16 +1333,45 @@ function Dashboard({ session, profile }) {
     showToast("Заявка возвращена в «Выполненные»"); reloadJobs();
   }
   async function createRepeatJob(job) {
+    // Повторный выезд — визит того же заказа, а не новая продажа. Иначе он
+    // навсегда останется заявкой с нулевой выручкой и будет занижать чек.
     const ins = await supabase.from("jobs").insert({
       type: "Вторичная", scheduled_date: null, scheduled_time: "", address: job.address, floor: job.floor,
       area: job.area, source: job.source, pest: job.pest, price_options: job.price_options,
-      client_phone: job.client_phone, guarantee_months: job.guarantee_months, status: "new", repeat_of: job.id, created_by: session.user.id,
+      client_phone: job.client_phone, guarantee_months: job.guarantee_months, status: "new", repeat_of: job.id,
+      object_id: job.object_id || null, branch_id: job.branch_id || null,
+      order_id: job.order_id || null, visit_no: nextVisitNo(job.order_id), visit_kind: "guarantee",
+      created_by: session.user.id,
     });
     if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
     await supabase.from("jobs").update({ repeat_state: "finished" }).eq("id", job.id);
     await logAction("Повтор", `Создана повторная заявка · ${job.pest} · ${job.address}`);
     showToast("Повторная заявка создана"); reloadJobs();
   }
+  // Контрольный выезд: второй визит по тому же заказу, входящий в цену.
+  //
+  // Раньше такого выезда не существовало как понятия — курс из двух обработок
+  // приходилось заводить двумя несвязанными заявками, и заказ распадался.
+  async function addVisit(job, payload) {
+    const orderId = job.order_id;
+    if (!orderId) { showToast("У заявки нет заказа — прогоните миграцию orders"); return "Нет заказа"; }
+    const { error } = await supabase.from("jobs").insert({
+      type: "Плановая", scheduled_date: payload.date || null, scheduled_time: "",
+      address: job.address, floor: job.floor, area: job.area, source: job.source, pest: job.pest,
+      client_phone: job.client_phone, contact_name: job.contact_name,
+      object_id: job.object_id || null, branch_id: job.branch_id || null,
+      guarantee_months: job.guarantee_months, status: "new",
+      // Цены нет намеренно: контрольный выезд уже оплачен в составе заказа.
+      price_options: [{ label: "Входит в заказ", amount: 0 }],
+      order_id: orderId, visit_no: nextVisitNo(orderId), visit_kind: "control",
+      note: payload.note || null, created_by: session.user.id,
+    });
+    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+    await logAction("Заказ", `Добавлен контрольный визит · ${job.pest || ""} · ${job.address}`);
+    setModal(null); showToast("Визит добавлен"); reloadJobs();
+    return null;
+  }
+
   async function assignJob(job, techId) {
     const newStatus = job.status === "done" ? "done" : (techId ? "assigned" : "new");
     const nextStage = job.status === "done" ? "done" : (techId ? "assigned" : "new");
@@ -2141,8 +2213,13 @@ function Dashboard({ session, profile }) {
       pest: contract.service, price_options: [{ label: "Абонентское обслуживание", amount: Number(contract.price) || 0 }], client_phone: contract.phone,
       contact_name: contract.client_name, guarantee_months: 0, status: "new", service_contract_id: contract.id, created_by: session.user.id,
     };
-    const ins = await supabase.from("jobs").insert(payload);
+    // Плановый выезд по договору — тоже заказ: у него своя цена и свой
+    // результат. Иначе год обслуживания остаётся цепочкой заявок, которая
+    // нигде не сходится в сумму.
+    const orderId = await ensureOrder({ ...payload, quoted_price: Number(contract.price) || 0 });
+    const ins = await supabase.from("jobs").insert({ ...payload, order_id: orderId, visit_no: 1, visit_kind: "contract" }).select("id").single();
     if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
+    if (orderId && ins.data?.id) await supabase.from("orders").update({ root_job_id: ins.data.id }).eq("id", orderId);
     const next = parseIso(contract.next_service_date) || new Date(); next.setDate(next.getDate() + (Number(contract.interval_days) || 30));
     await supabase.from("service_contracts").update({ last_generated_date: contract.next_service_date, next_service_date: isoOf(next), updated_at: new Date().toISOString() }).eq("id", contract.id);
     await logAction("Абонент", `Создана плановая заявка: ${contract.client_name} · ${isoToRu(contract.next_service_date)}`);
@@ -2835,6 +2912,21 @@ function Dashboard({ session, profile }) {
   // Пока филиал один, отчёт покажет одну строку. Смысл в том, что в день
   // открытия второго города он заработает сам.
   const branchRows = calc.branchTotals(jobs, branches, { inPeriod: inPeriodIso, profitOf: fullProfitOf });
+  // Заказ против визита. В прибыли ВИЗИТА гарантию не учитываем: гарантийный
+  // выезд лежит в том же заказе отдельным визитом со своими затратами, и если
+  // добавить к нему ещё и guaranteeCost исходной заявки, затраты задвоятся.
+  const visitProfitOf = (j) => {
+    const { labor, overhead } = allocFor(j);
+    return calc.jobFullEconomics(j, {
+      chemicals, purchases: chemPurchases, guaranteeCost: 0, qrFeeRate,
+      labor, overhead, marketing: marketingFor(j), helpers: calc.helpersTotal(j.id, jobHelpers),
+    }).fullProfit;
+  };
+  const orderSummary = calc.orderStats(jobs, { inPeriod: inPeriodIso });
+  const multiVisitOrders = calc.orderTotals(jobs, { inPeriod: inPeriodIso, profitOf: visitProfitOf })
+    .filter((r) => r.doneVisits > 1)
+    .sort((a, b) => b.visits - a.visits || a.profit - b.profit)
+    .slice(0, 10);
   const trueLossJobs = completedEconomics.filter((r) => r.econ.fullProfit < 0);
   // Длительность выездов. Отметки этапов писались давно, но их никто не смотрел.
   const durations = calc.durationStats(doneJobs);
@@ -4416,6 +4508,57 @@ function Dashboard({ session, profile }) {
               )}
             </div>
 
+            {/* До переноса у заявок нет заказа, и отчёт показал бы «один визит на
+               заказ» — то есть тихо соврал бы, что повторных выездов не бывает.
+               Лучше не показывать ничего, чем показывать спокойную неправду. */}
+            {orders.length > 0 && orderSummary.orders > 0 && (
+              <div className="kd-card" style={{ marginTop: 14 }}>
+                <div className="kd-section">Заказы и визиты · {range.label}</div>
+                <div className="kd-muted" style={{ marginBottom: 10 }}>
+                  Заказ — то, за что клиент заплатил. Визит — выезд. Гарантийный и контрольный выезды
+                  входят в цену заказа и денег не приносят, поэтому чек по визиту всегда ниже — и это
+                  не падение чека, а другой вопрос.
+                </div>
+                <div className="kd-kpigrid">
+                  <div className="kd-kpicard"><span>Чек по заказу</span><strong>{fmt(orderSummary.avgOrder)} ₸</strong><small>сколько платит клиент</small></div>
+                  <div className="kd-kpicard"><span>Чек по визиту</span><strong>{fmt(orderSummary.avgVisit)} ₸</strong><small>так считалось раньше</small></div>
+                  <div className="kd-kpicard"><span>Визитов на заказ</span><strong>{orderSummary.visitsPerOrder}</strong><small>{orderSummary.multiVisitOrders} заказ(ов) больше одного</small></div>
+                  <div className="kd-kpicard"><span>С выездом по гарантии</span><strong className={orderSummary.guaranteeShare >= 10 ? "neg" : ""}>{orderSummary.guaranteeShare}%</strong><small>{orderSummary.guaranteeOrders} из {orderSummary.orders}</small></div>
+                </div>
+                <div className="kd-muted" style={{ marginTop: 8 }}>
+                  {orderSummary.orders} заказ(ов), {orderSummary.visits} выполненных визитов.
+                  Заказ относится к периоду первого выезда: гарантийный визит в следующем месяце
+                  не создаёт там заказ с нулевой выручкой.
+                </div>
+
+                {multiVisitOrders.length > 0 && (
+                  <>
+                    <div className="kd-section" style={{ marginTop: 14 }}>Заказы, потребовавшие больше одного выезда</div>
+                    <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.8fr .7fr 1fr 1fr .8fr" }}>
+                      <span>Адрес</span><span>Визитов</span><span>Выручка</span><span>Прибыль</span><span>Дней</span>
+                    </div>
+                    {multiVisitOrders.map((r) => (
+                      <div className="kd-ledgerrow" key={r.key} style={{ gridTemplateColumns: "1.8fr .7fr 1fr 1fr .8fr" }}>
+                        <span className="kd-ledgername">{r.address || "адрес не указан"}
+                          <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>
+                            {r.pest || "услуга"}{r.guaranteeVisits > 0 ? ` · гарантия ${r.guaranteeVisits}` : ""}
+                          </em>
+                        </span>
+                        <span>{r.doneVisits}</span>
+                        <span>{fmt(r.revenue)} ₸</span>
+                        <strong style={{ color: r.profit < 0 ? "var(--rust)" : "inherit" }}>{fmt(r.profit)} ₸</strong>
+                        <span className="kd-muted">{r.spanDays}</span>
+                      </div>
+                    ))}
+                    <div className="kd-muted" style={{ marginTop: 8 }}>
+                      Прибыль здесь — по всему заказу, вместе с бесплатными выездами. Заказ с отрицательной
+                      прибылью означает, что переделка съела всё, что на нём заработали.
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {channelRows.length > 0 && (
               <div className="kd-card" style={{ marginTop: 14 }}>
                 <div className="kd-section">Рекламные каналы · {range.label}</div>
@@ -5764,7 +5907,12 @@ function Dashboard({ session, profile }) {
       })()} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "reportSuccess" && <ReportSuccessModal onClose={() => setModal(null)} />}
       {modal?.kind === "view" && <ViewModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} chemicalsUnavailable={reportChemsFailed} onClose={() => setModal(null)} />}
-      {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} partnerName={partnerNameOf(modal.job)} onReport={() => setModal({ kind: "report", job: modal.job })} onClose={() => setModal(null)} />}
+      {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} partnerName={partnerNameOf(modal.job)}
+        siblings={visitsOfOrder(modal.job)} canAddVisit={canEditJobs}
+        onAddVisit={(job) => setModal({ kind: "addVisit", job })}
+        onReport={() => setModal({ kind: "report", job: modal.job })} onClose={() => setModal(null)} />}
+      {modal?.kind === "addVisit" && <AddVisitModal job={modal.job}
+        onClose={() => setModal({ kind: "details", job: modal.job })} onSave={addVisit} />}
       {modal?.kind === "proof" && <ProofModal job={modal.job} proof={proofByJob(modal.job.id)} media={proofMedia} onClose={() => setModal(null)} onSave={saveJobProof} />}
       {modal?.kind === "history" && <HistoryModal
         blockedInfo={blockedClient(modal.job.client_phone)}

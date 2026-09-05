@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
-import { CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -74,6 +74,10 @@ function JobCard({ job, onObject, blocked, isAdmin, assignedName, partnerName, p
         <span>{job.type}</span><span>·</span><span className="kd-datetimetag">{isoToRu(job.scheduled_date) || "без даты"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
         {job.floor && (<><span>·</span><span>{job.floor} этаж</span></>)}
         {job.area && (<><span>·</span><span>{job.area} м²</span></>)}
+        {/* Исполнитель должен видеть, что едет вторым визитом по уже проданному
+           заказу, а не на новую работу: от этого зависит и что он там делает,
+           и что говорит клиенту про деньги. */}
+        {Number(job.visit_no) > 1 && (<><span>·</span><span className="kd-repeattag">визит {job.visit_no}{VISIT_KINDS[job.visit_kind] ? ` · ${VISIT_KINDS[job.visit_kind].short}` : ""}</span></>)}
       </div>
       <PartnerOrigin name={visiblePartnerName} />
       <div className="kd-addr"><AddressText text={job.address} /></div>
@@ -914,7 +918,53 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints
   );
 }
 
-function DetailsModal({ job, header, partnerName, onReport, onClose }) {
+// Контрольный визит: второй выезд по уже проданному заказу.
+//
+// Цены у него нет намеренно — он входит в стоимость заказа. Если за выезд
+// берут деньги, это не контрольный визит, а новая заявка.
+function AddVisitModal({ job, onClose, onSave }) {
+  const [date, setDate] = useState("");
+  const [note, setNote] = useState("");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave(job, { date: date || null, note: note.trim() || null });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+
+  return (
+    <ModalShell title="Визит по заказу" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Добавить визит"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <div className="kd-muted" style={{ marginBottom: 12 }}>
+        {job.pest || "Заказ"} · <AddressText text={job.address} />
+      </div>
+
+      <Field label="Когда">
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </Field>
+      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+        Дату можно не ставить — визит попадёт в «Новые» и будет ждать согласования с клиентом.
+      </div>
+
+      <Field label="Что сделать">
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="контроль после обработки от клопов" />
+      </Field>
+
+      <div className="kd-muted" style={{ marginTop: 10 }}>
+        Визит входит в стоимость заказа и денег не приносит: заказ уже оплачен.
+        Если за выезд берут отдельную плату — это новая заявка, а не визит.
+      </div>
+    </ModalShell>
+  );
+}
+
+function DetailsModal({ job, header, partnerName, siblings = [], canAddVisit = false, onAddVisit, onReport, onClose }) {
   const [view, setView] = useState("card");
   const [copied, setCopied] = useState(false);
   const msg = buildMsg(job, header);
@@ -953,6 +1003,42 @@ function DetailsModal({ job, header, partnerName, onReport, onClose }) {
           ))}
           {job.type !== "Осмотр" && <div className="kd-row"><span>Гарантия</span><strong>{job.guarantee_months || 6} мес.</strong></div>}
           {job.note && <div className="kd-notebox" style={{ marginTop: 12 }}>📝 {job.note}</div>}
+
+          {/* Заказ — то, за что клиент заплатил; визит — выезд. Пока их видно
+             только вместе, второй выезд выглядит новой продажей с нулевой
+             выручкой, а не частью уже проданной работы. */}
+          {siblings.length > 1 && (
+            <>
+              <div className="kd-section" style={{ marginTop: 14 }}>Заказ · {siblings.length} визита</div>
+              {siblings.map((v) => {
+                const kind = VISIT_KINDS[v.visit_kind] || null;
+                const here = String(v.id) === String(job.id);
+                return (
+                  <div className="kd-row" key={v.id}>
+                    <span>
+                      {v.visit_no ? `${v.visit_no}. ` : ""}{kind ? kind.label : "Выезд"}
+                      {here && <em className="kd-muted" style={{ fontStyle: "normal" }}> · этот</em>}
+                    </span>
+                    <strong style={{ textAlign: "right" }}>
+                      {isoToRu(v.scheduled_date) || "дата не назначена"}
+                      <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 11 }}>
+                        {v.status === "done" ? `${fmt(v.report_paid || 0)} ₸` : "не выполнен"}
+                      </em>
+                    </strong>
+                  </div>
+                );
+              })}
+              <div className="kd-row total">
+                <span>Заказ принёс</span>
+                <strong>{fmt(siblings.filter((v) => v.status === "done").reduce((sum, v) => sum + (Number(v.report_paid) || 0), 0))} ₸</strong>
+              </div>
+            </>
+          )}
+          {canAddVisit && job.order_id && (
+            <button className="kd-btn ghost sm" style={{ marginTop: 10 }} onClick={() => onAddVisit(job)}>
+              Добавить визит к заказу
+            </button>
+          )}
         </>
       ) : (
         <>
@@ -4019,4 +4105,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };

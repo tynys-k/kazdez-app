@@ -21,6 +21,7 @@ import {
   marketingPerJob, channelEconomics,
   controlPointsState, infestationTrend,
   branchTotals,
+  orderTotals, orderStats,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1928,5 +1929,78 @@ describe("филиалы", () => {
       profitOf: () => 0,
     });
     expect(rows.find((r) => r.branchId === "b1")).toBeUndefined();
+  });
+});
+
+describe("заказ и визит", () => {
+  // Продали одну обработку за 25 000 и съездили дважды: второй раз по
+  // гарантии, бесплатно. Раньше это было «две заявки, средний чек 12 500».
+  const chain = [
+    { id: "a1", order_id: "o1", visit_no: 1, visit_kind: "primary", status: "done",
+      scheduled_date: "2026-08-10", report_paid: 25000, address: "Абая 1", pest: "Клопы" },
+    { id: "a2", order_id: "o1", visit_no: 2, visit_kind: "guarantee", repeat_of: "a1", status: "done",
+      scheduled_date: "2026-08-24", report_paid: 0, address: "Абая 1" },
+  ];
+
+  it("чек по заказу — то, что клиент заплатил, а не поделённое на выезды", () => {
+    const st = orderStats(chain);
+    expect(st.orders).toBe(1);
+    expect(st.visits).toBe(2);
+    expect(st.avgOrder).toBe(25000);
+    expect(st.avgVisit).toBe(12500);
+  });
+
+  it("видно, скольким заказам понадобился гарантийный выезд", () => {
+    const st = orderStats([...chain, { id: "b1", order_id: "o2", status: "done", scheduled_date: "2026-08-12", report_paid: 10000 }]);
+    expect(st.orders).toBe(2);
+    expect(st.guaranteeOrders).toBe(1);
+    expect(st.guaranteeShare).toBe(50);
+    expect(st.visitsPerOrder).toBe(1.5);
+  });
+
+  it("заявка без заказа не выпадает из отчёта, а считается заказом из одного визита", () => {
+    // Пока перенос не прошёл, order_id пустой. Молча потерять такую выручку
+    // хуже, чем показать её отдельным заказом.
+    const st = orderStats([{ id: "x1", status: "done", scheduled_date: "2026-08-01", report_paid: 12000 }]);
+    expect(st.orders).toBe(1);
+    expect(st.revenue).toBe(12000);
+  });
+
+  it("заказ относится к периоду первого визита, даже если гарантия была позже", () => {
+    const later = [
+      chain[0],
+      { ...chain[1], scheduled_date: "2026-09-03" },
+    ];
+    const aug = orderTotals(later, { inPeriod: (iso) => String(iso || "").slice(0, 7) === "2026-08" });
+    const sep = orderTotals(later, { inPeriod: (iso) => String(iso || "").slice(0, 7) === "2026-09" });
+    expect(aug).toHaveLength(1);
+    expect(aug[0].revenue).toBe(25000);
+    expect(aug[0].spanDays).toBe(24);
+    // Сентябрь не получает заказ с нулевой выручкой, которого не продавал.
+    expect(sep).toHaveLength(0);
+  });
+
+  it("прибыль заказа складывается из всех визитов, включая бесплатный", () => {
+    const rows = orderTotals(chain, { profitOf: (j) => (j.id === "a1" ? 15000 : -4000) });
+    expect(rows[0].profit).toBe(11000);
+    expect(rows[0].margin).toBe(44);
+  });
+
+  it("отменённый визит не считается ни визитом, ни заказом", () => {
+    const st = orderStats([
+      { id: "c1", order_id: "o3", status: "canceled", scheduled_date: "2026-08-05", report_paid: 0 },
+    ]);
+    expect(st.orders).toBe(0);
+    expect(st.visits).toBe(0);
+  });
+
+  it("незакрытый заказ не разбавляет чек, но остаётся в списке", () => {
+    const st = orderStats([
+      ...chain,
+      { id: "d1", order_id: "o4", status: "new", scheduled_date: "2026-08-28" },
+    ]);
+    expect(st.orders).toBe(2);
+    expect(st.paidOrders).toBe(1);
+    expect(st.avgOrder).toBe(25000);
   });
 });
