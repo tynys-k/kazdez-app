@@ -2,6 +2,8 @@
 // Этап 3: единое окно, SLA, клиент 360, жизненный цикл и публичная страница заявки.
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
+import SessionGate from "./SessionGate";
+import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
 import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
@@ -81,29 +83,16 @@ class AppErrorBoundary extends React.Component {
 function AppContent() {
   installGlobalErrorLogging();
   const publicToken = new URLSearchParams(window.location.search).get("track");
-  const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [booting, setBooting] = useState(true);
   useEffect(() => {
     // Умолчание — тёмная: она и так у всех сейчас. Светлая включается сознательно
     // в Настройках, иначе после появления темы вся команда получила бы новый вид
     // приложения без предупреждения.
     document.documentElement.setAttribute("data-theme", localStorage.getItem("kd-theme") || "dark");
   }, []);
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setBooting(false); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
-    return () => sub.subscription.unsubscribe();
-  }, []);
-  useEffect(() => {
-    if (!session) { setProfile(null); return; }
-    supabase.from("profiles").select("id, role, full_name, phone, is_active, access_overrides").eq("id", session.user.id).single().then(({ data }) => setProfile(data));
-  }, [session]);
   if (publicToken) return <PublicJobPage token={publicToken} />;
-  if (booting) return <div className="kd-center">Загрузка…</div>;
-  if (!session) return <Login />;
-  if (profile?.is_active === false) return <div className="kd-center"><div className="kd-card" style={{ maxWidth: 460 }}><h2>Доступ отключён</h2><p className="kd-muted">Администратор временно отключил эту учётную запись.</p><button className="kd-btn ghost" onClick={() => supabase.auth.signOut()}>Выйти</button></div></div>;
-  return <Dashboard session={session} profile={profile} />;
+  return <SessionGate login={<Login />}>{(session, profile) =>
+    <Dashboard key={`${session.user.id}:${profile.role}:${profile.branch_id || ""}:${JSON.stringify(profile.access_overrides)}`} session={session} profile={profile} />
+  }</SessionGate>;
 }
 
 export default function App() {
@@ -115,9 +104,11 @@ function Login() {
   const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
   async function submit(e) {
     e.preventDefault(); setLoading(true); setErr("");
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pass });
-    if (error) setErr("Неверная почта или пароль");
-    setLoading(false);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pass });
+      if (error) setErr("Не удалось войти. Проверьте почту, пароль и соединение.");
+    } catch { setErr("Нет связи с сервером. Проверьте интернет и повторите вход."); }
+    finally { setLoading(false); }
   }
   return (
     <div className="kd-login">
@@ -423,24 +414,9 @@ function Dashboard({ session, profile }) {
   // report_chemicals растут вместе с историей (715 выполненных заявок × 1-3 препарата).
   // Обрезка происходит МОЛЧА, без ошибки: у админа просто пропадал расход по свежим
   // заявкам, а дезинфектор видел свои, потому что его выборка меньше порога.
-  // Тянем страницами, пока страница приходит полной.
+  // Тянем страницы до пустого ответа; неполный результат не выдаём за полный.
   async function fetchAllRows(table, order = null, pageSize = 1000) {
-    let from = 0; const all = [];
-    for (;;) {
-      let q = supabase.from(table).select("*");
-      if (order) q = q.order(order.column, { ascending: !!order.ascending });
-      const { data, error } = await q.range(from, from + pageSize - 1);
-      if (error) return { data: all.length ? all : null, error };
-      const rows = data || [];
-      all.push(...rows);
-      // Сдвигаемся на СКОЛЬКО ПРИШЛО, а не на размер страницы: у сервера свой
-      // потолок строк в ответе, и если он меньше pageSize, проверка
-      // «пришло меньше запрошенного — значит конец» останавливает нас на первой
-      // же странице и молча теряет остальные данные.
-      if (rows.length === 0) return { data: all, error: null };
-      from += rows.length;
-      if (from > 100000) return { data: all, error: null }; // защита от бесконечного цикла
-    }
+    return fetchRows(supabase, table, order, pageSize);
   }
   // Журнал действий, корзина и журнал сбоев — самые длинные таблицы в базе и
   // при этом нужны только в двух разделах. Раньше они тянулись при каждом
@@ -543,10 +519,16 @@ function Dashboard({ session, profile }) {
     // намеренно нет — единственный читатель тревог это приложение, и заход
     // человека полностью заменяет запуск по таймеру. База не работает
     // впустую, пока никто не смотрит.
+    // Грузим не только открытые: без закрытых нельзя ответить на вопрос
+    // «тревоги вообще разбирают или просто копят». Неделя закрытых — это
+    // десятки строк, не нагрузка.
     { key: "alerts", label: "Тревоги", set: setAlerts,
       run: async () => {
         if (canEditJobs) await supabase.rpc("kd_scan_alerts");
-        return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
+        const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+        return supabase.from("alerts").select("*")
+          .or(`resolved_at.is.null,resolved_at.gte.${weekAgo}`)
+          .order("created_at", { ascending: false });
       } },
     { key: "control_points", label: "Точки контроля", run: () => supabase.from("control_points").select("*").order("number"), set: setControlPoints },
     { key: "control_checks", label: "Осмотры точек", run: () => supabase.from("control_checks").select("*").order("checked_on", { ascending: false }), set: setControlChecks },
@@ -573,85 +555,85 @@ function Dashboard({ session, profile }) {
     return [...set];
   }
 
+  const sourceLoader = useRef(createSourceLoader());
+  const fullLoadVersion = useRef(0);
+  const hasLoadedJobs = useRef(false);
+  // A snapshot from another account or another set of rights must never be used.
+  const snapshotKey = `kd-offline-snapshot-v5:${session.user.id}:${profile.role}:${profile.branch_id || ""}:${JSON.stringify(profile.access_overrides)}`;
+
   async function load(only = null) {
-    const keys = only ? withDependencies(only) : null;
+    const keys = Array.isArray(only) ? withDependencies(only) : null;
     const picked = keys ? SOURCES.filter((s) => keys.includes(s.key)) : SOURCES;
+    const fullVersion = keys ? null : ++fullLoadVersion.current;
     if (!keys) setLoading(true);
     try {
-      const responses = await Promise.all(picked.map((s) => s.run()));
-      const res = {};
-      picked.forEach((s, i) => { res[s.key] = responses[i]; });
-
-      const warnings = picked
-        .map((s, i) => (responses[i].error ? `${s.label}: ${responses[i].error.message}` : null))
-        .filter(Boolean);
-      if (keys) {
-        // Частичное обновление знает только про свои таблицы: чужие
-        // предупреждения оставляем как есть, свои заменяем.
-        const mine = picked.map((s) => `${s.label}: `);
-        setDataWarnings((prev) => [...prev.filter((w) => !mine.some((m) => w.startsWith(m))), ...warnings]);
-      } else {
-        setDataWarnings(warnings);
-      }
-
-      for (const s of picked) if (s.set) s.set(res[s.key].data || []);
+      const res = await sourceLoader.current(picked);
+      setDataWarnings((prev) => mergeLoadWarnings(prev, picked, res));
+      // Failed and superseded sources retain their last confirmed value.
+      for (const s of picked) if (s.set && res[s.key] && !res[s.key].error) s.set(res[s.key].data);
 
       if (res.report_chemicals) setReportChemsFailed(!!res.report_chemicals.error);
-
-      // Офлайн-снимок нужен только при полной загрузке: частичное обновление
-      // без связи всё равно ничего не принесёт.
-      let offlineSnapshot = null;
-      if (!keys) { try { offlineSnapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { offlineSnapshot = null; } }
-      const useOfflineSnapshot = !keys && !navigator.onLine && !!res.jobs?.error && !!offlineSnapshot?.jobs;
-
-      if (res.jobs && res.report_chemicals) {
-        const chems = res.report_chemicals.data || [];
-        const mapped = (res.jobs.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) }));
-        setJobs(useOfflineSnapshot ? offlineSnapshot.jobs : mapped);
+      const jobsReady = res.jobs && !res.jobs.error && res.report_chemicals && !res.report_chemicals.error;
+      if (jobsReady) {
+        setJobs(attachReportChemicals(res.jobs.data, res.report_chemicals.data));
+        hasLoadedJobs.current = true;
+        setDataWarnings((prev) => prev.filter((warning) => !warning.startsWith("Офлайн-копия: ")));
       }
-      if (res.chemicals) setChemicals(useOfflineSnapshot ? (offlineSnapshot.chemicals || []) : (res.chemicals.data || []));
-      if (res.profiles) {
-        const people = useOfflineSnapshot ? (offlineSnapshot.profiles || []) : (res.profiles.data || []);
-        setTechs(people.filter((p) => p.role === "tech"));
-        setAllProfiles(people);
+      if (res.chemicals && !res.chemicals.error) setChemicals(res.chemicals.data);
+      if (res.profiles && !res.profiles.error) {
+        setTechs(res.profiles.data.filter((p) => p.role === "tech"));
+        setAllProfiles(res.profiles.data);
       }
-      if (res.app_settings) {
-        const settingsMap = useOfflineSnapshot ? (offlineSnapshot.settings || {}) : {};
-        if (!useOfflineSnapshot) (res.app_settings.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
-        // Печать и подпись в этот запрос не входят: если их уже подтянули,
-        // сохраняем — иначе фоновое обновление вымывало бы их из памяти, и
-        // документ печатался бы без печати.
-        setSettings((prev) => {
-          const kept = Object.fromEntries(COMPANY_IMAGE_KEYS.filter((k) => prev[k] != null).map((k) => [k, prev[k]]));
-          return { ...settingsMap, ...kept };
-        });
+      if (res.app_settings && !res.app_settings.error) {
+        const settingsMap = Object.fromEntries(res.app_settings.data.map((row) => [row.key, row.value]));
+        // Background refresh excludes images; preserve already loaded ones.
+        setSettings((prev) => ({
+          ...settingsMap,
+          ...Object.fromEntries(COMPANY_IMAGE_KEYS.filter((key) => prev[key] != null).map((key) => [key, prev[key]])),
+        }));
       }
 
-      // Офлайн-копию сохраняем только при полной загрузке: из частичной
-      // получился бы снимок без половины данных.
-      if (!keys && !useOfflineSnapshot && !res.jobs?.error) {
+      const cacheKeys = ["jobs", "report_chemicals", "chemicals", "profiles", "app_settings"];
+      if (!keys && cacheKeys.every((key) => res[key] && !res[key].error)) {
         try {
-          const chems = res.report_chemicals?.data || [];
-          const mapped = (res.jobs?.data || []).map((j) => ({ ...j, chemicals: chems.filter((c) => c.job_id === j.id) }));
-          const cacheJobs = mapped.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done").slice(0, 400);
-          const settingsMap = {};
-          (res.app_settings?.data || []).forEach((row) => { settingsMap[row.key] = row.value; });
-          localStorage.setItem("kd-offline-snapshot-v4", JSON.stringify({
-            jobs: cacheJobs, chemicals: res.chemicals?.data || [], profiles: res.profiles?.data || [],
-            settings: settingsMap, savedAt: new Date().toISOString(),
+          const mapped = attachReportChemicals(res.jobs.data, res.report_chemicals.data);
+          const cacheJobs = mapped.filter((job) => isAdmin || job.assigned_to === session.user.id || job.status !== "done")
+            .sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || ""))).slice(0, 400);
+          localStorage.setItem(snapshotKey, JSON.stringify({
+            owner: session.user.id, jobs: cacheJobs, chemicals: res.chemicals.data,
+            profiles: res.profiles.data.map(({ id, full_name, phone, role, is_active, branch_id }) => ({ id, full_name, phone, role, is_active, branch_id })),
+            settings: Object.fromEntries(res.app_settings.data.map((row) => [row.key, row.value])),
+            savedAt: new Date().toISOString(),
           }));
-        } catch { /* локальное хранилище может быть заполнено — онлайн-работе это не мешает */ }
+        } catch { /* Cache failure must not interrupt online work. */ }
+      } else if (!keys && !navigator.onLine && !hasLoadedJobs.current && (res.jobs?.error || res.report_chemicals?.error)) {
+        try {
+          const snapshot = JSON.parse(localStorage.getItem(snapshotKey) || "null");
+          if (snapshot?.owner === session.user.id && Array.isArray(snapshot.jobs) && Array.isArray(snapshot.chemicals)
+            && Array.isArray(snapshot.profiles) && snapshot.settings && Number.isFinite(Date.parse(snapshot.savedAt))) {
+            setJobs(snapshot.jobs);
+            if (res.chemicals?.error) setChemicals(snapshot.chemicals);
+            if (res.profiles?.error) {
+              setAllProfiles(snapshot.profiles);
+              setTechs(snapshot.profiles.filter((p) => p.role === "tech"));
+            }
+            if (res.app_settings?.error) setSettings(snapshot.settings);
+            setLastLoadedAt(new Date(snapshot.savedAt));
+            setDataWarnings((prev) => [...prev.filter((warning) => !warning.startsWith("Офлайн-копия: ")),
+              `Офлайн-копия: до 400 заявок на ${fmtTs(snapshot.savedAt)}. Финансы и остатки не подтверждены.`]);
+          }
+        } catch { /* Invalid cache is not a substitute for confirmed data. */ }
       }
-      if (useOfflineSnapshot) setDataWarnings([`Офлайн-режим: показаны данные на ${fmtTs(offlineSnapshot.savedAt)}`]);
-      setLastLoadedAt(useOfflineSnapshot && offlineSnapshot.savedAt ? new Date(offlineSnapshot.savedAt) : new Date());
+      // This timestamp means a complete successful refresh, not just an attempt.
+      if (!keys && picked.every((s) => res[s.key] && !res[s.key].error)) {
+        setLastLoadedAt(new Date());
+        setDataWarnings((prev) => prev.filter((warning) => !warning.startsWith("Загрузка: ")));
+      }
     } catch (error) {
-      let snapshot = null; try { snapshot = JSON.parse(localStorage.getItem("kd-offline-snapshot-v4") || "null"); } catch { snapshot = null; }
-      if (snapshot?.jobs) {
-        setJobs(snapshot.jobs); setChemicals(snapshot.chemicals || []); setAllProfiles(snapshot.profiles || []); setTechs((snapshot.profiles || []).filter((p) => p.role === "tech")); setSettings(snapshot.settings || {}); setLastLoadedAt(snapshot.savedAt ? new Date(snapshot.savedAt) : null);
-        setDataWarnings([`Нет связи с базой. Показана сохранённая копия на ${fmtTs(snapshot.savedAt)}`]);
-      } else setDataWarnings([`Не удалось связаться с базой: ${error?.message || "неизвестная ошибка"}`]);
+      setDataWarnings((prev) => [...prev.filter((warning) => !warning.startsWith("Загрузка: ")),
+        `Загрузка: не удалось обновить данные. ${error?.message || "Повторите попытку."}`]);
     } finally {
-      if (!keys) setLoading(false);
+      if (!keys && fullLoadVersion.current === fullVersion) setLoading(false);
     }
   }
 
@@ -2922,6 +2904,11 @@ function Dashboard({ session, profile }) {
       labor, overhead, marketing: marketingFor(j), helpers: calc.helpersTotal(j.id, jobHelpers),
     }).fullProfit;
   };
+  // В alerts теперь лежат и закрытые за неделю: они нужны сводке. Всё, что
+  // показывается как «требует решения», обязано брать openAlerts — иначе в
+  // списке появятся уже решённые проблемы.
+  const openAlerts = alerts.filter((a) => !a.resolved_at);
+  const alertDigest = calc.alertDigest(alerts);
   const orderSummary = calc.orderStats(jobs, { inPeriod: inPeriodIso });
   const multiVisitOrders = calc.orderTotals(jobs, { inPeriod: inPeriodIso, profitOf: visitProfitOf })
     .filter((r) => r.doneVisits > 1)
@@ -3147,10 +3134,10 @@ function Dashboard({ session, profile }) {
                 {dashboardAlerts.length > 0 && <span>{dashboardAlerts.length}</span>}
               </button>
               {notificationOpen && <div className="kd-notification-panel">
-                <div className="kd-notification-head"><div><strong>Требуют внимания</strong><span>{dashboardAlerts.length ? "сейчас, по данным приложения" : "всё под контролем"}</span></div></div>
+                <div className="kd-notification-head"><div><strong>Требуют внимания</strong><span>{dataWarnings.length ? "данные требуют обновления" : dashboardAlerts.length ? "сейчас, по данным приложения" : "по загруженным данным замечаний нет"}</span></div></div>
                 <div className="kd-notification-list">
                   {dashboardAlerts.length === 0
-                    ? <div className="kd-globalempty">Ничего не горит</div>
+                    ? <div className="kd-globalempty">{dataWarnings.length ? "Сначала обновите данные" : "По загруженным данным замечаний нет"}</div>
                     : dashboardAlerts.map((a) => (
                         <button key={a.id} className={a.tone === "danger" ? "urgent" : "warning"} onClick={() => { setTab(a.tab); setNotificationOpen(false); }}>
                           <span className="kd-notification-dot" />
@@ -3169,7 +3156,7 @@ function Dashboard({ session, profile }) {
             {tab === "docs" && canEditDocs && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}><Plus size={15} />Документ</button>}
             {tab === "opex" && canManageCash && <button className="kd-btn primary" onClick={() => setModal({ kind: "opex" })}><Plus size={15} />Расход</button>}
             {canAccess(`tab.${tab}`) && ["growth", "finance", "journal"].includes(tab) && <button className="kd-btn ghost" onClick={exportExcel}><Download size={15} />Excel</button>}
-            <button className="kd-iconbtn" disabled={loading} onClick={load} title="Обновить данные" aria-label="Обновить данные"><RefreshCw size={16} /></button>
+            <button className="kd-iconbtn" disabled={loading} onClick={() => load()} title="Обновить данные" aria-label="Обновить данные"><RefreshCw size={16} /></button>
           </div>
         </header>
 
@@ -3181,21 +3168,28 @@ function Dashboard({ session, profile }) {
       <main className="kd-main">
 
         {loading && <div className="kd-empty">Загрузка…</div>}
-        {!loading && isAdmin && dataWarnings.length > 0 && <details className="kd-systemwarning"><summary><AlertTriangle size={17} />Не все данные загрузились · {dataWarnings.length}</summary><div>{dataWarnings.map((warning) => <span key={warning}>{warning}</span>)}<button className="kd-btn ghost sm" onClick={load}>Повторить загрузку</button></div></details>}
+        {!loading && dataWarnings.length > 0 && <details className="kd-systemwarning" open><summary><AlertTriangle size={17} />Данные неполные или устарели · {dataWarnings.length}</summary><div><span>Не удалось обновить часть данных. Последние загруженные значения сохранены, но текущие суммы и статусы требуют проверки.</span>{isAdmin && dataWarnings.map((warning) => <span key={warning}>{warning}</span>)}<button className="kd-btn ghost sm" onClick={() => load()}>Повторить загрузку</button></div></details>}
 
         {!loading && tab === "today" && (
           <div className="kd-today">
-            {canEditJobs && alerts.length > 0 && (
+            {canEditJobs && openAlerts.length > 0 && (
               <section className="kd-card kd-alerts">
                 <div className="kd-tabbar" style={{ marginBottom: 10 }}>
                   <div>
-                    <div className="kd-section" style={{ margin: 0 }}>Требует решения · {alerts.length}</div>
+                    <div className="kd-section" style={{ margin: 0 }}>Требует решения · {openAlerts.length}</div>
                     <div className="kd-muted">
                       Правила считает база при заходе в приложение. Причина ушла — тревога закроется сама, отмечать ничего не нужно.
                     </div>
                   </div>
                 </div>
-                {[...alerts]
+                {/* Список открытых отвечает на вопрос «что горит». Сводка — на
+                   более важный: разбирают их вообще или просто копят. */}
+                <div className="kd-muted" style={{ marginBottom: 10 }}>
+                  За неделю: заведено {alertDigest.opened}, закрыто {alertDigest.resolved}.
+                  {alertDigest.growing && " Заводится больше, чем закрывается — список растёт."}
+                  {alertDigest.stale > 0 && ` Дольше трёх дней висит ${alertDigest.stale}${alertDigest.escalated > 0 ? `, из них поднято до владельца ${alertDigest.escalated}` : ""}.`}
+                </div>
+                {[...openAlerts]
                   .sort((a, b) => (a.severity === b.severity ? String(a.created_at).localeCompare(String(b.created_at)) : a.severity === "critical" ? -1 : 1))
                   .slice(0, 20)
                   .map((al) => (
@@ -3204,7 +3198,10 @@ function Dashboard({ session, profile }) {
                       <span>
                         <strong>{al.title}</strong>
                         {al.detail && <em>{al.detail}</em>}
-                        <small>{al.target || "без адресата"} · {fmtTs(al.created_at)}</small>
+                        <small>
+                          {al.target || "без адресата"} · {fmtTs(al.created_at)}
+                          {al.escalated_at && " · поднято: три дня без ответа"}
+                        </small>
                       </span>
                       {canEditJobs && (
                         <button className="kd-btn ghost sm" onClick={() => resolveAlert(al)} title="Проблема решена — убрать из списка">
@@ -3213,13 +3210,13 @@ function Dashboard({ session, profile }) {
                       )}
                     </div>
                   ))}
-                {alerts.length > 20 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 20 из {alerts.length}.</div>}
+                {openAlerts.length > 20 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 20 из {openAlerts.length}.</div>}
               </section>
             )}
             <section className="kd-todayhero">
               <div>
                 <div className="kd-eyebrow">{WEEKDAYS[new Date().getDay()]} · {isoToRu(todayIso)}</div>
-                <h2>{isAdmin ? (dashboardAlerts.length ? `${dashboardAlerts.length} решений требуют внимания` : "Компания работает по плану") : (todayActive.length ? `Сегодня ${todayActive.length} выезд.` : "На сегодня активных выездов нет")}</h2>
+                <h2>{dataWarnings.length ? "Данные требуют обновления" : isAdmin ? (dashboardAlerts.length ? `${dashboardAlerts.length} решений требуют внимания` : "По загруженным данным замечаний нет") : (todayActive.length ? `Сегодня ${todayActive.length} выезд.` : "На сегодня активных выездов нет")}</h2>
                 <p>{todayJobs.length ? `Всего ${todayJobs.length}, выполнено ${todayDone.length}. ${isAdmin ? `План дня — ${fmt(todayPlan)} ₸.` : "Следующий шаг виден в каждой заявке."}` : "Можно заняться задачами и подготовкой следующих выездов."}</p>
               </div>
               <div className="kd-todayhero-actions">
@@ -3233,7 +3230,7 @@ function Dashboard({ session, profile }) {
               <button onClick={() => setTab("jobs")}><span>Заявок сегодня</span><strong>{todayJobs.length}</strong><small>{todayActive.length} ещё в работе</small></button>
               <button onClick={() => setTab("done")}><span>Выполнено</span><strong>{todayDone.length}</strong><small>{todayJobs.length ? Math.round(todayDone.length / todayJobs.length * 100) : 0}% плана по количеству</small></button>
               {isAdmin ? <button onClick={() => setTab("finance")}><span>Выручка сегодня</span><strong>{fmt(todayRevenue)} ₸</strong><small>план по заявкам {fmt(todayPlan)} ₸</small></button> : <button onClick={() => setTab("tasks")}><span>Мои задачи</span><strong>{myOpenTasks}</strong><small>{overdueTaskList.length} просрочено</small></button>}
-              <button onClick={() => dashboardAlerts[0] && setTab(dashboardAlerts[0].tab)}><span>Требуют внимания</span><strong className={dashboardAlerts.length ? "danger" : "ok"}>{dashboardAlerts.length}</strong><small>{dashboardAlerts.length ? "открой список ниже" : "всё под контролем"}</small></button>
+              <button onClick={() => dashboardAlerts[0] && setTab(dashboardAlerts[0].tab)}><span>Требуют внимания</span><strong className={dataWarnings.length || dashboardAlerts.length ? "danger" : "ok"}>{dataWarnings.length ? "—" : dashboardAlerts.length}</strong><small>{dataWarnings.length ? "не все данные загружены" : dashboardAlerts.length ? "открой список ниже" : "по загруженным данным"}</small></button>
             </section>
 
             {/* Вторые четыре показателя владельца — компактной строкой, а не вторым рядом крупных плиток:
@@ -6007,7 +6004,7 @@ function Dashboard({ session, profile }) {
           leadStages={leadStages} onAddLeadStage={addLeadStage} onRemoveLeadStage={removeLeadStage} onMoveLeadStage={moveLeadStage}
           onClose={() => setModal(null)}
           onSaveSetting={saveAppSetting}
-          priceList={priceList} onSavePriceRow={savePriceRow} onRemovePriceRow={removePriceRow}
+          onSavePriceRow={savePriceRow} onRemovePriceRow={removePriceRow}
           onSetTheme={setTheme}
           onAddSource={(name) => addCatalogItem("client_sources", name)}
           onRemoveSource={(item) => removeCatalogItem("client_sources", item)}
