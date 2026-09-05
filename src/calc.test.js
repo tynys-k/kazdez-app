@@ -19,6 +19,7 @@ import {
   debtAging, clientDebt,
   repeatCauseReport,
   marketingPerJob, channelEconomics,
+  controlPointsState, infestationTrend,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1808,5 +1809,73 @@ describe("маркетинг на заказ", () => {
   it("убыточный канал видно по отрицательному возврату", () => {
     const rows = channelEconomics(jobs, { topups, channels, profitOf: () => -10000 });
     expect(rows.find((r) => r.channelId === "ch1").romi).toBeLessThan(0);
+  });
+});
+
+describe("точки контроля", () => {
+  const today = "2026-09-05";
+  const points = [
+    { id: "p1", object_id: "o1", number: "1", kind: "bait_station", installed_on: "2026-01-01" },
+    { id: "p2", object_id: "o1", number: "2", kind: "glue_board", installed_on: "2026-01-01" },
+    { id: "p3", object_id: "o1", number: "3", kind: "snap_trap", installed_on: "2026-08-25" },
+    { id: "p4", object_id: "o1", number: "4", kind: "bait_station", installed_on: "2026-01-01", removed_on: "2026-05-01" },
+  ];
+  const checks = [
+    { point_id: "p1", checked_on: "2026-09-01", result: "clean" },
+    { point_id: "p1", checked_on: "2026-06-01", result: "activity" },
+    { point_id: "p2", checked_on: "2026-06-01", result: "consumed" },
+  ];
+
+  it("берётся последний осмотр, а не первый", () => {
+    const st = controlPointsState(points, checks, { todayIso: today });
+    const p1 = st.rows.find((r) => r.point.id === "p1");
+    expect(p1.last.result).toBe("clean");
+    expect(p1.daysAgo).toBe(4);
+  });
+
+  it("снятая точка в обход не входит", () => {
+    const st = controlPointsState(points, checks, { todayIso: today });
+    expect(st.rows.map((r) => r.point.id)).not.toContain("p4");
+    expect(st.total).toBe(3);
+  });
+
+  it("никогда не осмотренная считается просроченной со дня установки", () => {
+    // про такую станцию мы просто ничего не знаем — это опаснее активности
+    const st = controlPointsState(points, checks, { todayIso: today, staleDays: 45 });
+    const p3 = st.rows.find((r) => r.point.id === "p3");
+    expect(p3.last).toBeNull();
+    expect(p3.daysAgo).toBe(11);
+    expect(p3.stale).toBe(false);
+  });
+
+  it("давно не осмотренная попадает в просроченные", () => {
+    const st = controlPointsState(points, checks, { todayIso: today, staleDays: 45 });
+    expect(st.rows.find((r) => r.point.id === "p2").stale).toBe(true);
+    expect(st.stale).toBe(1);
+  });
+
+  it("тревожный результат виден в сводке", () => {
+    const st = controlPointsState(points, checks, { todayIso: today });
+    expect(st.alarm).toBe(1); // p2 — приманка съедена
+    expect(st.neverChecked).toBe(1);
+  });
+
+  it("сверху тревожные, потом самые давние", () => {
+    const st = controlPointsState(points, checks, { todayIso: today });
+    expect(st.rows[0].point.id).toBe("p2");
+  });
+
+  it("динамика заражения считается по месяцам осмотров", () => {
+    const trend = infestationTrend(points, checks, { months: 4, todayIso: today });
+    const june = trend.find((t) => t.month === "2026-06");
+    expect(june).toMatchObject({ checks: 2, alarms: 2, rate: 100 });
+    const sept = trend.find((t) => t.month === "2026-09");
+    expect(sept).toMatchObject({ checks: 1, alarms: 0, rate: 0 });
+  });
+
+  it("месяц без осмотров даёт null, а не ноль процентов", () => {
+    // ноль означал бы «всё чисто», хотя на объект просто не приезжали
+    const trend = infestationTrend(points, checks, { months: 4, todayIso: today });
+    expect(trend.find((t) => t.month === "2026-07").rate).toBeNull();
   });
 });

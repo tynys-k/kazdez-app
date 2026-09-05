@@ -14,7 +14,7 @@ import { TREATMENT_METHODS, REPEAT_CAUSES, REPEAT_FAULTS, equipmentLabel, PAPERW
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -312,6 +312,8 @@ function Dashboard({ session, profile }) {
   const [debts, setDebts] = useState([]);
   const [repeatCauses, setRepeatCauses] = useState([]);
   const [chemDetails, setChemDetails] = useState([]);
+  const [controlPoints, setControlPoints] = useState([]);
+  const [controlChecks, setControlChecks] = useState([]);
   const [paperworkJobs, setPaperworkJobs] = useState([]);
   const [proofMedia, setProofMedia] = useState({ before: [], after: [], signatureUrl: "" });
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -543,6 +545,8 @@ function Dashboard({ session, profile }) {
         if (canEditJobs) await supabase.rpc("kd_scan_alerts");
         return supabase.from("alerts").select("*").is("resolved_at", null).order("created_at", { ascending: false });
       } },
+    { key: "control_points", label: "Точки контроля", run: () => supabase.from("control_points").select("*").order("number"), set: setControlPoints },
+    { key: "control_checks", label: "Осмотры точек", run: () => supabase.from("control_checks").select("*").order("checked_on", { ascending: false }), set: setControlChecks },
     { key: "job_chem_details", label: "Протокол обработки", run: () => supabase.from("job_chem_details").select("*"), set: setChemDetails },
     { key: "repeat_causes", label: "Разбор повторных выездов", run: () => supabase.from("repeat_causes").select("*"), set: setRepeatCauses },
     { key: "job_debts", label: "Долги клиентов", run: () => supabase.from("job_debts").select("*").order("due_on"), set: setDebts },
@@ -654,7 +658,7 @@ function Dashboard({ session, profile }) {
   // обслуживания по договору и справочники, которые пополняются на лету.
   const reloadJobs = () => load([
     "jobs", "job_proofs", "job_helpers", "job_discounts",
-    "client_followups", "quality_checks", "service_contracts", "job_equipment", "job_debts", "repeat_causes", "job_chem_details",
+    "client_followups", "quality_checks", "service_contracts", "job_equipment", "job_debts", "repeat_causes", "job_chem_details", "control_points", "control_checks",
     "client_sources", "pest_types", "objects", "clients",
   ]);
   const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
@@ -1061,6 +1065,24 @@ function Dashboard({ session, profile }) {
   // Если забрали у дезинфектора — сразу снимаем препарат с его остатка
   // корректировкой. Иначе у человека навсегда останется недостача, которую
   // он не делал, а разбираться с ней будем на ревизии через месяц.
+  async function saveControlPoint(object, payload) {
+    const { id, ...fields } = payload;
+    const res = id
+      ? await supabase.from("control_points").update(fields).eq("id", id)
+      : await supabase.from("control_points").insert({ ...fields, object_id: object.id, created_by: session.user.id });
+    if (res.error) { showToast("Ошибка: " + res.error.message); return res.error.message; }
+    await logAction("Точки контроля", `${object.address} · точка ${payload.number}`);
+    setModal({ kind: "object", objectId: object.id }); showToast("Сохранено"); load(["control_points"]); return null;
+  }
+
+  async function removeControlPoint(point) {
+    const { error } = await supabase.from("control_points")
+      .update({ removed_on: new Date().toISOString().slice(0, 10) }).eq("id", point.id);
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Точки контроля", `Снята точка ${point.number}`);
+    setModal({ kind: "object", objectId: point.object_id }); showToast("Точка снята"); load(["control_points"]);
+  }
+
   async function saveRepeatCause(job, patch) {
     const { error } = await supabase.from("repeat_causes").upsert({
       job_id: job.id, ...patch, created_by: session.user.id, updated_at: new Date().toISOString(),
@@ -1284,6 +1306,17 @@ function Dashboard({ session, profile }) {
     });
     if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); reloadJobs(); return false; }
     await recordClientEvent(job, "done", "Работа выполнена", `Оплата: ${fmt((Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0))} ₸`);
+    // Обход точек: отмечаем только то, что исполнитель реально осмотрел.
+    if (Array.isArray(report.checks) && report.checks.length) {
+      const { error: ccError } = await supabase.from("control_checks").upsert(
+        report.checks.map((c) => ({
+          ...c, job_id: job.id,
+          checked_on: job.scheduled_date || new Date().toISOString().slice(0, 10),
+          created_by: session.user.id,
+        })),
+        { onConflict: "point_id,job_id" });
+      if (ccError) showToast("Отчёт сохранён, но обход точек не записался: " + ccError.message);
+    }
     // Концентрация и метод — в отдельную таблицу: строки расхода пишет
     // защищённая функция, куда поля не добавить.
     if (Array.isArray(report.chemDetails) && report.chemDetails.length) {
@@ -5637,7 +5670,8 @@ function Dashboard({ session, profile }) {
         const reasons = [count === 0 ? "свободен в этот день" : `${count} заяв. в этот день`, sameArea ? "есть выезд рядом" : "", avgRating ? `качество ${avgRating.toFixed(1)}/5` : ""].filter(Boolean);
         return { off, night, count, score, reasons };
       }} />}
-      {modal?.kind === "report" && <ReportModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} discountThreshold={discountThreshold} primaryReport={(() => {
+      {modal?.kind === "report" && <ReportModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals}
+        controlPoints={controlPoints.filter((p) => !p.removed_on && String(p.object_id) === String(modal.job.object_id))} discountThreshold={discountThreshold} primaryReport={(() => {
         if (!modal.job.repeat_of) return null;
         const p = jobs.find((x) => x.id === modal.job.repeat_of);
         if (!p) return null;
@@ -5692,6 +5726,9 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "settle" && <SettleModal row={modal.row} money={modal.money} accounts={accounts}
         partnerName={partnerById(modal.row.partner_id)?.name}
         onClose={() => setModal({ kind: "paperwork", row: modal.row })} onSave={settlePaperwork} />}
+      {modal?.kind === "controlPoint" && <ControlPointModal object={modal.object} point={modal.point}
+        onClose={() => setModal({ kind: "object", objectId: modal.object.id })}
+        onSave={saveControlPoint} onRemove={removeControlPoint} />}
       {modal?.kind === "blockClient" && <BlockClientModal client={modal.client} onClose={() => setModal(null)} onSave={saveClientBlock} />}
       {modal?.kind === "object" && (() => {
         const obj = objects.find((o) => String(o.id) === String(modal.objectId));
@@ -5715,7 +5752,12 @@ function Dashboard({ session, profile }) {
               tech: techById(j.assigned_to)?.full_name || "",
             };
           }));
+        const objPoints = controlPoints.filter((p) => String(p.object_id) === String(obj.id));
+        const pointIds = new Set(objPoints.map((p) => String(p.id)));
         return <ObjectModal object={obj} protocol={protocol} summary={calc.objectSummary(obj.id, jobs)}
+          points={calc.controlPointsState(objPoints, controlChecks.filter((c) => pointIds.has(String(c.point_id))))}
+          onAddPoint={(o) => setModal({ kind: "controlPoint", object: o, point: null })}
+          onOpenPoint={(pt) => setModal({ kind: "controlPoint", object: obj, point: pt })}
           techName={(id) => techById(id)?.full_name || personName(id)}
           canEdit={canEditJobs} onClose={() => setModal(null)} onSave={saveObject} />;
       })()}

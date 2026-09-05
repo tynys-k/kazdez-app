@@ -207,6 +207,26 @@ const METHOD_BY_EQUIPMENT = {
   none: "bait",
 };
 
+// Точки контроля на объекте.
+const CONTROL_POINT_KINDS = {
+  bait_station: "Приманочная станция",
+  snap_trap: "Механическая ловушка",
+  live_trap: "Живоловка",
+  glue_board: "Клеевой монитор",
+  insect_monitor: "Феромонная ловушка",
+  uv_lamp: "Инсектицидная лампа",
+};
+
+// Результат осмотра. Порядок важен: он же задаёт, что тревожнее.
+const CHECK_RESULTS = {
+  clean: { label: "Чисто", alarm: false },
+  consumed: { label: "Приманка съедена", alarm: true },
+  activity: { label: "Есть активность", alarm: true },
+  damaged: { label: "Станция повреждена", alarm: true },
+  missing: { label: "Станция отсутствует", alarm: true },
+  replaced: { label: "Заменена", alarm: false },
+};
+
 // Чем работают на выезде.
 //
 // Первые два используются почти всегда и стоят на виду. Горячий туман и
@@ -669,4 +689,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  TECH_DOC_KINDS, TRAINING_TOPICS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  TECH_DOC_KINDS, TRAINING_TOPICS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };

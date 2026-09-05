@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
-import { TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -652,7 +652,7 @@ function DocModal({ doc, partners, onClose, onSave }) {
   );
 }
 
-function ReportModal({ job, partnerName, chemicals, primaryReport, discountThreshold = 20, onClose, onSave }) {
+function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints = [], discountThreshold = 20, onClose, onSave }) {
   const draftKey = `kazdez-report-draft-v4:${job.id}`;
   const draftRef = useRef(null);
   if (draftRef.current === null) { try { draftRef.current = JSON.parse(localStorage.getItem(draftKey) || "null") || {}; } catch { draftRef.current = {}; } }
@@ -665,6 +665,10 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
   const [saving, setSaving] = useState(false);
   const [offlineSaved, setOfflineSaved] = useState(false);
   const [equipment, setEquipment] = useState(draft.equipment || []);
+  // Обход точек контроля. Пустой результат означает «не осматривал» — это
+  // честнее, чем молча проставить «чисто» за человека.
+  const [checks, setChecks] = useState(draft.checks || {});
+  const setCheck = (pointId, patch) => setChecks((prev) => ({ ...prev, [pointId]: { ...prev[pointId], ...patch } }));
   const [moreEquip, setMoreEquip] = useState(() => (draft.equipment || []).some((c) => !WORK_EQUIPMENT.find((e) => e.code === c)?.common));
   const [discountReason, setDiscountReason] = useState(draft.discountReason || "");
   const [discountNote, setDiscountNote] = useState(draft.discountNote || "");
@@ -699,7 +703,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
     });
   };
   useEffect(() => {
-    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, discountReason, discountNote, debtDue, savedAt: new Date().toISOString() }));
+    localStorage.setItem(draftKey, JSON.stringify({ cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, checks, discountReason, discountNote, debtDue, savedAt: new Date().toISOString() }));
   }, [draftKey, cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote]);
   const setChem = (i, k) => (e) => { const n = chems.slice(); n[i] = { ...n[i], [k]: e.target.value }; setChems(n); };
   function methodLabel() {
@@ -727,7 +731,11 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
       const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
       return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
     });
-    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, equipment, chemDetails: details, discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "",
+    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, equipment, chemDetails: details,
+      checks: Object.entries(checks)
+        .filter(([, v]) => v && v.result)
+        .map(([pointId, v]) => ({ point_id: pointId, result: v.result, count: v.count === "" || v.count == null ? null : Number(v.count) || null, note: v.note || null })),
+      discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "",
       debt: isDebt ? { amount: quoted - total, dueOn: debtDue, note: discountNote.trim() } : null }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
     if (ok !== false) localStorage.removeItem(draftKey);
     setSaving(false);
@@ -827,6 +835,36 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
       {Number(transfer) > 0 && <div className="kd-hint" style={{ marginTop: -4 }}>💳 Перечисление уйдёт админу со статусом «ждём оплату». Админ проставит счёт и дату, когда деньги придут.</div>}
       <div className="kd-paytotal"><span>Итого по заявке</span><strong>{fmt(total)} ₸</strong></div>
       <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Было поднятие" /></Field>
+      {controlPoints.length > 0 && (
+        <>
+          <div className="kd-section" style={{ marginTop: 0 }}>Обход точек · {controlPoints.length}</div>
+          <div className="kd-muted" style={{ marginBottom: 8 }}>
+            Отметьте, что нашли на каждой станции. Пропущенная точка так и останется непроверенной — за вас «чисто» никто не поставит.
+          </div>
+          {controlPoints.map((p) => {
+            const cur = checks[p.id] || {};
+            const alarm = cur.result && CHECK_RESULTS[cur.result]?.alarm;
+            return (
+              <div className="kd-pointrow" key={p.id}>
+                <span className="kd-pointnum">№{p.number}</span>
+                <span className="kd-pointwhere">
+                  {CONTROL_POINT_KINDS[p.kind] || p.kind}
+                  <em>{p.location || "место не описано"}</em>
+                </span>
+                <select value={cur.result || ""} onChange={(e) => setCheck(p.id, { result: e.target.value })}>
+                  <option value="">— не осматривал —</option>
+                  {Object.entries(CHECK_RESULTS).map(([v, r]) => <option key={v} value={v}>{r.label}</option>)}
+                </select>
+                {alarm && (
+                  <input className="kd-pointcount" inputMode="numeric" placeholder="шт."
+                    value={cur.count ?? ""} onChange={(e) => setCheck(p.id, { count: e.target.value })} />
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+
       <div className="kd-section">Расход препаратов</div>
       {chemicals.length === 0 && <div className="kd-muted" style={{ marginBottom: 8 }}>Сначала добавь препараты на склад — тогда их можно будет выбирать здесь.</div>}
       {chems.map((c, i) => {
@@ -1926,7 +1964,67 @@ function PaperworkModal({ row, partners = [], accounts = [], jobs = [], clients 
   );
 }
 
-function ObjectModal({ object, summary, techName, protocol = [], canEdit = false, onClose, onSave }) {
+function ControlPointModal({ object, point, onClose, onSave, onRemove }) {
+  const [number, setNumber] = useState(point?.number || "");
+  const [kind, setKind] = useState(point?.kind || "bait_station");
+  const [location, setLocation] = useState(point?.location || "");
+  const [installed, setInstalled] = useState(point?.installed_on || new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState(point?.note || "");
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = number.trim();
+
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave(object, {
+      id: point?.id, number: number.trim(), kind,
+      location: location.trim() || null, installed_on: installed,
+      note: note.trim() || null,
+    });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+
+  return (
+    <ModalShell title={point ? `Точка ${point.number}` : "Новая точка контроля"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      {point && <button className="kd-btn ghost danger" disabled={saving} onClick={() => onRemove(point)}>Снять точку</button>}
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <div className="kd-muted" style={{ marginBottom: 12 }}><AddressText text={object.address} /></div>
+
+      <div className="kd-grid2">
+        <Field label="Номер на станции">
+          <input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="12" />
+        </Field>
+        <Field label="Тип">
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            {Object.entries(CONTROL_POINT_KINDS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </Field>
+      </div>
+
+      <Field label="Где стоит">
+        <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="склад сырья, у восточных ворот, справа от колонны" />
+      </Field>
+      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+        Пишите так, чтобы станцию нашёл человек, который здесь впервые. По этому описанию её будут искать через год.
+      </div>
+
+      <Field label="Установлена"><input type="date" value={installed} onChange={(e) => setInstalled(e.target.value)} /></Field>
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="что внутри, особенности доступа" /></Field>
+
+      {point && (
+        <div className="kd-muted" style={{ marginTop: 10 }}>
+          «Снять точку» не удаляет историю осмотров — станция просто перестаёт входить в обход.
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+function ObjectModal({ object, summary, techName, protocol = [], points = null, canEdit = false, onAddPoint, onOpenPoint, onClose, onSave }) {
   const [kind, setKind] = useState(object.kind || "other");
   const [area, setArea] = useState(object.area != null ? String(object.area) : "");
   const [note, setNote] = useState(object.note || "");
@@ -1973,6 +2071,40 @@ function ObjectModal({ object, summary, techName, protocol = [], canEdit = false
         <div className="kd-row" style={{ marginBottom: 14 }}>
           <span>С чем боролись</span><strong>{summary.pests.join(", ")}</strong>
         </div>
+      )}
+
+      {points && (
+        <>
+          <div className="kd-tabbar" style={{ margin: "14px 0 6px" }}>
+            <div>
+              <div className="kd-section" style={{ margin: 0 }}>Точки контроля · {points.total}</div>
+              <div className="kd-muted">
+                {points.total === 0
+                  ? "Станций нет. Для склада и пищевого производства обход по точкам — основа договора."
+                  : `${points.alarm ? `с активностью ${points.alarm} · ` : ""}${points.stale ? `давно не смотрели ${points.stale}` : "все осмотрены вовремя"}`}
+              </div>
+            </div>
+            {canEdit && <button className="kd-btn ghost sm" onClick={() => onAddPoint(object)}><Plus size={13} />Точка</button>}
+          </div>
+          {points.rows.map(({ point, last, daysAgo, stale, alarm }) => (
+            <div className="kd-ledgerrow" key={point.id} style={{ gridTemplateColumns: "72px 1.5fr 1.2fr auto" }}>
+              <span className="kd-ledgername">№{point.number}</span>
+              <span style={{ textAlign: "left" }}>
+                {CONTROL_POINT_KINDS[point.kind] || point.kind}
+                <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{point.location || "место не описано"}</em>
+              </span>
+              <span style={{ textAlign: "left", color: alarm ? "var(--rust)" : stale ? "var(--amber)" : undefined }}>
+                {last ? CHECK_RESULTS[last.result]?.label || last.result : "ещё не осматривали"}
+                <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>
+                  {last ? `${daysAgo} дн. назад` : `установлена ${daysAgo} дн. назад`}
+                </em>
+              </span>
+              {canEdit
+                ? <button className="kd-btn ghost sm" onClick={() => onOpenPoint(point)}>Открыть</button>
+                : <span />}
+            </div>
+          ))}
+        </>
       )}
 
       {protocol.length > 0 && (
@@ -3829,4 +3961,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
