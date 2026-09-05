@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
-import { REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -685,6 +685,10 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
   // затевалось, а «заполню потом» не наступает никогда. Отказаться можно
   // честно — есть вариант «без оборудования».
   const equipMissing = equipment.length === 0;
+  // Метод подставляется из оборудования: холодным туманом делают холодный
+  // туман. Но исполнитель может поправить — одним генератором делают и
+  // сплошную обработку, и барьерную.
+  const defaultMethod = METHOD_BY_EQUIPMENT[equipment[0]] || "spray";
   const toggleEquip = (code) => {
     const item = WORK_EQUIPMENT.find((e) => e.code === code);
     setEquipment((prev) => {
@@ -708,13 +712,22 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
   async function save() {
     if (!navigator.onLine) { setOfflineSaved(true); return; }
     setSaving(true);
+    const details = chems
+      .filter((c) => c.chemical_id && Number(c.amount) > 0)
+      .map((c) => ({
+        chemical_id: c.chemical_id,
+        concentration: c.concentration === "" || c.concentration == null
+          ? (chemicals.find((x) => x.id === c.chemical_id)?.default_concentration ?? null)
+          : Number(c.concentration) || null,
+        method: c.method || defaultMethod,
+      }));
     const lines = chems.filter((c) => c.chemical_id && Number(c.amount) > 0).map((c) => {
       const ch = chemicals.find((x) => x.id === c.chemical_id);
       const f = chemUnit(ch?.unit_kind).factor || 1000;
       const base = c.unit === "big" ? (Number(c.amount) || 0) * f : (Number(c.amount) || 0);
       return { chemical_id: c.chemical_id, name: ch ? ch.name : "", amount: base };
     });
-    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, equipment, discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "",
+    const ok = await onSave(job, { paid: total, cash: Number(cash) || 0, qr: Number(qr) || 0, transfer: Number(transfer) || 0, method: methodLabel(), note, followUp: { wanted: fuWanted, date: fuDate, note: fuNote }, equipment, chemDetails: details, discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "",
       debt: isDebt ? { amount: quoted - total, dueOn: debtDue, note: discountNote.trim() } : null }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
     if (ok !== false) localStorage.removeItem(draftKey);
     setSaving(false);
@@ -829,9 +842,22 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, discountThres
               <option value="small">{u.small}</option>
               {u.factor !== 1 && <option value="big">{u.big}</option>}
             </select>
+            {c.chemical_id && (
+              <>
+                <input className="kd-chemextra" placeholder={ch?.default_concentration ? `${ch.default_concentration}%` : "конц. %"}
+                  inputMode="decimal" value={c.concentration ?? ""} onChange={setChem(i, "concentration")} />
+                <select className="kd-chemextra" value={c.method || defaultMethod} onChange={setChem(i, "method")}>
+                  {Object.entries(TREATMENT_METHODS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </>
+            )}
           </div>
         );
       })}
+      <div className="kd-muted" style={{ marginTop: 4, marginBottom: 8 }}>
+        Концентрация и метод идут в журнал применения препаратов — тот самый, который спрашивает проверяющий.
+        Концентрация подставляется из карточки препарата, метод — из выбранного оборудования.
+      </div>
       <button className="kd-btn ghost sm" onClick={() => setChems([...chems, { chemical_id: "", amount: "", unit: "small" }])}>+ ещё препарат</button>
       <label className="kd-check"><input type="checkbox" checked={fuWanted} onChange={(e) => setFuWanted(e.target.checked)} /><span>Клиент просит повторный выезд</span></label>
       {fuWanted && (<div className="kd-grid2">
@@ -1108,13 +1134,14 @@ function ProofModal({ job, proof, media = { before: [], after: [], signatureUrl:
 function AddChemModal({ onClose, onSave }) {
   const [name, setName] = useState(""); const [unitKind, setUnitKind] = useState("volume");
   const [qty, setQty] = useState(""); const [price, setPrice] = useState(""); const [minQ, setMinQ] = useState("1");
+  const [substance, setSubstance] = useState(""); const [conc, setConc] = useState("");
   const [saving, setSaving] = useState(false);
   const u = chemUnit(unitKind);
   const ok = name && qty && price;
   async function save() {
     setSaving(true);
     const f = u.factor || 1000;
-    await onSave({ name, unit_kind: unitKind, purchased_ml: (Number(qty) || 0) * f, price_per_liter: Number(price) || 0, min_ml: (Number(minQ) || 0) * f });
+    await onSave({ name, active_substance: substance.trim() || null, default_concentration: Number(conc) || null, unit_kind: unitKind, purchased_ml: (Number(qty) || 0) * f, price_per_liter: Number(price) || 0, min_ml: (Number(minQ) || 0) * f });
     setSaving(false);
   }
   return (
@@ -1136,6 +1163,13 @@ function AddChemModal({ onClose, onSave }) {
       <div className="kd-grid2">
         <Field label={`Куплено (${u.big})`}><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
         <Field label={`Цена (₸ за ${u.big})`}><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="18000" /></Field>
+      </div>
+      <div className="kd-grid2">
+        <Field label="Действующее вещество"><input value={substance} onChange={(e) => setSubstance(e.target.value)} placeholder="напр. лямбда-цигалотрин 5%" /></Field>
+        <Field label="Рабочая концентрация, %"><input value={conc} onChange={(e) => setConc(e.target.value)} inputMode="decimal" placeholder="0,5" /></Field>
+      </div>
+      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+        Вещество и концентрация идут в журнал применения препаратов. Концентрация подставляется исполнителю в отчёт, чтобы не вспоминать её на объекте.
       </div>
       <Field label={`Сигнал «мало» при остатке (${u.big})`}><input value={minQ} onChange={(e) => setMinQ(e.target.value)} inputMode="decimal" placeholder="1" /></Field>
     </ModalShell>
@@ -1892,7 +1926,7 @@ function PaperworkModal({ row, partners = [], accounts = [], jobs = [], clients 
   );
 }
 
-function ObjectModal({ object, summary, techName, canEdit = false, onClose, onSave }) {
+function ObjectModal({ object, summary, techName, protocol = [], canEdit = false, onClose, onSave }) {
   const [kind, setKind] = useState(object.kind || "other");
   const [area, setArea] = useState(object.area != null ? String(object.area) : "");
   const [note, setNote] = useState(object.note || "");
@@ -1939,6 +1973,29 @@ function ObjectModal({ object, summary, techName, canEdit = false, onClose, onSa
         <div className="kd-row" style={{ marginBottom: 14 }}>
           <span>С чем боролись</span><strong>{summary.pests.join(", ")}</strong>
         </div>
+      )}
+
+      {protocol.length > 0 && (
+        <details className="kd-more" style={{ marginBottom: 12 }}>
+          <summary>Журнал применения препаратов · {protocol.length}</summary>
+          <div className="kd-muted" style={{ marginBottom: 6 }}>
+            То, что спрашивает проверяющий: дата, препарат, действующее вещество, концентрация, метод и кто работал.
+          </div>
+          <div className="kd-ledgerhead" style={{ gridTemplateColumns: "84px 1.4fr 1fr 70px 1fr" }}>
+            <span>Дата</span><span>Препарат</span><span>Вещество</span><span>Конц.</span><span>Метод</span>
+          </div>
+          {protocol.map((r, i) => (
+            <div className="kd-ledgerrow" key={`${r.date}-${i}`} style={{ gridTemplateColumns: "84px 1.4fr 1fr 70px 1fr" }}>
+              <span className="kd-muted" style={{ textAlign: "left" }}>{isoToRu(r.date)}</span>
+              <span style={{ textAlign: "left" }}>{r.name}
+                <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{r.amount} · {r.tech || "—"}</em>
+              </span>
+              <span className="kd-muted" style={{ textAlign: "left" }}>{r.substance || "не указано"}</span>
+              <span>{r.concentration != null ? `${r.concentration}%` : "—"}</span>
+              <span className="kd-muted" style={{ textAlign: "left" }}>{r.method || "не указан"}</span>
+            </div>
+          ))}
+        </details>
       )}
 
       <div className="kd-section">История обработок</div>
