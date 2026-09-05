@@ -812,6 +812,39 @@ export function seasonality(jobs = [], { monthsBack = 24, todayIso, brandFilter 
   });
 }
 
+// --- филиалы -------------------------------------------------------------
+
+// Итоги по филиалам: заявки, выручка и прибыль каждого.
+//
+// Пока филиал один, отчёт показывает одну строку и выглядит лишним. Смысл
+// в том, что в день открытия второго города он заработает сам — без
+// разбора накопленной истории, которую задним числом уже не разделить.
+//
+// Заявки без филиала показываются отдельной строкой, а не растворяются:
+// иначе часть выручки просто исчезнет из отчёта.
+export function branchTotals(jobs = [], branches = [], { inPeriod = () => true, profitOf } = {}) {
+  const rows = new Map();
+  for (const b of branches) {
+    rows.set(String(b.id), { branchId: b.id, name: b.name || "филиал", city: b.city || "", jobs: 0, revenue: 0, profit: 0 });
+  }
+  const orphan = { branchId: null, name: "Без филиала", city: "", jobs: 0, revenue: 0, profit: 0 };
+
+  for (const j of jobs) {
+    if (j.status !== "done" || !inPeriod(j.scheduled_date)) continue;
+    const row = j.branch_id ? rows.get(String(j.branch_id)) || orphan : orphan;
+    row.jobs += 1;
+    row.revenue += Number(j.report_paid) || 0;
+    row.profit += profitOf ? profitOf(j) : 0;
+  }
+
+  const list = [...rows.values()];
+  if (orphan.jobs > 0) list.push(orphan);
+  return list
+    .filter((r) => r.jobs > 0)
+    .map((r) => ({ ...r, margin: r.revenue > 0 ? Math.round(r.profit / r.revenue * 100) : 0 }))
+    .sort((a, b) => b.profit - a.profit);
+}
+
 // --- сравнение периодов --------------------------------------------------
 
 // Итоги периода: выручка, число выполненных заявок и средний чек.
