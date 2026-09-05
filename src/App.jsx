@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import SessionGate from "./SessionGate";
 import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
+import { insertJobWithBranchFallback } from "./jobPersistence";
 import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
@@ -1245,8 +1246,17 @@ function Dashboard({ session, profile }) {
     const quoted = quotedPriceFor(payload);
     const objectId = await ensureObject(payload);
     const orderId = await ensureOrder({ ...payload, object_id: objectId, quoted_price: quoted });
-    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, quoted_price: quoted, object_id: objectId, branch_id: payload.branch_id || defaultBranchId(), order_id: orderId, visit_no: 1, visit_kind: payload.service_contract_id ? "contract" : "primary", created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
+    const { data: created, error, branchOmitted } = await insertJobWithBranchFallback(supabase, {
+      ...payload, quoted_price: quoted, object_id: objectId,
+      branch_id: payload.branch_id || defaultBranchId(), order_id: orderId,
+      visit_no: 1, visit_kind: payload.service_contract_id ? "contract" : "primary",
+      created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new",
+    });
     if (error) { showToast("Ошибка: " + error.message); return false; }
+    if (branchOmitted) logClientError({
+      kind: "schema_compatibility", place: "createJob",
+      message: "Заявка создана без branch_id: примените supabase/2026-09-05_branches.sql",
+    });
     // Корневой визит записывается в заказ: по нему повторный запуск переноса
     // видит, что заказ уже заведён, и не плодит дубли.
     if (orderId && created?.id) await supabase.from("orders").update({ root_job_id: created.id }).eq("id", orderId);
@@ -1254,7 +1264,9 @@ function Dashboard({ session, profile }) {
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
     await recordClientEvent({ ...payload, id: created?.id, client_phone: created?.client_phone || payload.client_phone }, "created", "Заявка создана", `${payload.pest || "Услуга"} · ${isoToRu(payload.scheduled_date) || "дата уточняется"}`);
-    setModal(null); showToast("Заявка создана"); reloadJobs();
+    setModal(null);
+    showToast(branchOmitted ? "Заявка создана без филиала — сообщите администратору" : "Заявка создана");
+    reloadJobs();
     return true;
   }
   async function editJob(job, payload) {
