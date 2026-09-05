@@ -1770,3 +1770,111 @@ export function turnoverReport(jobs = [], { inPeriod = () => true, brandOf = (j)
       .sort((a, b) => b.total - a.total),
   };
 }
+
+// --- заказ и визит -------------------------------------------------------
+
+// Заказ — то, о чём договорились с клиентом. Визит — выезд. Раньше это была
+// одна сущность, и из-за этого средний чек был неправдой: продали обработку
+// за 25 000, съездили дважды (второй раз по гарантии, бесплатно) — в отчёте
+// «две заявки, средний чек 12 500». Такого чека клиент не платил.
+//
+// Группируем по order_id. Заявки, которым заказ ещё не проставлен, считаются
+// заказом из одного визита: иначе они просто выпадут из отчёта, а расхождение
+// в выручке будут искать неделю.
+function groupOrders(jobs = []) {
+  const groups = new Map();
+  for (const j of jobs) {
+    if (j.status === "canceled") continue;
+    const key = j.order_id ? `o:${j.order_id}` : `j:${j.id}`;
+    const g = groups.get(key) || { key, orderId: j.order_id || null, visits: [] };
+    g.visits.push(j);
+    groups.set(key, g);
+  }
+  const dateOf = (j) => String(j.scheduled_date || "").slice(0, 10);
+  for (const g of groups.values()) {
+    g.visits.sort((a, b) => (Number(a.visit_no) || 0) - (Number(b.visit_no) || 0)
+      || dateOf(a).localeCompare(dateOf(b)));
+  }
+  return [...groups.values()];
+}
+
+// Дней между первым и последним визитом: сколько заказ тянулся на самом деле.
+function spanDays(from, to) {
+  if (!from || !to) return 0;
+  const a = new Date(`${from}T00:00:00`), b = new Date(`${to}T00:00:00`);
+  if (Number.isNaN(+a) || Number.isNaN(+b)) return 0;
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
+// Итоги по заказам.
+//
+// Заказ относится к периоду ПЕРВОГО визита, а вся его выручка и все затраты
+// считаются целиком, даже если гарантийный выезд был в следующем месяце.
+// Иначе сентябрь получит заказ с нулевой выручкой, которого не продавал, а
+// август — прибыль, которой у него не было.
+//
+// profitOf должен считать прибыль ВИЗИТА без поправки на гарантию: в заказе
+// гарантийный выезд лежит отдельным визитом со своими затратами, и если
+// добавить к нему ещё и guaranteeCost исходной заявки, затраты задвоятся.
+export function orderTotals(jobs = [], { inPeriod = () => true, profitOf = () => 0 } = {}) {
+  const rows = [];
+  for (const g of groupOrders(jobs)) {
+    const dates = g.visits.map((j) => String(j.scheduled_date || "").slice(0, 10)).filter(Boolean).sort();
+    const first = dates[0] || null;
+    if (!inPeriod(first)) continue;
+
+    const done = g.visits.filter((j) => j.status === "done");
+    const revenue = done.reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
+    const profit = done.reduce((s, j) => s + (Number(profitOf(j)) || 0), 0);
+    const head = g.visits[0] || {};
+
+    rows.push({
+      key: g.key,
+      orderId: g.orderId,
+      address: head.address || "",
+      pest: head.pest || "",
+      clientPhone: head.client_phone || "",
+      firstDate: first,
+      lastDate: dates[dates.length - 1] || null,
+      spanDays: spanDays(first, dates[dates.length - 1]),
+      visits: g.visits.length,
+      doneVisits: done.length,
+      guaranteeVisits: g.visits.filter((j) => j.visit_kind === "guarantee" || j.repeat_of).length,
+      revenue,
+      profit: Math.round(profit),
+      margin: revenue > 0 ? Math.round(profit / revenue * 100) : 0,
+      jobs: g.visits,
+    });
+  }
+  return rows.sort((a, b) => String(b.firstDate || "").localeCompare(String(a.firstDate || "")));
+}
+
+// Чек по заказу против чека по визиту.
+//
+// Разница между этими двумя числами и есть цена вопроса: насколько отчёт
+// занижал средний чек, приписывая бесплатным выездам статус отдельных продаж.
+export function orderStats(jobs = [], { inPeriod = () => true } = {}) {
+  const rows = orderTotals(jobs, { inPeriod });
+  const paid = rows.filter((r) => r.revenue > 0);
+  const visits = rows.reduce((s, r) => s + r.doneVisits, 0);
+  const revenue = rows.reduce((s, r) => s + r.revenue, 0);
+  const multi = rows.filter((r) => r.doneVisits > 1);
+  const extra = rows.filter((r) => r.guaranteeVisits > 0);
+
+  return {
+    orders: rows.length,
+    paidOrders: paid.length,
+    visits,
+    revenue,
+    // Чек по заказу считается только по заказам, которые принесли деньги:
+    // иначе отменённая и незакрытая работа разбавит его так же, как раньше
+    // разбавляли гарантийные выезды.
+    avgOrder: paid.length ? Math.round(revenue / paid.length) : 0,
+    avgVisit: visits ? Math.round(revenue / visits) : 0,
+    visitsPerOrder: rows.length ? Math.round(visits / rows.length * 100) / 100 : 0,
+    multiVisitOrders: multi.length,
+    guaranteeOrders: extra.length,
+    // Доля заказов, куда пришлось выехать повторно по гарантии.
+    guaranteeShare: rows.length ? Math.round(extra.length / rows.length * 100) : 0,
+  };
+}
