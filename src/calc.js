@@ -1048,6 +1048,98 @@ export function isClosedDate(dateIso, closedUntil) {
   return String(dateIso).slice(0, 10) <= String(closedUntil).slice(0, 10);
 }
 
+// --- маркетинг на заказ --------------------------------------------------
+
+// Сколько рекламы пришлось на один заказ.
+//
+// Расход канала за месяц делится на число заказов, которые этот канал в том же
+// месяце принёс. Связь заявки с каналом — через source_key: так каналы уже
+// сопоставляются с источниками в рейтинге источников.
+//
+// Заказ из источника, за который мы не платим (сарафан, повторное обращение),
+// получает ноль, а не среднюю по компании: приписывать ему чужую рекламу
+// значит занижать прибыль там, где её как раз надо видеть.
+export function marketingPerJob(jobs = [], { topups = [], channels = [] } = {}) {
+  const spendByChannelMonth = new Map();
+  for (const t of topups) {
+    if (!t.topup_date || !t.channel_id) continue;
+    const key = `${t.channel_id}|${monthOf(t.topup_date)}`;
+    spendByChannelMonth.set(key, (spendByChannelMonth.get(key) || 0) + (Number(t.amount) || 0));
+  }
+
+  const channelBySource = new Map();
+  for (const ch of channels) {
+    const key = norm(ch.source_key);
+    if (key) channelBySource.set(key, ch.id);
+  }
+
+  const jobsByChannelMonth = new Map();
+  for (const j of jobs) {
+    if (j.status !== "done" || !j.scheduled_date) continue;
+    const chId = channelBySource.get(norm(j.source));
+    if (!chId) continue;
+    const key = `${chId}|${monthOf(j.scheduled_date)}`;
+    jobsByChannelMonth.set(key, (jobsByChannelMonth.get(key) || 0) + 1);
+  }
+
+  return function forJob(job) {
+    if (!job || job.status !== "done" || !job.scheduled_date) return 0;
+    const chId = channelBySource.get(norm(job.source));
+    if (!chId) return 0;
+    const key = `${chId}|${monthOf(job.scheduled_date)}`;
+    const count = jobsByChannelMonth.get(key) || 0;
+    return count > 0 ? Math.round((spendByChannelMonth.get(key) || 0) / count) : 0;
+  };
+}
+
+// Экономика рекламного канала: не «сколько заявок дал Instagram», а сколько
+// чистой прибыли он принёс сверх того, что стоил.
+//
+// Прибыль берётся полная — после препаратов, труда, накладных и гарантийных
+// выездов. По валовой выручке канал почти всегда выглядит выгодным.
+export function channelEconomics(jobs = [], { topups = [], channels = [], inPeriod = () => true, profitOf } = {}) {
+  const spend = new Map();
+  for (const t of topups) {
+    if (!t.topup_date || !t.channel_id || !inPeriod(t.topup_date)) continue;
+    spend.set(String(t.channel_id), (spend.get(String(t.channel_id)) || 0) + (Number(t.amount) || 0));
+  }
+
+  const rows = new Map();
+  for (const ch of channels) {
+    rows.set(String(ch.id), {
+      channelId: ch.id, name: ch.name || "канал", sourceKey: ch.source_key || "",
+      spent: spend.get(String(ch.id)) || 0, jobs: 0, revenue: 0, profit: 0,
+    });
+  }
+
+  const channelBySource = new Map();
+  for (const ch of channels) {
+    const key = norm(ch.source_key);
+    if (key) channelBySource.set(key, String(ch.id));
+  }
+
+  for (const j of jobs) {
+    if (j.status !== "done" || !inPeriod(j.scheduled_date)) continue;
+    const chId = channelBySource.get(norm(j.source));
+    if (!chId) continue;
+    const row = rows.get(chId);
+    if (!row) continue;
+    row.jobs += 1;
+    row.revenue += Number(j.report_paid) || 0;
+    row.profit += profitOf ? profitOf(j) : 0;
+  }
+
+  return [...rows.values()]
+    .filter((r) => r.spent > 0 || r.jobs > 0)
+    .map((r) => ({
+      ...r,
+      cac: r.jobs > 0 ? Math.round(r.spent / r.jobs) : null,
+      // Прибыль уже за вычетом рекламы, поэтому возврат считаем от неё.
+      romi: r.spent > 0 ? Math.round(r.profit / r.spent * 100) : null,
+    }))
+    .sort((a, b) => (b.romi ?? -1e9) - (a.romi ?? -1e9));
+}
+
 // --- полная себестоимость заявки ----------------------------------------
 
 const monthOf = (iso) => (iso ? String(iso).slice(0, 7) : "");
@@ -1098,11 +1190,13 @@ export function allocationPerJob(jobs = [], { profiles = [], opex = [] } = {}) {
 // Прибыль заявки с учётом труда и постоянных расходов.
 // Прямая прибыль (jobEconomics) остаётся как была: по ней видно, окупает ли
 // заявка сама себя, а полная показывает, зарабатывает ли на ней компания.
-export function jobFullEconomics(job, { chemicals = [], purchases = [], qrFeeRate = 0.0095, labor = 0, overhead = 0, helpers = 0, guaranteeCost = 0 } = {}) {
+export function jobFullEconomics(job, { chemicals = [], purchases = [], qrFeeRate = 0.0095, labor = 0, overhead = 0, helpers = 0, guaranteeCost = 0, marketing = 0 } = {}) {
   const base = jobEconomics(job, { chemicals, purchases, qrFeeRate, helpers, guaranteeCost });
-  const fullProfit = Math.round(base.profit - labor - overhead);
+  // Доля рекламы — последнее слагаемое, которого не хватало до полной
+  // экономики заказа: без неё «выгодный канал» определялся по валовой выручке.
+  const fullProfit = Math.round(base.profit - labor - overhead - marketing);
   return {
-    ...base, labor, overhead, fullProfit,
+    ...base, labor, overhead, marketing, fullProfit,
     fullMargin: base.revenue > 0 ? Math.round(fullProfit / base.revenue * 100) : 0,
   };
 }

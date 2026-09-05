@@ -2752,14 +2752,30 @@ function Dashboard({ session, profile }) {
   // (jobEconomics) остаётся прежней: по ней видно, окупает ли заявка сама себя.
   // Полная показывает, зарабатывает ли на ней компания после оклада и аренды.
   const allocFor = calc.allocationPerJob(jobs, { profiles: allProfiles, opex });
+  // Доля рекламы на заказ: расход канала за месяц ÷ заказы этого канала.
+  const marketingFor = calc.marketingPerJob(jobs, { topups: mktTopups, channels: mktChannels });
   const completedEconomics = doneJobs.map((job) => {
     const { labor, overhead } = allocFor(job);
-    return { job, econ: calc.jobFullEconomics(job, { chemicals, purchases: chemPurchases, guaranteeCost: guaranteeCostOf(job), qrFeeRate, labor, overhead, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
+    const marketing = marketingFor(job);
+    return { job, econ: calc.jobFullEconomics(job, { chemicals, purchases: chemPurchases, guaranteeCost: guaranteeCostOf(job), qrFeeRate, labor, overhead, marketing, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
   });
   const totalJobProfit = completedEconomics.reduce((s, r) => s + r.econ.profit, 0);
   const totalFullProfit = completedEconomics.reduce((s, r) => s + r.econ.fullProfit, 0);
   const totalLabor = completedEconomics.reduce((s, r) => s + r.econ.labor, 0);
   const totalOverhead = completedEconomics.reduce((s, r) => s + r.econ.overhead, 0);
+  const totalMarketing = completedEconomics.reduce((s, r) => s + r.econ.marketing, 0);
+  // Экономика каналов считается по ПОЛНОЙ прибыли: по валовой выручке
+  // выгодным выглядит почти любой канал.
+  const channelRows = calc.channelEconomics(jobs, {
+    topups: mktTopups, channels: mktChannels, inPeriod: inPeriodIso,
+    profitOf: (j) => {
+      const { labor, overhead } = allocFor(j);
+      return calc.jobFullEconomics(j, {
+        chemicals, purchases: chemPurchases, guaranteeCost: guaranteeCostOf(j), qrFeeRate,
+        labor, overhead, marketing: marketingFor(j), helpers: calc.helpersTotal(j.id, jobHelpers),
+      }).fullProfit;
+    },
+  });
   const trueLossJobs = completedEconomics.filter((r) => r.econ.fullProfit < 0);
   // Длительность выездов. Отметки этапов писались давно, но их никто не смотрел.
   const durations = calc.durationStats(doneJobs);
@@ -3770,6 +3786,7 @@ function Dashboard({ session, profile }) {
               <div className="kd-row"><span>Прямая прибыль по заявкам</span><strong>{fmt(totalJobProfit)} ₸</strong></div>
               <div className="kd-row"><span>Оклады, разнесённые на заявки</span><strong style={{ color: "var(--rust)" }}>− {fmt(totalLabor)} ₸</strong></div>
               <div className="kd-row"><span>Постоянные расходы (аренда, реклама, связь)</span><strong style={{ color: "var(--rust)" }}>− {fmt(totalOverhead)} ₸</strong></div>
+              <div className="kd-row"><span>Реклама, разнесённая на заявки</span><strong style={{ color: "var(--rust)" }}>− {fmt(totalMarketing)} ₸</strong></div>
               <div className="kd-row total"><span>Реальная прибыль</span><strong style={{ color: totalFullProfit >= 0 ? "var(--primary-d)" : "var(--rust)" }}>{fmt(totalFullProfit)} ₸</strong></div>
               {trueLossJobs.length > lossJobs.length && (
                 <div className="kd-flag warn" style={{ marginTop: 10 }}>
@@ -4339,6 +4356,38 @@ function Dashboard({ session, profile }) {
                 </>
               )}
             </div>
+
+            {channelRows.length > 0 && (
+              <div className="kd-card" style={{ marginTop: 14 }}>
+                <div className="kd-section">Рекламные каналы · {range.label}</div>
+                <div className="kd-muted" style={{ marginBottom: 10 }}>
+                  Считается по полной прибыли — после препаратов, труда, накладных, гарантийных выездов и самой рекламы.
+                  По валовой выручке выгодным выглядит почти любой канал.
+                </div>
+                <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.4fr .9fr 1fr 1fr 1fr 1fr" }}>
+                  <span>Канал</span><span>Заявок</span><span>Потрачено</span><span>Привлечение</span><span>Прибыль</span><span>Возврат</span>
+                </div>
+                {channelRows.map((r) => (
+                  <div className="kd-ledgerrow" key={String(r.channelId)} style={{ gridTemplateColumns: "1.4fr .9fr 1fr 1fr 1fr 1fr" }}>
+                    <span className="kd-ledgername">{r.name}
+                      {!r.sourceKey && <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5, color: "var(--amber)" }}>источник не привязан</em>}
+                    </span>
+                    <span>{r.jobs}</span>
+                    <span className="kd-muted">{fmt(r.spent)} ₸</span>
+                    <span>{r.cac != null ? `${fmt(r.cac)} ₸` : "—"}</span>
+                    <span>{fmt(r.profit)} ₸</span>
+                    <strong style={{ color: r.romi == null ? "var(--muted)" : r.romi < 0 ? "var(--rust)" : r.romi < 50 ? "var(--amber)" : "var(--primary)" }}>
+                      {r.romi != null ? `${r.romi}%` : "—"}
+                    </strong>
+                  </div>
+                ))}
+                <div className="kd-muted" style={{ marginTop: 8 }}>
+                  «Привлечение» — сколько рекламы пришлось на один заказ. «Возврат» — прибыль в процентах от потраченного:
+                  ниже нуля означает, что канал забирает больше, чем приносит.
+                  {channelRows.some((r) => !r.sourceKey) && " У каналов без привязанного источника заявки не считаются — привяжите источник в настройках канала."}
+                </div>
+              </div>
+            )}
 
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Скидки ниже прайса · {range.label}</div>
