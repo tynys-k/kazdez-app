@@ -20,6 +20,7 @@ import {
   repeatCauseReport,
   marketingPerJob, channelEconomics,
   controlPointsState, infestationTrend,
+  branchTotals,
   chemNormCheck, batchesWithRemaining, expiringBatches,
 } from "./calc";
 
@@ -1877,5 +1878,55 @@ describe("точки контроля", () => {
     // ноль означал бы «всё чисто», хотя на объект просто не приезжали
     const trend = infestationTrend(points, checks, { months: 4, todayIso: today });
     expect(trend.find((t) => t.month === "2026-07").rate).toBeNull();
+  });
+});
+
+describe("филиалы", () => {
+  const branches = [
+    { id: "b1", name: "Алматы", city: "Алматы" },
+    { id: "b2", name: "Астана", city: "Астана" },
+  ];
+  const jobs = [
+    { id: "1", branch_id: "b1", status: "done", scheduled_date: "2026-08-05", report_paid: 40000 },
+    { id: "2", branch_id: "b1", status: "done", scheduled_date: "2026-08-06", report_paid: 60000 },
+    { id: "3", branch_id: "b2", status: "done", scheduled_date: "2026-08-07", report_paid: 30000 },
+    { id: "4", status: "done", scheduled_date: "2026-08-08", report_paid: 20000 },
+    { id: "5", branch_id: "b1", status: "new", scheduled_date: "2026-08-09", report_paid: 0 },
+  ];
+
+  it("считает выручку и прибыль по филиалам", () => {
+    const rows = branchTotals(jobs, branches, { profitOf: (j) => Math.round((Number(j.report_paid) || 0) * 0.4) });
+    const almaty = rows.find((r) => r.branchId === "b1");
+    expect(almaty).toMatchObject({ jobs: 2, revenue: 100000, profit: 40000, margin: 40 });
+  });
+
+  it("заявки без филиала показываются отдельно, а не растворяются", () => {
+    // иначе часть выручки просто исчезнет из отчёта
+    const rows = branchTotals(jobs, branches, { profitOf: () => 0 });
+    const orphan = rows.find((r) => r.branchId === null);
+    expect(orphan).toMatchObject({ jobs: 1, revenue: 20000 });
+  });
+
+  it("невыполненные заявки в выручку не идут", () => {
+    const rows = branchTotals(jobs, branches, { profitOf: () => 0 });
+    expect(rows.find((r) => r.branchId === "b1").jobs).toBe(2);
+  });
+
+  it("филиал без заявок в отчёте не мозолит глаза", () => {
+    const rows = branchTotals([], branches, { profitOf: () => 0 });
+    expect(rows).toEqual([]);
+  });
+
+  it("сверху тот, кто заработал больше", () => {
+    const rows = branchTotals(jobs, branches, { profitOf: (j) => Math.round((Number(j.report_paid) || 0) * 0.4) });
+    expect(rows[0].branchId).toBe("b1");
+  });
+
+  it("период учитывается", () => {
+    const rows = branchTotals(jobs, branches, {
+      inPeriod: (iso) => String(iso) >= "2026-08-07",
+      profitOf: () => 0,
+    });
+    expect(rows.find((r) => r.branchId === "b1")).toBeUndefined();
   });
 });

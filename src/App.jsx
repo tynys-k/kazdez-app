@@ -14,7 +14,7 @@ import { TREATMENT_METHODS, REPEAT_CAUSES, REPEAT_FAULTS, equipmentLabel, PAPERW
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
-import { ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -311,6 +311,8 @@ function Dashboard({ session, profile }) {
   const [jobEquipment, setJobEquipment] = useState([]);
   const [debts, setDebts] = useState([]);
   const [repeatCauses, setRepeatCauses] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [branchFilter, setBranchFilter] = useState("all");
   const [chemDetails, setChemDetails] = useState([]);
   const [controlPoints, setControlPoints] = useState([]);
   const [controlChecks, setControlChecks] = useState([]);
@@ -548,6 +550,7 @@ function Dashboard({ session, profile }) {
     { key: "control_points", label: "Точки контроля", run: () => supabase.from("control_points").select("*").order("number"), set: setControlPoints },
     { key: "control_checks", label: "Осмотры точек", run: () => supabase.from("control_checks").select("*").order("checked_on", { ascending: false }), set: setControlChecks },
     { key: "job_chem_details", label: "Протокол обработки", run: () => supabase.from("job_chem_details").select("*"), set: setChemDetails },
+    { key: "branches", label: "Филиалы", run: () => supabase.from("branches").select("*").order("name"), set: setBranches },
     { key: "repeat_causes", label: "Разбор повторных выездов", run: () => supabase.from("repeat_causes").select("*"), set: setRepeatCauses },
     { key: "job_debts", label: "Долги клиентов", run: () => supabase.from("job_debts").select("*").order("due_on"), set: setDebts },
     { key: "job_equipment", label: "Оборудование на заявках", run: () => supabase.from("job_equipment").select("*"), set: setJobEquipment },
@@ -1083,6 +1086,16 @@ function Dashboard({ session, profile }) {
     setModal({ kind: "object", objectId: point.object_id }); showToast("Точка снята"); load(["control_points"]);
   }
 
+  async function saveBranch(payload) {
+    const { id, ...fields } = payload;
+    const res = id
+      ? await supabase.from("branches").update(fields).eq("id", id)
+      : await supabase.from("branches").insert(fields);
+    if (res.error) { showToast("Ошибка: " + res.error.message); return res.error.message; }
+    await logAction("Настройки", `Филиал: ${payload.name}${payload.city ? ` · ${payload.city}` : ""}`);
+    setModal(null); showToast("Сохранено"); load(["branches"]); return null;
+  }
+
   async function saveRepeatCause(job, patch) {
     const { error } = await supabase.from("repeat_causes").upsert({
       job_id: job.id, ...patch, created_by: session.user.id, updated_at: new Date().toISOString(),
@@ -1199,10 +1212,18 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Сохранено"); load(["objects"]); return null;
   }
 
+  // Филиал берётся у того, кто оформляет заявку, а если у него не проставлен —
+  // из филиала по умолчанию. Пустым он остаться не должен: заявка без филиала
+  // выпадает из отчёта, а не попадает в «прочее».
+  const defaultBranchId = () => profile?.branch_id
+    || branches.find((b) => b.is_default)?.id
+    || branches[0]?.id
+    || null;
+
   async function createJob(payload) {
     const quoted = quotedPriceFor(payload);
     const objectId = await ensureObject(payload);
-    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, quoted_price: quoted, object_id: objectId, created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
+    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, quoted_price: quoted, object_id: objectId, branch_id: payload.branch_id || defaultBranchId(), created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
     if (error) { showToast("Ошибка: " + error.message); return false; }
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
@@ -2797,18 +2818,23 @@ function Dashboard({ session, profile }) {
   const totalLabor = completedEconomics.reduce((s, r) => s + r.econ.labor, 0);
   const totalOverhead = completedEconomics.reduce((s, r) => s + r.econ.overhead, 0);
   const totalMarketing = completedEconomics.reduce((s, r) => s + r.econ.marketing, 0);
+  // Одна функция полной прибыли на все отчёты: если каналы и филиалы будут
+  // считать её по-разному, расхождение найдут не сразу и не поверят обоим.
+  const fullProfitOf = (j) => {
+    const { labor, overhead } = allocFor(j);
+    return calc.jobFullEconomics(j, {
+      chemicals, purchases: chemPurchases, guaranteeCost: guaranteeCostOf(j), qrFeeRate,
+      labor, overhead, marketing: marketingFor(j), helpers: calc.helpersTotal(j.id, jobHelpers),
+    }).fullProfit;
+  };
   // Экономика каналов считается по ПОЛНОЙ прибыли: по валовой выручке
   // выгодным выглядит почти любой канал.
   const channelRows = calc.channelEconomics(jobs, {
-    topups: mktTopups, channels: mktChannels, inPeriod: inPeriodIso,
-    profitOf: (j) => {
-      const { labor, overhead } = allocFor(j);
-      return calc.jobFullEconomics(j, {
-        chemicals, purchases: chemPurchases, guaranteeCost: guaranteeCostOf(j), qrFeeRate,
-        labor, overhead, marketing: marketingFor(j), helpers: calc.helpersTotal(j.id, jobHelpers),
-      }).fullProfit;
-    },
+    topups: mktTopups, channels: mktChannels, inPeriod: inPeriodIso, profitOf: fullProfitOf,
   });
+  // Пока филиал один, отчёт покажет одну строку. Смысл в том, что в день
+  // открытия второго города он заработает сам.
+  const branchRows = calc.branchTotals(jobs, branches, { inPeriod: inPeriodIso, profitOf: fullProfitOf });
   const trueLossJobs = completedEconomics.filter((r) => r.econ.fullProfit < 0);
   // Длительность выездов. Отметки этапов писались давно, но их никто не смотрел.
   const durations = calc.durationStats(doneJobs);
@@ -4422,6 +4448,34 @@ function Dashboard({ session, profile }) {
               </div>
             )}
 
+            {branchRows.length > 1 && (
+              <div className="kd-card" style={{ marginTop: 14 }}>
+                <div className="kd-section">Филиалы · {range.label}</div>
+                <div className="kd-muted" style={{ marginBottom: 10 }}>
+                  Прибыль полная — после препаратов, труда, накладных и гарантийных выездов.
+                </div>
+                <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr 1fr 1.2fr 1.2fr .8fr" }}>
+                  <span>Филиал</span><span>Заявок</span><span>Выручка</span><span>Прибыль</span><span>Маржа</span>
+                </div>
+                {branchRows.map((r) => (
+                  <div className="kd-ledgerrow" key={String(r.branchId || "none")} style={{ gridTemplateColumns: "1.6fr 1fr 1.2fr 1.2fr .8fr" }}>
+                    <span className="kd-ledgername">{r.name}
+                      {r.city && <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{r.city}</em>}
+                    </span>
+                    <span>{r.jobs}</span>
+                    <span>{fmt(r.revenue)} ₸</span>
+                    <span>{fmt(r.profit)} ₸</span>
+                    <strong style={{ color: r.margin < 0 ? "var(--rust)" : r.margin < 15 ? "var(--amber)" : "var(--primary)" }}>{r.margin}%</strong>
+                  </div>
+                ))}
+                {branchRows.some((r) => !r.branchId) && (
+                  <div className="kd-muted" style={{ marginTop: 8 }}>
+                    Заявки без филиала показаны отдельной строкой, а не растворены в остальных — иначе часть выручки исчезла бы из отчёта.
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Скидки ниже прайса · {range.label}</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>
@@ -5144,6 +5198,32 @@ function Dashboard({ session, profile }) {
                 })}
               </div>
             </div>}
+            {canAccess("action.settings") && <div className="kd-card">
+              <div className="kd-tabbar" style={{ marginBottom: 10 }}>
+                <div>
+                  <div className="kd-section" style={{ margin: 0 }}>Филиалы · {branches.length}</div>
+                  <div className="kd-muted">
+                    Пока филиал один, здесь ничего не меняется. Он заведён заранее: разносить по филиалам уже накопленные заявки и кассы задним числом втрое дороже.
+                  </div>
+                </div>
+                <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "branch", branch: null })}><Plus size={13} />Филиал</button>
+              </div>
+              {branches.length === 0 && <div className="kd-muted">Филиалов нет — выполните миграцию, она заведёт первый.</div>}
+              {branches.map((b) => (
+                <div className="kd-ledgerrow" key={b.id} style={{ gridTemplateColumns: "1.5fr 1.5fr auto" }}>
+                  <span className="kd-ledgername">{b.name}
+                    {b.is_default && <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>по умолчанию</em>}
+                  </span>
+                  <span style={{ textAlign: "left" }} className={b.active === false ? "kd-muted" : ""}>
+                    {b.city || "город не указан"}
+                    <em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>
+                      {b.legal_name || "юрлицо не указано"}{b.bin ? ` · ${b.bin}` : ""}
+                    </em>
+                  </span>
+                  <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "branch", branch: b })}>Открыть</button>
+                </div>
+              ))}
+            </div>}
             {canAccess("action.team_manage") && <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>Допуски и документы{docAlerts.length ? ` · ${docAlerts.length}` : ""}</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>
@@ -5729,6 +5809,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "controlPoint" && <ControlPointModal object={modal.object} point={modal.point}
         onClose={() => setModal({ kind: "object", objectId: modal.object.id })}
         onSave={saveControlPoint} onRemove={removeControlPoint} />}
+      {modal?.kind === "branch" && <BranchModal branch={modal.branch} onClose={() => setModal(null)} onSave={saveBranch} />}
       {modal?.kind === "blockClient" && <BlockClientModal client={modal.client} onClose={() => setModal(null)} onSave={saveClientBlock} />}
       {modal?.kind === "object" && (() => {
         const obj = objects.find((o) => String(o.id) === String(modal.objectId));

@@ -2165,6 +2165,64 @@ function ObjectModal({ object, summary, techName, protocol = [], points = null, 
   );
 }
 
+function BranchModal({ branch, onClose, onSave }) {
+  const [name, setName] = useState(branch?.name || "");
+  const [city, setCity] = useState(branch?.city || "");
+  const [legal, setLegal] = useState(branch?.legal_name || "");
+  const [bin, setBin] = useState(branch?.bin || "");
+  const [legalAddr, setLegalAddr] = useState(branch?.legal_address || "");
+  const [active, setActive] = useState(branch ? branch.active !== false : true);
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  const ok = name.trim();
+
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onSave({
+      id: branch?.id, name: name.trim(), city: city.trim() || null,
+      legal_name: legal.trim() || null, bin: bin.trim() || null,
+      legal_address: legalAddr.trim() || null, active,
+    });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
+
+  return (
+    <ModalShell title={branch ? "Филиал" : "Новый филиал"} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <div className="kd-grid2">
+        <Field label="Название"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Астана" /></Field>
+        <Field label="Город"><input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Астана" /></Field>
+      </div>
+
+      <div className="kd-section" style={{ marginTop: 12 }}>Юрлицо для документов</div>
+      <div className="kd-muted" style={{ marginBottom: 8 }}>
+        От кого филиал выставляет договоры и акты. Если работаете от одного ТОО во всех городах — оставьте одинаковым.
+      </div>
+      <div className="kd-grid2">
+        <Field label="Наименование"><input value={legal} onChange={(e) => setLegal(e.target.value)} placeholder="ТОО KazDez" /></Field>
+        <Field label="БИН"><input value={bin} onChange={(e) => setBin(e.target.value)} inputMode="numeric" placeholder="123456789012" /></Field>
+      </div>
+      <Field label="Юридический адрес"><input value={legalAddr} onChange={(e) => setLegalAddr(e.target.value)} /></Field>
+
+      {branch && (
+        <label className="kd-check" style={{ marginTop: 10 }}>
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+          <span>Филиал работает</span>
+        </label>
+      )}
+      {branch?.is_default && (
+        <div className="kd-muted" style={{ marginTop: 8 }}>
+          Это филиал по умолчанию: в него попадают заявки тех, у кого филиал не проставлен.
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
 function TechDocModal({ tech, doc = null, onClose, onSave }) {
   const [kind, setKind] = useState(doc?.kind || "medbook");
   const [number, setNumber] = useState(doc?.number || "");
@@ -3961,4 +4019,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
