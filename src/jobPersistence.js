@@ -1,24 +1,31 @@
 function errorText(error) {
-  return [error?.message, error?.details, error?.hint].filter(Boolean).join(" ").toLowerCase();
+  return [error?.message, error?.details, error?.hint].filter(Boolean).join(" ");
 }
 
-export function isMissingJobsBranchColumn(error) {
+export function missingJobsColumn(error) {
   const text = errorText(error);
-  return (error?.code === "PGRST204" || text.includes("schema cache"))
-    && text.includes("branch_id")
-    && text.includes("jobs");
+  if (error?.code !== "PGRST204" && !text.toLowerCase().includes("schema cache")) return null;
+  const match = text.match(/could not find the ['"]([^'"]+)['"] column of ['"](?:public\.)?jobs['"] in the schema cache/i);
+  return match?.[1] || null;
 }
 
-// A missing column is rejected by PostgREST before INSERT reaches PostgreSQL,
-// so this one compatibility retry cannot duplicate a successfully created job.
-export async function insertJobWithBranchFallback(client, row) {
+// Unknown columns are rejected by PostgREST before INSERT reaches PostgreSQL.
+// Removing only the column named by that exact error is therefore safe from
+// duplicate inserts. Network, permission and SQL errors are never retried.
+export async function insertCompatibleJob(client, row) {
   const insert = (payload) => client.from("jobs").insert(payload).select("id, client_phone").single();
-  const first = await insert(row);
-  if (!first.error || !Object.hasOwn(row, "branch_id") || !isMissingJobsBranchColumn(first.error)) {
-    return { ...first, branchOmitted: false };
+  let compatibleRow = { ...row };
+  const omittedColumns = [];
+
+  for (let attempt = 0; attempt <= Object.keys(row).length; attempt += 1) {
+    const result = await insert(compatibleRow);
+    if (!result.error) return { ...result, omittedColumns };
+
+    const column = missingJobsColumn(result.error);
+    if (!column || !Object.hasOwn(compatibleRow, column)) return { ...result, omittedColumns };
+    compatibleRow = Object.fromEntries(Object.entries(compatibleRow).filter(([key]) => key !== column));
+    omittedColumns.push(column);
   }
 
-  const { branch_id: _unsupportedBranch, ...compatibleRow } = row;
-  const retry = await insert(compatibleRow);
-  return { ...retry, branchOmitted: !retry.error };
+  return { data: null, error: { message: "Не удалось подобрать совместимый формат заявки" }, omittedColumns };
 }

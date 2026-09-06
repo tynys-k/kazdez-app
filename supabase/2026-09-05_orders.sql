@@ -149,3 +149,7 @@ create trigger kd_changes_orders
 -- select o.address, count(j.*) as визитов, sum(j.report_paid) as выручка
 --   from public.orders o join public.jobs j on j.order_id = o.id
 --  group by o.id, o.address having count(j.*) > 1 order by 2 desc limit 20;
+
+-- Если PostgREST продолжает показывать старую схему после ALTER/CREATE,
+-- принудительно перечитываем таблицы и столбцы.
+notify pgrst, 'reload schema';

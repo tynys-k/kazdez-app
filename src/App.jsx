@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import SessionGate from "./SessionGate";
 import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
-import { insertJobWithBranchFallback } from "./jobPersistence";
+import { insertCompatibleJob } from "./jobPersistence";
 import { generateCertificate, generateAct } from "./pdfDocs";
 import ExcelJS from "exceljs";
 import {
@@ -1246,16 +1246,16 @@ function Dashboard({ session, profile }) {
     const quoted = quotedPriceFor(payload);
     const objectId = await ensureObject(payload);
     const orderId = await ensureOrder({ ...payload, object_id: objectId, quoted_price: quoted });
-    const { data: created, error, branchOmitted } = await insertJobWithBranchFallback(supabase, {
+    const { data: created, error, omittedColumns } = await insertCompatibleJob(supabase, {
       ...payload, quoted_price: quoted, object_id: objectId,
       branch_id: payload.branch_id || defaultBranchId(), order_id: orderId,
       visit_no: 1, visit_kind: payload.service_contract_id ? "contract" : "primary",
       created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new",
     });
     if (error) { showToast("Ошибка: " + error.message); return false; }
-    if (branchOmitted) logClientError({
+    if (omittedColumns.length) logClientError({
       kind: "schema_compatibility", place: "createJob",
-      message: "Заявка создана без branch_id: примените supabase/2026-09-05_branches.sql",
+      message: `Заявка создана без полей ${omittedColumns.join(", ")}: примените SQL-миграции Supabase`,
     });
     // Корневой визит записывается в заказ: по нему повторный запуск переноса
     // видит, что заказ уже заведён, и не плодит дубли.
@@ -1265,7 +1265,7 @@ function Dashboard({ session, profile }) {
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
     await recordClientEvent({ ...payload, id: created?.id, client_phone: created?.client_phone || payload.client_phone }, "created", "Заявка создана", `${payload.pest || "Услуга"} · ${isoToRu(payload.scheduled_date) || "дата уточняется"}`);
     setModal(null);
-    showToast(branchOmitted ? "Заявка создана без филиала — сообщите администратору" : "Заявка создана");
+    showToast(omittedColumns.length ? "Заявка создана в режиме совместимости — обновите базу" : "Заявка создана");
     reloadJobs();
     return true;
   }
@@ -1329,7 +1329,7 @@ function Dashboard({ session, profile }) {
   async function createRepeatJob(job) {
     // Повторный выезд — визит того же заказа, а не новая продажа. Иначе он
     // навсегда останется заявкой с нулевой выручкой и будет занижать чек.
-    const ins = await supabase.from("jobs").insert({
+    const ins = await insertCompatibleJob(supabase, {
       type: "Вторичная", scheduled_date: null, scheduled_time: "", address: job.address, floor: job.floor,
       area: job.area, source: job.source, pest: job.pest, price_options: job.price_options,
       client_phone: job.client_phone, guarantee_months: job.guarantee_months, status: "new", repeat_of: job.id,
@@ -1349,7 +1349,7 @@ function Dashboard({ session, profile }) {
   async function addVisit(job, payload) {
     const orderId = job.order_id;
     if (!orderId) { showToast("У заявки нет заказа — прогоните миграцию orders"); return "Нет заказа"; }
-    const { error } = await supabase.from("jobs").insert({
+    const { error } = await insertCompatibleJob(supabase, {
       type: "Плановая", scheduled_date: payload.date || null, scheduled_time: "",
       address: job.address, floor: job.floor, area: job.area, source: job.source, pest: job.pest,
       client_phone: job.client_phone, contact_name: job.contact_name,
@@ -2211,7 +2211,7 @@ function Dashboard({ session, profile }) {
     // результат. Иначе год обслуживания остаётся цепочкой заявок, которая
     // нигде не сходится в сумму.
     const orderId = await ensureOrder({ ...payload, quoted_price: Number(contract.price) || 0 });
-    const ins = await supabase.from("jobs").insert({ ...payload, order_id: orderId, visit_no: 1, visit_kind: "contract" }).select("id").single();
+    const ins = await insertCompatibleJob(supabase, { ...payload, order_id: orderId, visit_no: 1, visit_kind: "contract" });
     if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
     if (orderId && ins.data?.id) await supabase.from("orders").update({ root_job_id: ins.data.id }).eq("id", orderId);
     const next = parseIso(contract.next_service_date) || new Date(); next.setDate(next.getDate() + (Number(contract.interval_days) || 30));
@@ -3180,7 +3180,7 @@ function Dashboard({ session, profile }) {
       <main className="kd-main">
 
         {loading && <div className="kd-empty">Загрузка…</div>}
-        {!loading && dataWarnings.length > 0 && <details className="kd-systemwarning" open><summary><AlertTriangle size={17} />Данные неполные или устарели · {dataWarnings.length}</summary><div><span>Не удалось обновить часть данных. Последние загруженные значения сохранены, но текущие суммы и статусы требуют проверки.</span>{isAdmin && dataWarnings.map((warning) => <span key={warning}>{warning}</span>)}<button className="kd-btn ghost sm" onClick={() => load()}>Повторить загрузку</button></div></details>}
+        {!loading && dataWarnings.length > 0 && <details className="kd-systemwarning" open><summary><AlertTriangle size={17} />Данные неполные или устарели · {dataWarnings.length}</summary><div><span>Не удалось обновить часть данных. Последние загруженные значения сохранены, но текущие суммы и статусы требуют проверки.</span>{isAdmin && dataWarnings.some((warning) => warning.toLowerCase().includes("schema cache")) && <span><strong>Схема Supabase отстаёт от приложения: примените ожидающие SQL-миграции и обновите кеш схемы.</strong></span>}{isAdmin && dataWarnings.map((warning) => <span key={warning}>{warning}</span>)}<button className="kd-btn ghost sm" onClick={() => load()}>Повторить загрузку</button></div></details>}
 
         {!loading && tab === "today" && (
           <div className="kd-today">
