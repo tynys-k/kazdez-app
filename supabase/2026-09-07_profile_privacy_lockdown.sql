@@ -7,9 +7,11 @@
 
 revoke select on table public.profiles from anon, authenticated;
 
--- id нужен PostgreSQL для WHERE при разрешённом политиками обновлении профиля.
--- Остальные поля читаются только через безопасные функции выше.
-grant select (id) on table public.profiles to authenticated;
+-- Эти служебные поля нужны старым RLS-функциям is_admin/kd_has_permission:
+-- они проверяют роль и персональные флажки перед чтением других таблиц.
+-- Зарплата, телефон и кассовые поля в этот список намеренно не входят.
+grant select (id, role, is_active, access_overrides, branch_id)
+  on table public.profiles to authenticated;
 
 notify pgrst, 'reload schema';
 
