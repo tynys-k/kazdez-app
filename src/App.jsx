@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -2018,17 +2018,27 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Отмечено как внесённое"); load(); return null;
   }
   // Добавить частичный возврат: приход на указанный счёт
-  async function addGuaranteeReturn(g, amount, retDate, accountId, note) {
-    const { data, error } = await supabase.from("guarantee_returns").insert({ guarantee_id: g.id, amount: Number(amount) || 0, return_date: retDate || null, account_id: accountId || null, note: note || null, created_by: session.user.id }).select().single();
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    if (accountId) {
-      await supabase.from("money_moves").insert({
-        account_id: accountId, direction: "income", amount: Number(amount) || 0, move_date: retDate || new Date().toISOString().slice(0, 10),
-        note: `Возврат обеспечения по тендеру`, source: "tender_return", ref_id: data.id, created_by: session.user.id,
-      });
+  async function addGuaranteeReturn(g, amount, retDate, accountId, note, requestId) {
+    if (!accountId || !retDate || !requestId) {
+      const message = "Выбери счёт и дату возврата.";
+      showToast(message); return message;
+    }
+    const { error } = await supabase.rpc("post_tender_guarantee_return_atomic", {
+      p_request_id: requestId,
+      p_guarantee_id: g.id,
+      p_amount: Number(amount) || 0,
+      p_account_id: accountId,
+      p_returned_on: retDate,
+      p_note: note || null,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, "post_tender_guarantee_return_atomic")
+        ? `Безопасные возвраты ещё не включены. Выполни supabase/${ATOMIC_GUARANTEE_RETURNS_MIGRATION} — возврат не был записан.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
     await logAction("Тендеры", `Возврат обеспечения ${fmt(amount)} ₸${accountId ? " на счёт " + (accountById(accountId)?.name || "") : ""}`);
-    setModal(null); showToast("Возврат добавлен"); load();
+    setModal(null); showToast("Возврат добавлен"); load(); return null;
   }
   async function removeGuaranteeReturn(r) {
     await supabase.from("money_moves").delete().eq("source", "tender_return").eq("ref_id", r.id);
@@ -6049,7 +6059,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} onClose={() => setModal(null)} onPick={(sid) => { setLeadStage(modal.lead, sid); setModal(null); }} />}
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
-      {modal?.kind === "returnGuarantee" && <ReturnGuaranteeModal g={modal.g} remaining={modal.remaining} accounts={accounts} onClose={() => setModal(null)} onConfirm={(amount, date, accId, note) => addGuaranteeReturn(modal.g, amount, date, accId, note)} />}
+      {modal?.kind === "returnGuarantee" && <ReturnGuaranteeModal g={modal.g} remaining={modal.remaining} accounts={accounts} onClose={() => setModal(null)} onConfirm={(amount, date, accId, note, requestId) => addGuaranteeReturn(modal.g, amount, date, accId, note, requestId)} />}
       {modal?.kind === "rejectDeposit" && <RejectDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} onClose={() => setModal(null)} onSave={(adminNote) => { decideDeposit(modal.dep, "rejected", adminNote); setModal(null); }} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
