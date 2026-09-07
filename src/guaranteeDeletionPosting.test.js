@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { ATOMIC_GUARANTEE_DELETIONS_MIGRATION } from "./financialPosting";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const sql = fs.readFileSync(path.join(here, "..", "supabase", ATOMIC_GUARANTEE_DELETIONS_MIGRATION), "utf8");
+const sql = fs.readFileSync(path.join(here, "..", "supabase", ATOMIC_GUARANTEE_DELETIONS_MIGRATION), "utf8").replace(/\r\n/g, "\n");
 
 describe("atomic tender guarantee deletions", () => {
   it("provides APIs for one return and the whole guarantee", () => {
