@@ -29,7 +29,10 @@ beforeEach(() => {
   supabase.auth.getSession.mockResolvedValue({ data: { session: { user: { id: person.id, email: "test@example.invalid" } } } });
   supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } });
   supabase.functions.invoke.mockResolvedValue({ data: { users: [] } });
-  supabase.rpc.mockResolvedValue({ data: [], error: null });
+  supabase.rpc.mockImplementation((name) => Promise.resolve({
+    data: name === "get_my_profile" ? person : name === "list_profiles_safe" ? tables.profiles : [],
+    error: null,
+  }));
   supabase.from.mockImplementation((table) => {
     let offset = 0;
     const query = {

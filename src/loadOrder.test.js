@@ -30,7 +30,9 @@ function readSources() {
       const key = /key: "([a-z_]+)"/.exec(line);
       const label = /label: "([^"]+)"/.exec(line);
       const table = /(?:from|fetchAllRows)\("([a-z_]+)"/.exec(line);
-      return { key: key && key[1], label: label && label[1], table: table && table[1], line };
+      const rpc = /rpc\("([a-z_]+)"/.exec(line);
+      const rpcSource = { list_profiles_safe: "profiles" }[rpc && rpc[1]];
+      return { key: key && key[1], label: label && label[1], table: (table && table[1]) || rpcSource, line };
     });
 }
 
@@ -51,6 +53,12 @@ describe("реестр источников данных", () => {
   it("ключи не повторяются", () => {
     const keys = sources.map((s) => s.key);
     expect(keys.length).toBe(new Set(keys).size);
+  });
+
+  it("профили загружаются только через безопасную серверную проекцию", () => {
+    const profiles = sources.find((s) => s.key === "profiles");
+    expect(profiles.line).toContain('rpc("list_profiles_safe")');
+    expect(profiles.line).not.toContain('from("profiles")');
   });
 
   it("у каждой записи есть подпись для сообщений об ошибках", () => {

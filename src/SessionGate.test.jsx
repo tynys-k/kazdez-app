@@ -6,7 +6,7 @@ import SessionGate from "./SessionGate";
 import { supabase } from "./supabaseClient";
 
 vi.mock("./supabaseClient", () => ({ supabase: {
-  auth: { getSession: vi.fn(), onAuthStateChange: vi.fn(), signOut: vi.fn() }, from: vi.fn(),
+  auth: { getSession: vi.fn(), onAuthStateChange: vi.fn(), signOut: vi.fn() }, from: vi.fn(), rpc: vi.fn(),
 } }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,9 +20,8 @@ beforeEach(() => {
   unsubscribe = vi.fn();
   supabase.auth.onAuthStateChange.mockImplementation((callback) => { authEvent = callback; return { data: { subscription: { unsubscribe } } }; });
   supabase.auth.getSession.mockResolvedValue({ data: { session: session("a") } });
-  single = vi.fn().mockResolvedValue({ data: profile("a") });
-  const query = { select: vi.fn(() => query), eq: vi.fn(() => query), single };
-  supabase.from.mockReturnValue(query);
+  single = supabase.rpc;
+  single.mockResolvedValue({ data: profile("a") });
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 async function render() {
@@ -38,6 +37,8 @@ describe("profile-gated startup", () => {
     expect(container.textContent).not.toContain("PRIVATE");
     await act(async () => pending.resolve({ data: profile("a", { role: "admin" }) }));
     expect(container.textContent).toBe("PRIVATE:a:admin");
+    expect(supabase.rpc).toHaveBeenCalledWith("get_my_profile");
+    expect(supabase.from).not.toHaveBeenCalled();
   });
   it.each([{ data: null }, { error: { message: "offline" } }, { data: profile("a", { role: "unknown" }) }])("fails closed for an unavailable or invalid profile: %j", async (result) => {
     single.mockResolvedValueOnce(result);
