@@ -3166,14 +3166,25 @@ function AccountModal({ item, onClose, onSave, onRemove }) {
 
 function ConfirmDepositModal({ dep, techName, accounts, defaultAccountId, onClose, onConfirm }) {
   const [accId, setAccId] = useState(defaultAccountId || accounts[0]?.id || "");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+  async function save() {
+    setSaving(true); setProblem("");
+    const message = await onConfirm(accId, date);
+    if (message) setProblem(message);
+    setSaving(false);
+  }
   return (
     <ModalShell title="Подтвердить поступление" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={!accId} onClick={() => onConfirm(accId)}>Да, подтвердить</button>
+      <button className="kd-btn primary" disabled={!accId || !date || saving} onClick={save}>{saving ? "…" : "Да, подтвердить"}</button>
     </>}>
       <div className="kd-paytotal"><span>{techName || "Дезинфектор"}</span><strong>{fmt(dep.amount)} ₸</strong></div>
       <div className="kd-muted" style={{ marginBottom: 12 }}>Деньги придут на выбранный счёт (сдача налички через банкомат). Это перевод из «на руках» дезинфектора на счёт — без двойного счёта.</div>
       <Field label="На какой счёт поступило"><select value={accId} onChange={(e) => setAccId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      <Field label="Дата поступления"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      {problem && <div className="kd-err">{problem}</div>}
     </ModalShell>
   );
 }
@@ -3694,7 +3705,13 @@ function DepositModal({ max, onClose, onSave }) {
 function RejectDepositModal({ dep, techName, onClose, onSave }) {
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
-  async function save() { setSaving(true); await onSave(reason); setSaving(false); }
+  const [problem, setProblem] = useState("");
+  async function save() {
+    setSaving(true); setProblem("");
+    const message = await onSave(reason);
+    if (message) setProblem(message);
+    setSaving(false);
+  }
   return (
     <ModalShell title="Отклонить внесение" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
@@ -3702,6 +3719,7 @@ function RejectDepositModal({ dep, techName, onClose, onSave }) {
     </>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{techName || "Сотрудник"} · {fmt(dep.amount)} ₸. Сумма вернётся в «на руках» у сотрудника.</div>
       <Field label="Причина (увидит сотрудник)"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="напр.: не вижу поступления" /></Field>
+      {problem && <div className="kd-err">{problem}</div>}
     </ModalShell>
   );
 }

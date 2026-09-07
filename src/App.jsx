@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -1926,24 +1926,35 @@ function Dashboard({ session, profile }) {
     await logAction("Касса", `Заявка на внесение: ${fmt(amount)} ₸ (ожидает подтверждения)`);
     setModal(null); showToast("Отправлено на подтверждение"); load();
   }
-  async function decideDeposit(dep, status, adminNote, accountId) {
-    const { error } = await supabase.from("cash_deposits").update({ status, decided_at: new Date().toISOString(), decided_by: session.user.id, admin_note: adminNote || null }).eq("id", dep.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    const who = techById(dep.tech_id)?.full_name || "?";
-    if (status === "confirmed" && accountId) {
-      const exists = moves.some((m) => m.source === "deposit" && m.ref_id === dep.id);
-      if (!exists) {
-        await supabase.from("money_moves").insert({
-          account_id: accountId, direction: "income", amount: dep.amount, move_date: new Date().toISOString().slice(0, 10),
-          note: `Сдача наличных: ${who}`, source: "deposit", ref_id: dep.id, created_by: session.user.id,
-        });
-      }
+  async function decideDeposit(dep, status, adminNote, accountId, decidedOn) {
+    if (status === "confirmed" && (!accountId || !decidedOn)) return "Выбери счёт и дату поступления.";
+    const rpcName = "decide_cash_deposit_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_deposit_id: dep.id,
+      p_status: status,
+      p_account_id: accountId || null,
+      p_decided_on: decidedOn || null,
+      p_admin_note: adminNote || null,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное подтверждение ещё не включено. Выполни supabase/${ATOMIC_CASH_DEPOSITS_MIGRATION} — заявка не была изменена.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
+    const who = techById(dep.tech_id)?.full_name || "?";
     await logAction("Касса", `${status === "confirmed" ? "Подтверждено поступление" : "Отклонено"}: ${who} · ${fmt(dep.amount)} ₸${status === "confirmed" && accountId ? " → " + (accountById(accountId)?.name || "") : ""}`);
-    showToast(status === "confirmed" ? "Поступление подтверждено" : "Отклонено"); load();
+    setModal(null); showToast(status === "confirmed" ? "Поступление подтверждено" : "Отклонено"); load(); return null;
   }
   async function cancelDeposit(dep) {
-    await supabase.from("cash_deposits").delete().eq("id", dep.id);
+    const rpcName = "cancel_cash_deposit_atomic";
+    const { error } = await supabase.rpc(rpcName, { p_deposit_id: dep.id });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасная отмена ещё не включена. Выполни supabase/${ATOMIC_CASH_DEPOSITS_MIGRATION} — заявка не была отменена.`
+        : error.message;
+      showToast("Ошибка: " + message); return;
+    }
     await logAction("Касса", `Отменена заявка на внесение: ${fmt(dep.amount)} ₸`);
     showToast("Отменено"); load();
   }
@@ -6051,7 +6062,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "opex" && <OpexModal opex={modal.opex} expCats={expCats} onClose={() => setModal(null)} onSave={saveOpex} />}
       {modal?.kind === "move" && <MoveModal move={modal.move} accounts={accounts} expCats={expCats} onClose={() => setModal(null)} onSave={saveMove} />}
       {modal?.kind === "account" && <AccountModal item={modal.item} onClose={() => setModal(null)} onSave={saveAccount} onRemove={removeAccount} />}
-      {modal?.kind === "confirmDeposit" && <ConfirmDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} accounts={accounts} defaultAccountId={cashDepositAccountId} onClose={() => setModal(null)} onConfirm={(accId) => { decideDeposit(modal.dep, "confirmed", null, accId); setModal(null); }} />}
+      {modal?.kind === "confirmDeposit" && <ConfirmDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} accounts={accounts} defaultAccountId={cashDepositAccountId} onClose={() => setModal(null)} onConfirm={(accId, decidedOn) => decideDeposit(modal.dep, "confirmed", null, accId, decidedOn)} />}
       {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
@@ -6069,7 +6080,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
       {modal?.kind === "returnGuarantee" && <ReturnGuaranteeModal g={modal.g} remaining={modal.remaining} accounts={accounts} onClose={() => setModal(null)} onConfirm={(amount, date, accId, note, requestId) => addGuaranteeReturn(modal.g, amount, date, accId, note, requestId)} />}
-      {modal?.kind === "rejectDeposit" && <RejectDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} onClose={() => setModal(null)} onSave={(adminNote) => { decideDeposit(modal.dep, "rejected", adminNote); setModal(null); }} />}
+      {modal?.kind === "rejectDeposit" && <RejectDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} onClose={() => setModal(null)} onSave={(adminNote) => decideDeposit(modal.dep, "rejected", adminNote)} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
       {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
