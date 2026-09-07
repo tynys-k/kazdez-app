@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { readLocalDraft, useLocalDraft } from "./useLocalDraft";
 import { newJobDraftStorageKey, reportDraftStorageKey } from "./localDataScope";
 import { createReportRequestId } from "./reportSubmission";
+import { createFinancialRequestId } from "./financialPosting";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
 import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
@@ -3625,18 +3626,25 @@ function PayGuaranteeModal({ g, accounts, onClose, onConfirm }) {
 }
 
 function ReturnGuaranteeModal({ g, remaining, accounts, onClose, onConfirm }) {
+  const requestIdRef = useRef(createFinancialRequestId());
   const [amount, setAmount] = useState(String(remaining || ""));
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [accId, setAccId] = useState(g.account_id || accounts[0]?.id || "");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
   const val = Number(amount) || 0;
   const ok = val > 0 && val <= remaining;
-  async function save() { setSaving(true); await onConfirm(val, date || null, accId || null, note.trim() || null); setSaving(false); }
+  async function save() {
+    setSaving(true); setProblem("");
+    const message = await onConfirm(val, date || null, accId || null, note.trim() || null, requestIdRef.current);
+    if (message) setProblem(message);
+    setSaving(false);
+  }
   return (
     <ModalShell title="Возврат обеспечения" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Да, добавить возврат"}</button>
+      <button className="kd-btn primary" disabled={!ok || !date || !accId || saving} onClick={save}>{saving ? "…" : "Да, добавить возврат"}</button>
     </>}>
       <div className="kd-paytotal"><span>Осталось вернуть</span><strong style={{ color: "#B4650B" }}>{fmt(remaining)} ₸</strong></div>
       <div className="kd-muted" style={{ marginBottom: 12 }}>Государство возвращает частями — добавляй каждый возврат отдельно. Деньги придут на выбранный счёт (увеличат его остаток).</div>
@@ -3645,8 +3653,9 @@ function ReturnGuaranteeModal({ g, remaining, accounts, onClose, onConfirm }) {
         <Field label="Дата возврата"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
       </div>
       {val > remaining && <div className="kd-err" style={{ marginTop: -6 }}>Нельзя вернуть больше, чем заморожено.</div>}
-      <Field label="На какой счёт вернулось"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— не привязывать к счёту —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      <Field label="На какой счёт вернулось"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— выбери счёт —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
       <Field label="Примечание (необязательно)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="напр.: после 1-й обработки" /></Field>
+      {problem && <div className="kd-err">{problem}</div>}
     </ModalShell>
   );
 }
