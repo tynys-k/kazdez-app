@@ -61,6 +61,18 @@ describe("report drafts and submission failures", () => {
     expect(read()).not.toBeNull();
     expect(button("Сохранить отчёт").disabled).toBe(false);
   });
+  it("reuses the same request id after an uncertain result and a remount", async () => {
+    const firstSave = vi.fn().mockResolvedValue(false);
+    await mountReport(firstSave); await click(equipment.label); await click("Сохранить отчёт");
+    const firstRequestId = firstSave.mock.calls[0][4];
+    expect(firstRequestId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(read().requestId).toBe(firstRequestId);
+
+    await act(async () => root.unmount()); root = createRoot(container);
+    const retrySave = vi.fn().mockResolvedValue(false);
+    await mountReport(retrySave); await click("Сохранить отчёт");
+    expect(retrySave.mock.calls[0][4]).toBe(firstRequestId);
+  });
   it("prevents double submission, editing and closing while a save is pending", async () => {
     let resolve; const onSave = vi.fn(() => new Promise((r) => { resolve = r; })); const onClose = vi.fn();
     await mountReport(onSave, onClose); await click(equipment.label);

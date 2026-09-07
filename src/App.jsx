@@ -15,6 +15,7 @@ import { TREATMENT_METHODS, REPEAT_CAUSES, REPEAT_FAULTS, equipmentLabel, PAPERW
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
+import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -1405,73 +1406,20 @@ function Dashboard({ session, profile }) {
     await recordClientEvent(job, "assignment", techId ? "Назначен исполнитель" : "Исполнитель снят", techId ? to : actorName);
     setModal(null); showToast("Дезинфектор назначен"); reloadJobs();
   }
-  async function submitReport(job, report, chems, docs) {
+  async function submitReport(job, report, chems, docs, requestId) {
     if (blockedByClosedPeriod(job.scheduled_date)) return false;
-    const { error } = await supabase.rpc("submit_report", {
-      p_job: job.id, p_cash: report.cash, p_qr: report.qr, p_note: report.note,
-      p_chems: chems,
-      p_fu_wanted: report.followUp.wanted, p_fu_date: report.followUp.date, p_fu_note: report.followUp.note,
-      p_docs_needed: docs.needed, p_docs_avr: docs.avr, p_docs_dogovor: docs.dogovor, p_docs_note: docs.note,
+    const { error } = await supabase.rpc("submit_report_atomic", {
+      p_request_id: requestId,
+      p_payload: buildAtomicReportPayload(job, report, chems, docs),
     });
-    if (error) { showToast("Ошибка: " + error.message); return false; }
-    // перечисление + пересчёт report_paid — через защищённую функцию (RLS блокировал прямой update)
-    const upd = await supabase.rpc("save_report_extras", {
-      p_job: job.id, p_cash: Number(report.cash) || 0, p_qr: Number(report.qr) || 0,
-      p_transfer: Number(report.transfer) || 0, p_method: report.method,
-    });
-    if (upd.error) { showToast("Отчёт сохранён, но детали оплаты не записались: " + upd.error.message + ". Проверь, выполнен ли kazdez-report-rpc.sql."); reloadJobs(); return false; }
+    if (error) {
+      const message = atomicReportRpcUnavailable(error)
+        ? "Безопасное сохранение ещё не включено в базе. Выполни миграцию 2026-09-07_atomic_report_submission.sql — отчёт не был сохранён."
+        : "Отчёт не сохранён: " + error.message + ". Все изменения отменены, можно безопасно повторить.";
+      showToast(message);
+      return false;
+    }
     await recordClientEvent(job, "done", "Работа выполнена", `Оплата: ${fmt((Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0))} ₸`);
-    // Обход точек: отмечаем только то, что исполнитель реально осмотрел.
-    if (Array.isArray(report.checks) && report.checks.length) {
-      const { error: ccError } = await supabase.from("control_checks").upsert(
-        report.checks.map((c) => ({
-          ...c, job_id: job.id,
-          checked_on: job.scheduled_date || new Date().toISOString().slice(0, 10),
-          created_by: session.user.id,
-        })),
-        { onConflict: "point_id,job_id" });
-      if (ccError) showToast("Отчёт сохранён, но обход точек не записался: " + ccError.message);
-    }
-    // Концентрация и метод — в отдельную таблицу: строки расхода пишет
-    // защищённая функция, куда поля не добавить.
-    if (Array.isArray(report.chemDetails) && report.chemDetails.length) {
-      const { error: cdError } = await supabase.from("job_chem_details").upsert(
-        report.chemDetails.map((d) => ({ ...d, job_id: job.id, created_by: session.user.id })),
-        { onConflict: "job_id,chemical_id" });
-      if (cdError) showToast("Отчёт сохранён, но концентрация не записалась: " + cdError.message);
-    }
-    // Оборудование пишется отдельной записью по той же причине, что и скидка:
-    // отчёт уходит защищённой функцией, куда поля не добавить, а писать в
-    // заявку напрямую исполнителю запрещено политикой.
-    if (Array.isArray(report.equipment) && report.equipment.length) {
-      const { error: eqError } = await supabase.from("job_equipment").upsert({
-        job_id: job.id, codes: report.equipment,
-        created_by: session.user.id, updated_at: new Date().toISOString(),
-      }, { onConflict: "job_id" });
-      if (eqError) showToast("Отчёт сохранён, но оборудование не записалось: " + eqError.message);
-    }
-    // Долг записывается отдельно от скидки: скидку дали осознанно, долг
-    // обещали вернуть. Смешивать их — значит потерять и то и другое.
-    if (report.debt && report.debt.amount > 0) {
-      const { error: dError } = await supabase.from("job_debts").upsert({
-        job_id: job.id, amount: report.debt.amount, due_on: report.debt.dueOn || null,
-        note: report.debt.note || null, created_by: session.user.id,
-      }, { onConflict: "job_id" });
-      if (dError) showToast("Отчёт сохранён, но долг не записался: " + dError.message);
-    }
-    // Причина скидки пишется отдельной записью: сумма уходит защищённой
-    // функцией, а причину указывает тот, кто скидку дал.
-    if (report.discountReason && report.discountReason !== "debt") {
-      const { error: dError } = await supabase.from("job_discounts").upsert({
-        job_id: job.id,
-        quoted: Number(job.quoted_price) || 0,
-        charged: (Number(report.cash) || 0) + (Number(report.qr) || 0) + (Number(report.transfer) || 0),
-        reason: report.discountReason,
-        note: report.discountNote || null,
-        created_by: session.user.id,
-      }, { onConflict: "job_id" });
-      if (dError) showToast("Отчёт сохранён, но причина скидки не записалась: " + dError.message);
-    }
     setModal({ kind: "reportSuccess" }); reloadJobs(); return true;
   }
   async function markTransferPaid(job, accountId, paidDate) {

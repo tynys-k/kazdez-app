@@ -2,6 +2,7 @@
 // Модальные окна Этапа 3: клиент 360 и единый жизненный цикл заявки.
 import React, { useEffect, useRef, useState } from "react";
 import { readLocalDraft, useLocalDraft } from "./useLocalDraft";
+import { createReportRequestId } from "./reportSubmission";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
 import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
@@ -668,6 +669,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints
   const draftRef = useRef(null);
   if (draftRef.current === null) draftRef.current = readLocalDraft(draftKey) || {};
   const draft = draftRef.current;
+  const requestIdRef = useRef(draft.requestId || createReportRequestId());
   const [cash, setCash] = useState(draft.cash || ""); const [qr, setQr] = useState(draft.qr || ""); const [note, setNote] = useState(draft.note || "");
   const [transfer, setTransfer] = useState(draft.transfer || "");
   const [chems, setChems] = useState(draft.chems || [{ chemical_id: "", amount: "", unit: "small" }, { chemical_id: "", amount: "", unit: "small" }]);
@@ -715,7 +717,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints
       return [...prev.filter((c) => !WORK_EQUIPMENT.find((e) => e.code === c)?.exclusive), code];
     });
   };
-  const draftStorage = useLocalDraft(draftKey, { cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, checks, discountReason, discountNote, debtDue });
+  const draftStorage = useLocalDraft(draftKey, { requestId: requestIdRef.current, cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, checks, discountReason, discountNote, debtDue });
   function requestClose() {
     if (savingRef.current) return;
     if (!draftStorage.error || window.confirm("Черновик не сохранён на устройстве. Закрыть форму с риском потери изменений?")) onClose();
@@ -755,7 +757,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints
           .filter(([, v]) => v && v.result)
           .map(([pointId, v]) => ({ point_id: pointId, result: v.result, count: v.count === "" || v.count == null ? null : Number(v.count) || null, note: v.note || null })),
         discountReason: needsReason ? discountReason : "", discountNote: needsReason ? discountNote.trim() : "",
-        debt: isDebt ? { amount: quoted - total, dueOn: debtDue, note: discountNote.trim() } : null }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false });
+        debt: isDebt ? { amount: quoted - total, dueOn: debtDue, note: discountNote.trim() } : null }, lines, { needed: docNeeded, avr, dogovor, note: docNote, done: false }, requestIdRef.current);
       if (ok === true) draftStorage.clear();
       else setSaveError("Сохранение отчёта не подтверждено. Проверьте сообщение об ошибке; черновик оставлен в форме.");
     } catch { setSaveError("Не удалось подтвердить сохранение. Черновик оставлен в форме. Перед повторной отправкой проверьте статус заявки — сервер мог принять запрос."); }
