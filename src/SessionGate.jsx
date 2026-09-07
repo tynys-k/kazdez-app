@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { ROLE_DEFINITIONS } from "./shared";
+import { clearUserLocalData } from "./localDataScope";
 
 // Do not mount the data-owning screen until the current user's profile is known.
 // The user id on the result also protects the render before effect cleanup runs.
@@ -43,6 +44,7 @@ export default function SessionGate({ login, children }) {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) setExitError(true);
+      else if (userId) clearUserLocalData(localStorage, userId);
     } catch { setExitError(true); }
   }
   function retry() {

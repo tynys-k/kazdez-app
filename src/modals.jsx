@@ -2,6 +2,7 @@
 // Модальные окна Этапа 3: клиент 360 и единый жизненный цикл заявки.
 import React, { useEffect, useRef, useState } from "react";
 import { readLocalDraft, useLocalDraft } from "./useLocalDraft";
+import { newJobDraftStorageKey, reportDraftStorageKey } from "./localDataScope";
 import { createReportRequestId } from "./reportSubmission";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
@@ -319,13 +320,13 @@ function jobToForm(job) {
   };
 }
 
-const JOB_DRAFT_KEY = "kazdez-new-job-draft-v2";
 const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
 
-function JobFormModal({ initial, title, submitLabel, keepStatus, findBlocked, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, onClose, onSave }) {
+function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, findBlocked, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, onClose, onSave }) {
+  const draftKey = newJobDraftStorageKey(draftOwnerId);
   const draftRef = useRef(undefined);
   if (draftRef.current === undefined) {
-    draftRef.current = !initial ? readLocalDraft(JOB_DRAFT_KEY) : null;
+    draftRef.current = !initial ? readLocalDraft(draftKey, draftOwnerId) : null;
   }
   const draft = draftRef.current;
   const startingForm = initial || draft?.form || emptyJobForm(defaultGuarantee);
@@ -364,7 +365,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, findBlocked, pa
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState("");
   const hasDraft = JSON.stringify(f) !== JSON.stringify(emptyJobForm(defaultGuarantee));
-  const draftStorage = useLocalDraft(JOB_DRAFT_KEY, hasDraft ? { form: f, mode: formMode } : null, !initial);
+  const draftStorage = useLocalDraft(draftKey, hasDraft ? { ownerId: String(draftOwnerId), form: f, mode: formMode } : null, !initial);
 
   function requestClose() {
     if (savingRef.current) return;
@@ -664,10 +665,10 @@ function DocModal({ doc, partners, onClose, onSave }) {
   );
 }
 
-function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints = [], discountThreshold = 20, onClose, onSave }) {
-  const draftKey = `kazdez-report-draft-v4:${job.id}`;
+function ReportModal({ job, partnerName, chemicals, primaryReport, draftOwnerId, controlPoints = [], discountThreshold = 20, onClose, onSave }) {
+  const draftKey = reportDraftStorageKey(draftOwnerId, job.id);
   const draftRef = useRef(null);
-  if (draftRef.current === null) draftRef.current = readLocalDraft(draftKey) || {};
+  if (draftRef.current === null) draftRef.current = readLocalDraft(draftKey, draftOwnerId) || {};
   const draft = draftRef.current;
   const requestIdRef = useRef(draft.requestId || createReportRequestId());
   const [cash, setCash] = useState(draft.cash || ""); const [qr, setQr] = useState(draft.qr || ""); const [note, setNote] = useState(draft.note || "");
@@ -717,7 +718,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, controlPoints
       return [...prev.filter((c) => !WORK_EQUIPMENT.find((e) => e.code === c)?.exclusive), code];
     });
   };
-  const draftStorage = useLocalDraft(draftKey, { requestId: requestIdRef.current, cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, checks, discountReason, discountNote, debtDue });
+  const draftStorage = useLocalDraft(draftKey, { ownerId: String(draftOwnerId), requestId: requestIdRef.current, cash, qr, note, transfer, chems, fuWanted, fuDate, fuNote, docNeeded, avr, dogovor, docNote, equipment, checks, discountReason, discountNote, debtDue });
   function requestClose() {
     if (savingRef.current) return;
     if (!draftStorage.error || window.confirm("Черновик не сохранён на устройстве. Закрыть форму с риском потери изменений?")) onClose();

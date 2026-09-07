@@ -4,10 +4,12 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JobFormModal, ReportModal, jobToForm } from "./modals";
 import { CHECK_RESULTS, WORK_EQUIPMENT } from "./shared";
+import { reportDraftStorageKey } from "./localDataScope";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const job = { id: "report-test", pest: "Тараканы", address: "Тестовый адрес", quoted_price: 10000 };
-const draftKey = `kazdez-report-draft-v4:${job.id}`;
+const ownerId = "test-owner";
+const draftKey = reportDraftStorageKey(ownerId, job.id);
 const equipment = WORK_EQUIPMENT.find((e) => e.common);
 let container, root;
 beforeEach(() => {
@@ -17,7 +19,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); localStorage.clear(); });
 async function mountReport(onSave = vi.fn().mockResolvedValue(false), onClose = vi.fn()) {
-  await act(async () => root.render(<ReportModal job={job} chemicals={[]} controlPoints={[{ id: "point", number: 1, kind: "bait" }]} onSave={onSave} onClose={onClose} />));
+  await act(async () => root.render(<ReportModal draftOwnerId={ownerId} job={job} chemicals={[]} controlPoints={[{ id: "point", number: 1, kind: "bait" }]} onSave={onSave} onClose={onClose} />));
 }
 function button(text) { return [...container.querySelectorAll("button")].find((b) => b.textContent === text); }
 async function click(text) { await act(async () => button(text).click()); }
@@ -104,7 +106,7 @@ describe("job form save recovery", () => {
   it("reenables the form after a thrown save and warns about an uncertain result", async () => {
     const initial = jobToForm({ ...job, type: "Первичная", client_phone: "+77010000000", price_options: [{ label: "Стоимость", amount: 10000 }] });
     const onSave = vi.fn().mockRejectedValue(new Error("network"));
-    await act(async () => root.render(<JobFormModal initial={initial} title="Изменить заявку" submitLabel="Сохранить" onSave={onSave} onClose={vi.fn()} />));
+    await act(async () => root.render(<JobFormModal draftOwnerId={ownerId} initial={initial} title="Изменить заявку" submitLabel="Сохранить" onSave={onSave} onClose={vi.fn()} />));
     await click("Сохранить");
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(button("Сохранить").disabled).toBe(false);

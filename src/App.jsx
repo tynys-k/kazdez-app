@@ -16,6 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
+import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -242,6 +243,7 @@ function SortBar({ value, onChange, options }) {
 }
 
 function Dashboard({ session, profile }) {
+  const offlineQueueKey = offlineActionsStorageKey(session.user.id);
   const [jobs, setJobs] = useState([]);
   const [chemicals, setChemicals] = useState([]);
   const [techs, setTechs] = useState([]);
@@ -351,7 +353,10 @@ function Dashboard({ session, profile }) {
   const [lastLoadedAt, setLastLoadedAt] = useState(null);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
-  const [offlineQueued, setOfflineQueued] = useState(() => { try { return JSON.parse(localStorage.getItem("kd-offline-actions-v4") || "[]").length; } catch { return 0; } });
+  const [offlineQueued, setOfflineQueued] = useState(() => {
+    try { return ownedOfflineActions(JSON.parse(localStorage.getItem(offlineQueueKey) || "[]"), session.user.id).length; }
+    catch { return 0; }
+  });
   const [syncingOffline, setSyncingOffline] = useState(false);
   const isAdmin = profile?.role === "admin";
   const permissions = effectivePermissions(profile);
@@ -718,10 +723,22 @@ function Dashboard({ session, profile }) {
   async function logAction(action, summary) {
     await supabase.from("audit_log").insert({ actor: actorName, actor_id: session.user.id, action, summary });
   }
-  const OFFLINE_QUEUE_KEY = "kd-offline-actions-v4";
-  function readOfflineQueue() { try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]"); } catch { return []; } }
-  function writeOfflineQueue(items) { localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(items)); setOfflineQueued(items.length); }
-  function queueOfflineAction(action) { const items = readOfflineQueue(); items.push({ ...action, queuedAt: new Date().toISOString() }); writeOfflineQueue(items); }
+  function readOfflineQueue() {
+    try { return ownedOfflineActions(JSON.parse(localStorage.getItem(offlineQueueKey) || "[]"), session.user.id); }
+    catch { return []; }
+  }
+  function writeOfflineQueue(items) {
+    try {
+      localStorage.setItem(offlineQueueKey, JSON.stringify(items)); setOfflineQueued(items.length); return true;
+    } catch {
+      showToast("Не удалось сохранить офлайн-изменение на устройстве"); return false;
+    }
+  }
+  function queueOfflineAction(action) {
+    const items = readOfflineQueue();
+    items.push({ ...action, ownerId: session.user.id, queuedAt: new Date().toISOString() });
+    return writeOfflineQueue(items);
+  }
   async function syncOfflineQueue() {
     if (!navigator.onLine || syncingOffline) return;
     const items = readOfflineQueue(); if (!items.length) return;
@@ -738,6 +755,12 @@ function Dashboard({ session, profile }) {
   async function installApplication() {
     if (!installPrompt) return;
     await installPrompt.prompt(); await installPrompt.userChoice; setInstallPrompt(null);
+  }
+  async function signOut() {
+    if (offlineQueued > 0 && !window.confirm("Есть несинхронизированные офлайн-изменения. При выходе они будут удалены с устройства. Всё равно выйти?")) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) { showToast("Не удалось выйти. Попробуйте ещё раз."); return; }
+    clearUserLocalData(localStorage, session.user.id);
   }
   function clientReminderWhatsappUrl(job) {
     const phone = String(job?.client_phone || "").replace(/\D/g, ""); if (!phone) return "";
@@ -854,7 +877,7 @@ function Dashboard({ session, profile }) {
     if (stageKey === "en_route") payload.en_route_at = now;
     if (stageKey === "on_site") payload.arrived_at = now;
     if (!navigator.onLine) {
-      queueOfflineAction({ kind: "stage", jobId: job.id, payload });
+      if (!queueOfflineAction({ kind: "stage", jobId: job.id, payload })) return;
       setJobs((rows) => rows.map((row) => row.id === job.id ? { ...row, ...payload } : row));
       showToast(`Сохранено офлайн: ${WORK_STAGE[stageKey].short}`); return;
     }
@@ -3099,7 +3122,7 @@ function Dashboard({ session, profile }) {
         <div className="kd-navfoot">
           <div className={`kd-connection ${online ? "online" : "offline"}`}>{online ? <Wifi size={14} /> : <WifiOff size={14} />}<span>{online ? `На связи${lastLoadedAt ? ` · ${lastLoadedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Нет подключения"}</span></div>
           {canAccess("action.settings") && <button className="kd-tab" onClick={() => { loadCompanyImages(); setModal({ kind: "settings" }); setSideOpen(false); }}><Settings size={17} /><span className="kd-tab-lbl">Настройки</span></button>}
-          <button className="kd-tab" onClick={() => supabase.auth.signOut()}><LogOut size={17} /><span className="kd-tab-lbl">Выйти</span></button>
+          <button className="kd-tab" onClick={signOut}><LogOut size={17} /><span className="kd-tab-lbl">Выйти</span></button>
         </div>
       </aside>
 
@@ -5863,8 +5886,8 @@ function Dashboard({ session, profile }) {
       </main>
       </div>
 
-      {modal?.kind === "new" && <JobFormModal findBlocked={blockedClient} title="Новая заявка" submitLabel="Создать" partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
-      {modal?.kind === "edit" && <JobFormModal findBlocked={blockedClient} title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
+      {modal?.kind === "new" && <JobFormModal draftOwnerId={session.user.id} findBlocked={blockedClient} title="Новая заявка" submitLabel="Создать" partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
+      {modal?.kind === "edit" && <JobFormModal draftOwnerId={session.user.id} findBlocked={blockedClient} title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} assignInfo={(techId) => {
         const d = modal.job.scheduled_date;
         if (!d) return { off: false, night: false, count: 0, score: 50, reasons: ["дата ещё не задана"] };
@@ -5890,7 +5913,7 @@ function Dashboard({ session, profile }) {
         const reasons = [count === 0 ? "свободен в этот день" : `${count} заяв. в этот день`, sameArea ? "есть выезд рядом" : "", avgRating ? `качество ${avgRating.toFixed(1)}/5` : ""].filter(Boolean);
         return { off, night, count, score, reasons };
       }} />}
-      {modal?.kind === "report" && <ReportModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals}
+      {modal?.kind === "report" && <ReportModal draftOwnerId={session.user.id} job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals}
         controlPoints={controlPoints.filter((p) => !p.removed_on && String(p.object_id) === String(modal.job.object_id))} discountThreshold={discountThreshold} primaryReport={(() => {
         if (!modal.job.repeat_of) return null;
         const p = jobs.find((x) => x.id === modal.job.repeat_of);
