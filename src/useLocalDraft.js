@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
-export function readLocalDraft(key) {
+export function readLocalDraft(key, ownerId) {
   try {
     const value = JSON.parse(localStorage.getItem(key) || "null");
-    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (ownerId && value.ownerId !== String(ownerId)) return null;
+    return value;
   } catch { return null; }
 }
 
