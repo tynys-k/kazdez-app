@@ -1853,7 +1853,7 @@ function SettleModal({ row, money, accounts = [], partnerName, onClose, onSave }
   return (
     <ModalShell title={outgoing ? "Отдать партнёру" : "Получить от партнёра"} onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Назад</button>
-      <button className="kd-btn primary" disabled={saving || !date} onClick={save}>{saving ? "…" : "Провести"}</button>
+      <button className="kd-btn primary" disabled={saving || !date || !accountId} onClick={save}>{saving ? "…" : "Провести"}</button>
     </>}>
       {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-row" style={{ marginBottom: 12 }}>
@@ -1876,12 +1876,12 @@ function SettleModal({ row, money, accounts = [], partnerName, onClose, onSave }
       </div>
       <Field label={outgoing ? "С какого счёта" : "На какой счёт"}>
         <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-          <option value="">— не проводить по кассе —</option>
+          <option value="">— выбери счёт —</option>
           {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
       </Field>
       <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="номер перевода, кто передал" /></Field>
-      {!accountId && <div className="kd-hint">Без счёта расчёт останется отметкой и по кассе не пройдёт.</div>}
+      {!accountId && <div className="kd-hint">Счёт обязателен: расчёт и движение денег сохраняются вместе.</div>}
     </ModalShell>
   );
 }
@@ -3603,15 +3603,22 @@ function PayGuaranteeModal({ g, accounts, onClose, onConfirm }) {
   const [accId, setAccId] = useState(accounts[0]?.id || "");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
-  async function save() { setSaving(true); await onConfirm(accId || null, date || null); setSaving(false); }
+  const [problem, setProblem] = useState("");
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onConfirm(accId || null, date || null);
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
   return (
     <ModalShell title="Внести обеспечение" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Да, внести"}</button>
+      <button className="kd-btn primary" disabled={saving || !accId || !date} onClick={save}>{saving ? "…" : "Да, внести"}</button>
     </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-paytotal"><span>{GUARANTEE_KINDS[g.kind] || g.kind}</span><strong>{fmt(g.amount)} ₸</strong></div>
       <div className="kd-muted" style={{ marginBottom: 12 }}>Деньги спишутся с выбранного счёта как замороженный залог (уменьшат его остаток в «Финансах»).</div>
-      <Field label="С какого счёта внесено"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— не привязывать к счёту —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      <Field label="С какого счёта внесено"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— выбери счёт —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
       <Field label="Дата внесения"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
     </ModalShell>
   );

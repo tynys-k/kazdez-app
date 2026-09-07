@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -1076,26 +1076,21 @@ function Dashboard({ session, profile }) {
   // переводил». Поэтому пишем сумму, дату, способ, на кого отправляли и с
   // какого счёта, а деньги сразу проводим по кассе.
   async function settlePaperwork(row, money, form) {
-    const patch = {
-      settled_at: form.date, settle_method: form.method,
-      settle_to: form.to || null, settle_account_id: form.accountId || null,
-      settle_note: form.note || null, updated_at: new Date().toISOString(),
-    };
-    const { error } = await supabase.from("paperwork").update(patch).eq("id", row.id);
-    if (error) { showToast("Ошибка: " + error.message); return error.message; }
-
-    if (form.accountId && money.payout > 0) {
-      const already = moves.some((m) => m.source === "paperwork" && m.ref_id === row.id);
-      if (!already) {
-        const { error: mError } = await supabase.from("money_moves").insert({
-          account_id: form.accountId,
-          direction: money.direction === "out" ? "expense" : "income",
-          amount: money.payout, move_date: form.date,
-          note: `Расчёт по документам: ${partnerById(row.partner_id)?.name || "партнёр"}${form.to ? ` → ${form.to}` : ""}`,
-          source: "paperwork", ref_id: row.id, created_by: session.user.id,
-        });
-        if (mError) showToast("Расчёт отмечен, но по кассе не провелся: " + mError.message);
-      }
+    if (!form.accountId) return "Выбери счёт для расчёта.";
+    const rpcName = "post_paperwork_settlement_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_paperwork_id: row.id,
+      p_account_id: form.accountId,
+      p_settled_on: form.date,
+      p_method: form.method,
+      p_settle_to: form.to || null,
+      p_note: form.note || null,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасный расчёт ещё не включён. Выполни supabase/${ATOMIC_SETTLEMENTS_MIGRATION} — операция не была записана.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
     await logAction("Документы", `Расчёт: ${partnerById(row.partner_id)?.name || "партнёр"} · ${fmt(money.payout)} ₸ · ${form.method}${form.to ? ` · ${form.to}` : ""}`);
     setModal(null); showToast("Расчёт проведён"); load(["paperwork", "accounts", "money_moves"]); return null;
@@ -2008,18 +2003,19 @@ function Dashboard({ session, profile }) {
   }
   // Отметить обеспечение внесённым: списание с указанного счёта (замороженные деньги)
   async function markGuaranteePaid(g, accountId, paidDate) {
-    await supabase.from("tender_guarantees").update({ paid: true, account_id: accountId || null, paid_date: paidDate || new Date().toISOString().slice(0, 10) }).eq("id", g.id);
-    if (accountId) {
-      const exists = moves.some((m) => m.source === "tender_pledge" && m.ref_id === g.id);
-      if (!exists) {
-        await supabase.from("money_moves").insert({
-          account_id: accountId, direction: "expense", amount: g.amount, move_date: paidDate || new Date().toISOString().slice(0, 10),
-          note: `Обеспечение (залог) по тендеру`, source: "tender_pledge", ref_id: g.id, created_by: session.user.id,
-        });
-      }
+    if (!accountId) return "Выбери счёт, с которого внесено обеспечение.";
+    const rpcName = "post_tender_guarantee_payment_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_guarantee_id: g.id, p_account_id: accountId, p_paid_on: paidDate,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное внесение ещё не включено. Выполни supabase/${ATOMIC_SETTLEMENTS_MIGRATION} — обеспечение не было отмечено внесённым.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
     await logAction("Тендеры", `Внесено обеспечение ${fmt(g.amount)} ₸${accountId ? " со счёта " + (accountById(accountId)?.name || "") : ""}`);
-    setModal(null); showToast("Отмечено как внесённое"); load();
+    setModal(null); showToast("Отмечено как внесённое"); load(); return null;
   }
   // Добавить частичный возврат: приход на указанный счёт
   async function addGuaranteeReturn(g, amount, retDate, accountId, note) {
