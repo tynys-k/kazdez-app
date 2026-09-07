@@ -4,8 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import SessionGate from "./SessionGate";
 import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
-import { generateCertificate, generateAct } from "./pdfDocs";
-import ExcelJS from "exceljs";
+import { insertCompatibleJob } from "./jobPersistence";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
   Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera,
@@ -320,6 +319,8 @@ function Dashboard({ session, profile }) {
   const [audit, setAudit] = useState([]);
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const exportingRef = useRef(false);
   const [tab, setTab] = useState("today");
   const [modal, setModal] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
@@ -429,11 +430,15 @@ function Dashboard({ session, profile }) {
   // перед печатью документа и на экране настроек.
   const [companyImagesLoaded, setCompanyImagesLoaded] = useState(false);
   async function loadCompanyImages() {
-    if (companyImagesLoaded) return;
+    if (companyImagesLoaded) return settings;
     const { data, error } = await supabase.from("app_settings").select("*").in("key", COMPANY_IMAGE_KEYS);
-    if (error) { showToast("Ошибка: " + error.message); return; }
+    if (error) { showToast("Не удалось загрузить печать и подпись: " + error.message); return settings; }
+    const images = Object.fromEntries((data || []).map((r) => [r.key, r.value]));
     setCompanyImagesLoaded(true);
-    setSettings((prev) => ({ ...prev, ...Object.fromEntries((data || []).map((r) => [r.key, r.value])) }));
+    setSettings((prev) => ({ ...prev, ...images }));
+    // React updates state asynchronously. Return the merged value so the very
+    // first document already receives the images fetched by this call.
+    return { ...settings, ...images };
   }
 
   // История клиента открывается редко, а событий уже тысячи. Грузим их при
@@ -447,18 +452,32 @@ function Dashboard({ session, profile }) {
   }
 
   async function loadJournalData(force = false) {
-    if (journalLoaded && !force) return;
-    setJournalLoaded(true);
+    if (journalLoaded && !force) return { audit, trash, clientErrors, changeLog, errors: [] };
+    const settle = async (request) => {
+      try { return await request; }
+      catch (error) { return { data: null, error }; }
+    };
     const [a, t, e, c] = await Promise.all([
-      supabase.from("audit_log").select("*").order("ts", { ascending: false }).limit(500),
-      supabase.from("trash").select("*").order("deleted_at", { ascending: false }).limit(300),
-      supabase.from("client_errors").select("*").order("occurred_at", { ascending: false }).limit(200),
-      supabase.from("change_log").select("*").order("at", { ascending: false }).limit(400),
+      settle(supabase.from("audit_log").select("*").order("ts", { ascending: false }).limit(500)),
+      settle(supabase.from("trash").select("*").order("deleted_at", { ascending: false }).limit(300)),
+      settle(supabase.from("client_errors").select("*").order("occurred_at", { ascending: false }).limit(200)),
+      settle(supabase.from("change_log").select("*").order("at", { ascending: false }).limit(400)),
     ]);
-    if (a.data) setAudit(a.data);
-    if (t.data) setTrash(t.data);
-    if (e.data) setClientErrors(e.data);
-    if (c.data) setChangeLog(c.data);
+    const next = {
+      audit: Array.isArray(a.data) ? a.data : audit,
+      trash: Array.isArray(t.data) ? t.data : trash,
+      clientErrors: Array.isArray(e.data) ? e.data : clientErrors,
+      changeLog: Array.isArray(c.data) ? c.data : changeLog,
+      errors: [a.error && `Журнал: ${a.error.message}`, t.error && `Корзина: ${t.error.message}`,
+        e.error && `Ошибки: ${e.error.message}`, c.error && `Изменения: ${c.error.message}`].filter(Boolean),
+    };
+    if (!a.error) setAudit(next.audit);
+    if (!t.error) setTrash(next.trash);
+    if (!e.error) setClientErrors(next.clientErrors);
+    if (!c.error) setChangeLog(next.changeLog);
+    setJournalLoaded(next.errors.length === 0);
+    if (next.errors.length) showToast("Не все журналы загрузились");
+    return next;
   }
   // Реестр источников данных.
   //
@@ -866,45 +885,55 @@ function Dashboard({ session, profile }) {
   const pestGuideObj = (() => { try { return JSON.parse(settings.pest_guide || "{}"); } catch { return {}; } })();
   // сделать гарантийный сертификат по заявке (реальные данные)
   async function certifyJob(job) {
-    await loadCompanyImages();
-    const yr = new Date().getFullYear();
-    const num = `ГС-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
-    generateCertificate({
-      address: addressPlain(job.address),
-      type: job.type,
-      pest: job.pest,
-      area: job.area,
-      scheduled_date: job.scheduled_date,
-      scheduled_time: job.scheduled_time,
-      guarantee_months: job.guarantee_months,
-      tech: techById(job.assigned_to)?.full_name,
-      client_phone: job.client_phone,
-      contact_name: job.contact_name,
-      doc_number: num,
-    }, settings);
+    try {
+      const [documentSettings, { generateCertificate }] = await Promise.all([loadCompanyImages(), import("./pdfDocs")]);
+      const yr = new Date().getFullYear();
+      const num = `ГС-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
+      generateCertificate({
+        address: addressPlain(job.address),
+        type: job.type,
+        pest: job.pest,
+        area: job.area,
+        scheduled_date: job.scheduled_date,
+        scheduled_time: job.scheduled_time,
+        guarantee_months: job.guarantee_months,
+        tech: techById(job.assigned_to)?.full_name,
+        client_phone: job.client_phone,
+        contact_name: job.contact_name,
+        doc_number: num,
+      }, documentSettings);
+    } catch (error) {
+      logClientError({ kind: "handled", place: "certifyJob", message: error?.message || String(error), stack: error?.stack });
+      showToast("Не удалось сформировать сертификат");
+    }
   }
   // сделать акт о проведении дезработ (для первичной обработки — гарантия после второй)
   async function certifyAct(job) {
-    await loadCompanyImages();
-    const yr = new Date().getFullYear();
-    const num = `АКТ-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
-    const chems = (job.chemicals || []).map((l) => {
-      const c = lineChem(l);
-      return `${l.name || (c && c.name) || "препарат"} — ${fmtAmount(lineAmount(l), c && c.unit_kind)}`;
-    });
-    generateAct({
-      address: addressPlain(job.address),
-      type: job.type,
-      pest: job.pest,
-      area: job.area,
-      scheduled_date: job.scheduled_date,
-      scheduled_time: job.scheduled_time,
-      tech: techById(job.assigned_to)?.full_name,
-      client_phone: job.client_phone,
-      contact_name: job.contact_name,
-      chemicals: chems,
-      doc_number: num,
-    }, settings);
+    try {
+      const [documentSettings, { generateAct }] = await Promise.all([loadCompanyImages(), import("./pdfDocs")]);
+      const yr = new Date().getFullYear();
+      const num = `АКТ-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
+      const chems = (job.chemicals || []).map((l) => {
+        const c = lineChem(l);
+        return `${l.name || (c && c.name) || "препарат"} — ${fmtAmount(lineAmount(l), c && c.unit_kind)}`;
+      });
+      generateAct({
+        address: addressPlain(job.address),
+        type: job.type,
+        pest: job.pest,
+        area: job.area,
+        scheduled_date: job.scheduled_date,
+        scheduled_time: job.scheduled_time,
+        tech: techById(job.assigned_to)?.full_name,
+        client_phone: job.client_phone,
+        contact_name: job.contact_name,
+        chemicals: chems,
+        doc_number: num,
+      }, documentSettings);
+    } catch (error) {
+      logClientError({ kind: "handled", place: "certifyAct", message: error?.message || String(error), stack: error?.stack });
+      showToast("Не удалось сформировать акт");
+    }
   }
   const techExtrasTotal = (techId) => jobs.filter((j) => j.assigned_to === techId).reduce((s, j) => s + (Number(j.tech_bonus) || 0) + (Number(j.tech_travel) || 0), 0);
   const techBonusTotal = (techId) => jobs.filter((j) => j.assigned_to === techId).reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
@@ -1245,8 +1274,17 @@ function Dashboard({ session, profile }) {
     const quoted = quotedPriceFor(payload);
     const objectId = await ensureObject(payload);
     const orderId = await ensureOrder({ ...payload, object_id: objectId, quoted_price: quoted });
-    const { data: created, error } = await supabase.from("jobs").insert({ ...payload, quoted_price: quoted, object_id: objectId, branch_id: payload.branch_id || defaultBranchId(), order_id: orderId, visit_no: 1, visit_kind: payload.service_contract_id ? "contract" : "primary", created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new" }).select("id, client_phone").single();
+    const { data: created, error, omittedColumns } = await insertCompatibleJob(supabase, {
+      ...payload, quoted_price: quoted, object_id: objectId,
+      branch_id: payload.branch_id || defaultBranchId(), order_id: orderId,
+      visit_no: 1, visit_kind: payload.service_contract_id ? "contract" : "primary",
+      created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new",
+    });
     if (error) { showToast("Ошибка: " + error.message); return false; }
+    if (omittedColumns.length) logClientError({
+      kind: "schema_compatibility", place: "createJob",
+      message: `Заявка создана без полей ${omittedColumns.join(", ")}: примените SQL-миграции Supabase`,
+    });
     // Корневой визит записывается в заказ: по нему повторный запуск переноса
     // видит, что заказ уже заведён, и не плодит дубли.
     if (orderId && created?.id) await supabase.from("orders").update({ root_job_id: created.id }).eq("id", orderId);
@@ -1254,7 +1292,9 @@ function Dashboard({ session, profile }) {
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
     await recordClientEvent({ ...payload, id: created?.id, client_phone: created?.client_phone || payload.client_phone }, "created", "Заявка создана", `${payload.pest || "Услуга"} · ${isoToRu(payload.scheduled_date) || "дата уточняется"}`);
-    setModal(null); showToast("Заявка создана"); reloadJobs();
+    setModal(null);
+    showToast(omittedColumns.length ? "Заявка создана в режиме совместимости — обновите базу" : "Заявка создана");
+    reloadJobs();
     return true;
   }
   async function editJob(job, payload) {
@@ -1317,7 +1357,7 @@ function Dashboard({ session, profile }) {
   async function createRepeatJob(job) {
     // Повторный выезд — визит того же заказа, а не новая продажа. Иначе он
     // навсегда останется заявкой с нулевой выручкой и будет занижать чек.
-    const ins = await supabase.from("jobs").insert({
+    const ins = await insertCompatibleJob(supabase, {
       type: "Вторичная", scheduled_date: null, scheduled_time: "", address: job.address, floor: job.floor,
       area: job.area, source: job.source, pest: job.pest, price_options: job.price_options,
       client_phone: job.client_phone, guarantee_months: job.guarantee_months, status: "new", repeat_of: job.id,
@@ -1337,7 +1377,7 @@ function Dashboard({ session, profile }) {
   async function addVisit(job, payload) {
     const orderId = job.order_id;
     if (!orderId) { showToast("У заявки нет заказа — прогоните миграцию orders"); return "Нет заказа"; }
-    const { error } = await supabase.from("jobs").insert({
+    const { error } = await insertCompatibleJob(supabase, {
       type: "Плановая", scheduled_date: payload.date || null, scheduled_time: "",
       address: job.address, floor: job.floor, area: job.area, source: job.source, pest: job.pest,
       client_phone: job.client_phone, contact_name: job.contact_name,
@@ -2199,7 +2239,7 @@ function Dashboard({ session, profile }) {
     // результат. Иначе год обслуживания остаётся цепочкой заявок, которая
     // нигде не сходится в сумму.
     const orderId = await ensureOrder({ ...payload, quoted_price: Number(contract.price) || 0 });
-    const ins = await supabase.from("jobs").insert({ ...payload, order_id: orderId, visit_no: 1, visit_kind: "contract" }).select("id").single();
+    const ins = await insertCompatibleJob(supabase, { ...payload, order_id: orderId, visit_no: 1, visit_kind: "contract" });
     if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
     if (orderId && ins.data?.id) await supabase.from("orders").update({ root_job_id: ins.data.id }).eq("id", orderId);
     const next = parseIso(contract.next_service_date) || new Date(); next.setDate(next.getDate() + (Number(contract.interval_days) || 30));
@@ -2252,10 +2292,16 @@ function Dashboard({ session, profile }) {
   }
 
   async function exportExcel() {
+    if (exportingRef.current) return;
+    exportingRef.current = true;
+    setExporting(true);
     // В выгрузке есть листы «Журнал» и «Корзина»: если раздел не открывали,
     // данных ещё нет и листы уехали бы пустыми.
-    await loadJournalData();
     try {
+      const [{ default: ExcelJS }, journalData] = await Promise.all([import("exceljs"), loadJournalData()]);
+      if (journalData.errors.some((error) => error.startsWith("Журнал:") || error.startsWith("Корзина:"))) {
+        throw new Error("Журнал или корзина не загрузились");
+      }
       const wb = new ExcelJS.Workbook();
       wb.creator = "KazDez"; wb.created = new Date();
 
@@ -2347,12 +2393,12 @@ function Dashboard({ session, profile }) {
       await addSheet("Журнал", [
         { header: "Когда", key: "when", width: 16 }, { header: "Кто", key: "who", width: 16 },
         { header: "Действие", key: "action", width: 16 }, { header: "Детали", key: "summary", width: 40 },
-      ], audit.map((a) => ({ when: fmtTs(a.ts), who: a.actor, action: a.action, summary: a.summary })));
+      ], journalData.audit.map((a) => ({ when: fmtTs(a.ts), who: a.actor, action: a.action, summary: a.summary })));
 
       await addSheet("Корзина", [
         { header: "Удалено", key: "when", width: 16 }, { header: "Кем", key: "who", width: 16 },
         { header: "Вид", key: "pest", width: 16 }, { header: "Адрес", key: "address", width: 28 }, { header: "Было оплачено", key: "paid", width: 14, money: true },
-      ], trash.map((t) => ({ when: fmtTs(t.deleted_at), who: t.deleted_by, pest: t.job.pest, address: t.job.address, paid: t.job.report_paid ?? "" })));
+      ], journalData.trash.map((t) => ({ when: fmtTs(t.deleted_at), who: t.deleted_by, pest: t.job?.pest || "", address: t.job?.address || "", paid: t.job?.report_paid ?? "" })));
 
       await addSheet("Документы", [
         { header: "Тип", key: "type", width: 24 }, { header: "Партнёр", key: "partner", width: 16 }, { header: "Клиент", key: "client", width: 22 },
@@ -2444,7 +2490,13 @@ function Dashboard({ session, profile }) {
       document.body.appendChild(a); a.click();
       setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
       showToast("Файл Excel выгружен");
-    } catch (e) { showToast("Ошибка выгрузки"); }
+    } catch (error) {
+      logClientError({ kind: "handled", place: "exportExcel", message: error?.message || String(error), stack: error?.stack });
+      showToast("Ошибка выгрузки");
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
+    }
   }
 
   // ---- финансы за период ----
@@ -3155,7 +3207,7 @@ function Dashboard({ session, profile }) {
             {tab === "partners" && canEditPartners && <button className="kd-btn primary" onClick={() => setModal({ kind: "partner" })}><Plus size={15} />Партнёр</button>}
             {tab === "docs" && canEditDocs && <button className="kd-btn primary" onClick={() => setModal({ kind: "doc" })}><Plus size={15} />Документ</button>}
             {tab === "opex" && canManageCash && <button className="kd-btn primary" onClick={() => setModal({ kind: "opex" })}><Plus size={15} />Расход</button>}
-            {canAccess(`tab.${tab}`) && ["growth", "finance", "journal"].includes(tab) && <button className="kd-btn ghost" onClick={exportExcel}><Download size={15} />Excel</button>}
+            {canAccess(`tab.${tab}`) && ["growth", "finance", "journal"].includes(tab) && <button className="kd-btn ghost" disabled={exporting} onClick={exportExcel}><Download size={15} />{exporting ? "Готовим Excel…" : "Excel"}</button>}
             <button className="kd-iconbtn" disabled={loading} onClick={() => load()} title="Обновить данные" aria-label="Обновить данные"><RefreshCw size={16} /></button>
           </div>
         </header>
@@ -3168,7 +3220,7 @@ function Dashboard({ session, profile }) {
       <main className="kd-main">
 
         {loading && <div className="kd-empty">Загрузка…</div>}
-        {!loading && dataWarnings.length > 0 && <details className="kd-systemwarning" open><summary><AlertTriangle size={17} />Данные неполные или устарели · {dataWarnings.length}</summary><div><span>Не удалось обновить часть данных. Последние загруженные значения сохранены, но текущие суммы и статусы требуют проверки.</span>{isAdmin && dataWarnings.map((warning) => <span key={warning}>{warning}</span>)}<button className="kd-btn ghost sm" onClick={() => load()}>Повторить загрузку</button></div></details>}
+        {!loading && dataWarnings.length > 0 && <details className="kd-systemwarning" open><summary><AlertTriangle size={17} />Данные неполные или устарели · {dataWarnings.length}</summary><div><span>Не удалось обновить часть данных. Последние загруженные значения сохранены, но текущие суммы и статусы требуют проверки.</span>{isAdmin && dataWarnings.some((warning) => warning.toLowerCase().includes("schema cache")) && <span><strong>Схема Supabase отстаёт от приложения: примените ожидающие SQL-миграции и обновите кеш схемы.</strong></span>}{isAdmin && dataWarnings.map((warning) => <span key={warning}>{warning}</span>)}<button className="kd-btn ghost sm" onClick={() => load()}>Повторить загрузку</button></div></details>}
 
         {!loading && tab === "today" && (
           <div className="kd-today">

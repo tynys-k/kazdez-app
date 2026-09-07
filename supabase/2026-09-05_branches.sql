@@ -72,6 +72,10 @@ update public.accounts set branch_id = (select id from public.branches where is_
 update public.opex     set branch_id = (select id from public.branches where is_default) where branch_id is null;
 update public.profiles set branch_id = (select id from public.branches where is_default) where branch_id is null;
 
+-- PostgREST обычно обновляет кеш схемы автоматически. Явный сигнал нужен для
+-- проектов, где кеш продолжает считать branch_id отсутствующим после ALTER.
+notify pgrst, 'reload schema';
+
 -- Смена филиала у заявки — событие для журнала: вместе с ней уезжает выручка.
 drop trigger if exists kd_changes_branches on public.branches;
 create trigger kd_changes_branches
