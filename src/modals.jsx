@@ -1662,7 +1662,7 @@ function DebtPayModal({ debt, job, accounts = [], onClose, onSave }) {
   return (
     <ModalShell title="Клиент рассчитался" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={saving || !paidOn} onClick={save}>{saving ? "…" : "Закрыть долг"}</button>
+      <button className="kd-btn primary" disabled={saving || !paidOn || !accountId} onClick={save}>{saving ? "…" : "Закрыть долг"}</button>
     </>}>
       {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-row" style={{ marginBottom: 12 }}>
@@ -1673,12 +1673,12 @@ function DebtPayModal({ debt, job, accounts = [], onClose, onSave }) {
         <Field label="Дата оплаты"><input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} /></Field>
         <Field label="На какой счёт">
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-            <option value="">— не проводить по кассе —</option>
+            <option value="">— выбери счёт —</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </Field>
       </div>
-      {!accountId && <div className="kd-hint">Без счёта долг закроется отметкой, но деньги по кассе не появятся.</div>}
+      {!accountId && <div className="kd-hint">Счёт обязателен: долг и поступление денег сохраняются вместе.</div>}
     </ModalShell>
   );
 }
@@ -1697,7 +1697,7 @@ function ChemSalePayModal({ sale, accounts = [], partnerName, onClose, onSave })
   return (
     <ModalShell title="Оплата за препарат" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Назад</button>
-      <button className="kd-btn primary" disabled={saving || !paidOn} onClick={save}>{saving ? "…" : "Провести"}</button>
+      <button className="kd-btn primary" disabled={saving || !paidOn || !accountId} onClick={save}>{saving ? "…" : "Провести"}</button>
     </>}>
       {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-row" style={{ marginBottom: 12 }}>
@@ -1707,12 +1707,12 @@ function ChemSalePayModal({ sale, accounts = [], partnerName, onClose, onSave })
         <Field label="Дата оплаты"><input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} /></Field>
         <Field label="На какой счёт">
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-            <option value="">— не проводить по кассе —</option>
+            <option value="">— выбери счёт —</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </Field>
       </div>
-      {!accountId && <div className="kd-hint">Без счёта оплата останется отметкой и по кассе не пройдёт.</div>}
+      {!accountId && <div className="kd-hint">Счёт обязателен: оплата и поступление денег сохраняются вместе.</div>}
     </ModalShell>
   );
 }
