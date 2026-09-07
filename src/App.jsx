@@ -16,6 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
+import { ATOMIC_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -1143,18 +1144,16 @@ function Dashboard({ session, profile }) {
   }
 
   async function closeDebt(debt, accountId, paidOn) {
-    const { error } = await supabase.from("job_debts")
-      .update({ paid_on: paidOn, paid_account_id: accountId || null }).eq("id", debt.id);
-    if (error) { showToast("Ошибка: " + error.message); return error.message; }
-    if (accountId) {
-      const already = moves.some((m) => m.source === "job_debt" && m.ref_id === debt.id);
-      if (!already) {
-        const { error: mError } = await supabase.from("money_moves").insert({
-          account_id: accountId, direction: "income", amount: Number(debt.amount) || 0, move_date: paidOn,
-          note: `Погашен долг по заявке`, source: "job_debt", ref_id: debt.id, created_by: session.user.id,
-        });
-        if (mError) showToast("Долг закрыт, но по кассе не провёлся: " + mError.message);
-      }
+    if (!accountId) return "Выбери счёт, на который поступили деньги.";
+    const rpcName = "post_job_debt_payment_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_debt_id: debt.id, p_account_id: accountId, p_paid_on: paidOn,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное проведение оплаты ещё не включено. Выполни supabase/${ATOMIC_RECEIPTS_MIGRATION} — долг не был закрыт.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
     await logAction("Долги", `Погашен долг ${fmt(debt.amount)} ₸`);
     setModal(null); showToast("Долг закрыт"); load(["job_debts", "accounts", "money_moves"]); return null;
@@ -1183,19 +1182,16 @@ function Dashboard({ session, profile }) {
   }
 
   async function payChemSale(sale, accountId, paidOn) {
-    const { error } = await supabase.from("chemical_sales")
-      .update({ paid_on: paidOn, account_id: accountId || null }).eq("id", sale.id);
-    if (error) { showToast("Ошибка: " + error.message); return error.message; }
-    if (accountId) {
-      const already = moves.some((m) => m.source === "chem_sale" && m.ref_id === sale.id);
-      if (!already) {
-        const { error: mError } = await supabase.from("money_moves").insert({
-          account_id: accountId, direction: "income", amount: Number(sale.total) || 0, move_date: paidOn,
-          note: `Оплата за препарат: ${partnerById(sale.partner_id)?.name || "партнёр"}`,
-          source: "chem_sale", ref_id: sale.id, created_by: session.user.id,
-        });
-        if (mError) showToast("Оплата отмечена, но по кассе не провелась: " + mError.message);
-      }
+    if (!accountId) return "Выбери счёт, на который поступили деньги.";
+    const rpcName = "post_chemical_sale_payment_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_sale_id: sale.id, p_account_id: accountId, p_paid_on: paidOn,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное проведение оплаты ещё не включено. Выполни supabase/${ATOMIC_RECEIPTS_MIGRATION} — оплата не была записана.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
     await logAction("Склад", `Оплата за препарат: ${partnerById(sale.partner_id)?.name || "?"} · ${fmt(sale.total)} ₸`);
     setModal(null); showToast("Оплата проведена"); load(["chemical_sales", "accounts", "money_moves"]); return null;
