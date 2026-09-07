@@ -6,6 +6,10 @@ const migration = fs.readFileSync(
   path.join(process.cwd(), "supabase/2026-09-07_profile_policy_security_definer.sql"),
   "utf8",
 );
+const compatibilityRestore = fs.readFileSync(
+  path.join(process.cwd(), "supabase/2026-09-07_profile_policy_compatibility_restore.sql"),
+  "utf8",
+);
 
 describe("profile policy security-definer migration", () => {
   it("preserves the production permission logic instead of redefining it", () => {
@@ -18,9 +22,10 @@ describe("profile policy security-definer migration", () => {
     expect(migration.match(/set search_path = public, pg_temp/g)).toHaveLength(2);
   });
 
-  it("removes browser access to authorization internals", () => {
+  it("keeps only the service columns required by legacy production policies", () => {
     expect(migration).toContain("revoke select on table public.profiles from anon, authenticated");
-    expect(migration).toContain("grant select (id) on table public.profiles to authenticated");
-    expect(migration).not.toMatch(/grant select \([^)]*(role|is_active|access_overrides|branch_id)/i);
+    expect(migration).toMatch(/grant select \(id, role, is_active, access_overrides, branch_id\)/i);
+    expect(compatibilityRestore).toMatch(/grant select \(id, role, is_active, access_overrides, branch_id\)/i);
+    expect(`${migration}\n${compatibilityRestore}`).not.toMatch(/grant select \([^)]*(salary|phone|cash_opening)/i);
   });
 });

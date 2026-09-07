@@ -33,10 +33,13 @@ revoke all on function public.kd_has_permission(text) from public, anon;
 grant execute on function public.is_admin() to authenticated, service_role;
 grant execute on function public.kd_has_permission(text) to authenticated, service_role;
 
--- После перевода проверок на сервер браузеру достаточно id для адресного UPDATE.
--- Роль, активность, филиал и access_overrides доступны только через безопасные RPC.
+-- В production есть дополнительные старые политики/функции, исходников которых
+-- пока нет в репозитории. Они всё ещё выполняются с правами пользователя и
+-- требуют эти служебные колонки. Убирать их можно только после выгрузки и аудита
+-- всей действующей схемы. Финансовые и контактные поля здесь не открываются.
 revoke select on table public.profiles from anon, authenticated;
-grant select (id) on table public.profiles to authenticated;
+grant select (id, role, is_active, access_overrides, branch_id)
+  on table public.profiles to authenticated;
 
 notify pgrst, 'reload schema';
 
