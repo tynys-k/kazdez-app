@@ -3,6 +3,7 @@ export const ATOMIC_SETTLEMENTS_MIGRATION = "2026-09-07_atomic_settlements.sql";
 export const ATOMIC_GUARANTEE_RETURNS_MIGRATION = "2026-09-08_atomic_guarantee_returns.sql";
 export const ATOMIC_GUARANTEE_DELETIONS_MIGRATION = "2026-09-08_atomic_guarantee_deletions.sql";
 export const ATOMIC_CASH_DEPOSITS_MIGRATION = "2026-09-08_atomic_cash_deposits.sql";
+export const ATOMIC_PAYROLL_MIGRATION = "2026-09-08_atomic_payroll.sql";
 
 export function createFinancialRequestId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();

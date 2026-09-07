@@ -2562,6 +2562,7 @@ function ExpenseModal({ tech, onClose, onSave }) {
 // Выплата зарплаты с проведением по кассе: в отличие от ExpenseModal здесь
 // обязателен счёт — по нему создаётся расходное движение, и остаток уменьшается.
 function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, onSave }) {
+  const requestIdRef = useRef(createFinancialRequestId());
   const [type, setType] = useState(existing?.type || "salary");
   const [amount, setAmount] = useState(existing ? String(existing.amount ?? "") : (owed > 0 ? String(owed) : ""));
   const [payDate, setPayDate] = useState(existing?.expense_date || new Date().toISOString().slice(0, 10));
@@ -2574,7 +2575,7 @@ function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, 
   const ok = Number(amount) > 0 && payDate && accountId;
   async function save() {
     setSaving(true); setProblem("");
-    const failed = await onSave({ tech_id: tech.id, type, amount: Number(amount) || 0, expense_date: payDate, account_id: accountId, note: note.trim() || null });
+    const failed = await onSave({ tech_id: tech.id, type, amount: Number(amount) || 0, expense_date: payDate, account_id: accountId, note: note.trim() || null }, requestIdRef.current);
     if (failed) setProblem(typeof failed === "string" ? failed : "Выплата не прошла.");
     setSaving(false);
   }
@@ -2586,11 +2587,11 @@ function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, 
       {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-row" style={{ marginBottom: 12 }}><span>{existing ? "Начислено ранее, ещё не проведено" : "К выплате за период"}</span><strong>{fmt(owed)} ₸</strong></div>
       <div className="kd-grid2">
-        <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
+        <Field label={existing ? "Сумма начисления (₸)" : "Сумма (₸)"}><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="0" readOnly={!!existing} /></Field>
         <Field label="Дата выплаты"><input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} /></Field>
       </div>
       <div className="kd-grid2">
-        <Field label="Тип"><select value={type} onChange={(e) => setType(e.target.value)}>{Object.entries(EXPENSE_TYPES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
+        <Field label="Тип"><select value={type} onChange={(e) => setType(e.target.value)} disabled={!!existing}>{Object.entries(EXPENSE_TYPES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
         <Field label="С какого счёта">
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
             <option value="">— выбери счёт —</option>
@@ -2599,7 +2600,7 @@ function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, 
         </Field>
       </div>
       {accounts.length === 0 && <div className="kd-hint">Счетов пока нет — заведи их в разделе «Счета и расходы», иначе выплату некуда провести.</div>}
-      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за август / аванс" /></Field>
+      <Field label="Примечание"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за август / аванс" readOnly={!!existing} /></Field>
       {!ok && !problem && (
         <div className="kd-muted" style={{ marginTop: 8 }}>
           Кнопка станет активной, когда заполнены сумма, дата и счёт{!accountId ? " — счёт сейчас не выбран" : ""}.

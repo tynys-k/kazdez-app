@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -1702,54 +1702,6 @@ function Dashboard({ session, profile }) {
     await logAction("Документы", `Удалено: ${d.type} · ${fmt(d.amount)} ₸`);
     showToast("Удалено"); load();
   }
-  // Единственное место, где выплата попадает в кассу. Раньше дорог было две:
-  // «Зарплата» проводила движение по счёту, а кнопка в «Сотрудниках» только
-  // меняла статус — деньги уходили, а остаток счёта этого не знал.
-  async function postPayoutToCash(expenseRow, tech) {
-    if (!expenseRow?.account_id) return;
-    // не задваиваем движение, если запись проводят повторно
-    if (moves.some((m) => m.source === "payroll" && m.ref_id === expenseRow.id)) return;
-    const { error } = await supabase.from("money_moves").insert({
-      account_id: expenseRow.account_id, direction: "expense", amount: expenseRow.amount,
-      move_date: expenseRow.expense_date,
-      note: `Зарплата: ${tech?.full_name || "сотрудник"}${expenseRow.note ? " · " + expenseRow.note : ""}`,
-      source: "payroll", ref_id: expenseRow.id, created_by: session.user.id,
-    });
-    if (error) showToast("Выплата записана, но по кассе не провелась: " + error.message);
-  }
-  // Новая выплата из раздела «Зарплата».
-  // Запрос, который не отвечает, для человека выглядит как мёртвая кнопка:
-  // ни ошибки, ни результата. Поэтому ждём ответ ограниченное время и
-  // возвращаем внятный текст вместо бесконечного ожидания.
-  async function withTimeout(promise, label, ms = 20000) {
-    let timer;
-    const guard = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label}: база не ответила за ${Math.round(ms / 1000)} секунд`)), ms);
-    });
-    try { return await Promise.race([promise, guard]); } finally { clearTimeout(timer); }
-  }
-
-  // Ошибка базы в лицо пользователю мало что говорит. Самый частый случай —
-  // не выполнена миграция, и тогда надо назвать файл, а не код PostgREST.
-  function payoutProblem(error) {
-    const msg = error?.message || "неизвестная ошибка";
-    if (/account_id|paid_at|salary_monthly|schema cache/i.test(msg)) {
-      return `В базе нет колонок для выплат. Выполни supabase/2026-09-01_payroll_columns.sql в Supabase → SQL Editor. Ответ базы: ${msg}`;
-    }
-    if (/permission|row-level security|policy/i.test(msg)) {
-      return `Недостаточно прав на запись выплаты. Ответ базы: ${msg}`;
-    }
-    return msg;
-  }
-
-  // Сбой на любом шаге записывается в «Сбои приложения» — иначе он исчезает
-  // вместе с окном, и разбираться потом не по чему.
-  function payoutCrash(e, place) {
-    const msg = e?.message || String(e);
-    logClientError({ kind: "handled", place, message: msg });
-    return `Выплата не записалась: ${msg}. Проверь список выплат перед повторной попыткой — запись могла всё же пройти.`;
-  }
-
   async function saveMonthlyPlan(monthKey, values) {
     const next = { ...calc.parseTargets(settings.monthly_targets) };
     // Пустой план убираем целиком, иначе месяц остаётся с нулевыми целями и
@@ -1760,53 +1712,41 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("План сохранён");
   }
 
-  async function savePayrollPayment(tech, payload) {
+  async function postPayrollPayment(tech, payload, existing, requestId) {
     if (blockedByClosedPeriod(payload.expense_date)) return "Период закрыт — выплату этой датой провести нельзя. Дату закрытия можно сдвинуть в Настройках.";
-    try {
-      const { data: created, error } = await withTimeout(supabase.from("tech_expenses").insert({
-        tech_id: payload.tech_id, type: payload.type, amount: payload.amount,
-        expense_date: payload.expense_date, account_id: payload.account_id || null,
-        paid_at: payload.expense_date, status: "paid", note: payload.note,
-        created_by: session.user.id,
-      }).select().single(), "Запись выплаты");
-      if (error) { showToast("Ошибка: " + error.message); return payoutProblem(error); }
-      // Дальше выплата уже записана. Что бы ни случилось на следующих шагах,
-      // окно обязано закрыться и список — обновиться: иначе человек решит,
-      // что выплаты нет, и проведёт её второй раз.
-      try { await postPayoutToCash(created, tech); } catch (e) { showToast("Выплата записана, но по кассе не провелась: " + (e?.message || e)); }
-      try {
-        await logAction("Выплата", `${tech.full_name || "?"} · ${EXPENSE_TYPES[payload.type] || payload.type} · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
-      } catch { /* журнал не должен мешать выплате */ }
-      setModal(null); showToast("Выплата проведена"); reloadMoney(); return null;
-    } catch (e) {
-      return payoutCrash(e, "Зарплата · выплата");
+    if (existing && blockedByClosedPeriod(existing.expense_date)) return "Период начисления закрыт — эту запись нельзя изменить.";
+    const rpcName = "post_payroll_payment_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_request_id: requestId,
+      p_tech_id: payload.tech_id,
+      p_type: payload.type,
+      p_amount: payload.amount,
+      p_paid_on: payload.expense_date,
+      p_account_id: payload.account_id,
+      p_note: payload.note,
+      p_expense_id: existing?.id || null,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасные выплаты ещё не включены. Выполни supabase/${ATOMIC_PAYROLL_MIGRATION} — выплата не была записана.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
-  }
-  // Старое начисление, заведённое до того, как выплаты стали проводиться по кассе.
-  // Проводим ту же запись, а не создаём новую — иначе сумма задвоится в отчётах.
-  async function payExistingExpense(tech, expense, payload) {
-    if (blockedByClosedPeriod(payload.expense_date) || blockedByClosedPeriod(expense.expense_date)) return "Период закрыт — выплату этой датой провести нельзя. Дату закрытия можно сдвинуть в Настройках.";
-    try {
-      const { data: updated, error } = await withTimeout(supabase.from("tech_expenses").update({
-        status: "paid", account_id: payload.account_id || null,
-        expense_date: payload.expense_date, paid_at: payload.expense_date,
-        amount: payload.amount, type: payload.type, note: payload.note,
-      }).eq("id", expense.id).select().single(), "Проведение выплаты");
-      if (error) { showToast("Ошибка: " + error.message); return payoutProblem(error); }
-      try { await postPayoutToCash(updated, tech); } catch (e) { showToast("Выплата записана, но по кассе не провелась: " + (e?.message || e)); }
-      try {
-        await logAction("Выплата", `${tech?.full_name || "?"} · проведено по кассе · ${fmt(payload.amount)} ₸${payload.account_id ? " → " + (accountById(payload.account_id)?.name || "") : ""}`);
-      } catch { /* журнал не должен мешать выплате */ }
-      setModal(null); showToast("Выплата проведена"); reloadMoney(); return null;
-    } catch (e) {
-      return payoutCrash(e, "Зарплата · проведение выплаты");
-    }
+    const amount = existing ? existing.amount : payload.amount;
+    const type = existing ? existing.type : payload.type;
+    await logAction("Выплата", `${tech?.full_name || "?"} · ${EXPENSE_TYPES[type] || type} · ${fmt(amount)} ₸ → ${accountById(payload.account_id)?.name || "счёт"}`);
+    setModal(null); showToast("Выплата проведена"); reloadMoney(); return null;
   }
   async function removeExpense(e) {
     if (blockedByClosedPeriod(e.expense_date)) return;
-    // сначала снимаем движение по кассе, иначе останется расход без основания
-    await supabase.from("money_moves").delete().eq("source", "payroll").eq("ref_id", e.id);
-    await supabase.from("tech_expenses").delete().eq("id", e.id);
+    const rpcName = "delete_payroll_expense_atomic";
+    const { error } = await supabase.rpc(rpcName, { p_expense_id: e.id });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное удаление выплат ещё не включено. Выполни supabase/${ATOMIC_PAYROLL_MIGRATION} — выплата не была удалена.`
+        : error.message;
+      showToast("Ошибка: " + message); return;
+    }
     await logAction("Выплата", `Удалено: ${techById(e.tech_id)?.full_name || "?"} · ${fmt(e.amount)} ₸`);
     showToast("Удалено"); reloadMoney();
   }
@@ -6036,7 +5976,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "training" && <TrainingModal person={modal.person} record={modal.record} onClose={() => setModal(null)} onSave={saveTraining} />}
       {modal?.kind === "techDoc" && <TechDocModal tech={modal.tech} doc={modal.doc} onClose={() => setModal(null)} onSave={saveTechDoc} />}
       {modal?.kind === "plan" && <PlanModal monthKey={modal.monthKey} label={modal.label} target={modal.target} onClose={() => setModal(null)} onSave={saveMonthlyPlan} />}
-      {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} existing={modal.expense} accounts={accounts} onClose={() => setModal(null)} onSave={(payload) => (modal.expense ? payExistingExpense(modal.tech, modal.expense, payload) : savePayrollPayment(modal.tech, payload))} />}
+      {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} existing={modal.expense} accounts={accounts} onClose={() => setModal(null)} onSave={(payload, requestId) => postPayrollPayment(modal.tech, payload, modal.expense, requestId)} />}
       {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
       {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
