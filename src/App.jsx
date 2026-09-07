@@ -495,7 +495,7 @@ function Dashboard({ session, profile }) {
     { key: "jobs", label: "Заявки", run: () => fetchAllRows("jobs") },
     { key: "report_chemicals", label: "Препараты в отчётах", run: () => fetchAllRows("report_chemicals") },
     { key: "chemicals", label: "Склад", run: () => supabase.from("chemicals").select("*") },
-    { key: "profiles", label: "Сотрудники", run: () => supabase.from("profiles").select("id, full_name, phone, role, is_active, access_overrides, created_at, cash_opening_balance, cash_opening_date, salary_monthly, work_schedule") },
+    { key: "profiles", label: "Сотрудники", run: () => supabase.rpc("list_profiles_safe") },
     { key: "handouts", label: "Выдача препаратов", run: () => supabase.from("handouts").select("*"), set: setHandouts },
     { key: "partners", label: "Партнёры", run: () => supabase.from("partners").select("*"), set: setPartners },
     { key: "doc_services", label: "Документы", run: () => supabase.from("doc_services").select("*").order("created_at", { ascending: false }), set: setDocs },

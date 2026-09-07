@@ -30,9 +30,7 @@ export default function SessionGate({ login, children }) {
     let active = true;
     setAccess(null);
     if (!userId) return () => { active = false; };
-    Promise.resolve().then(() => supabase.from("profiles")
-      .select("id, role, full_name, phone, is_active, access_overrides, branch_id")
-      .eq("id", userId).single()).then(({ data, error }) => {
+    Promise.resolve().then(() => supabase.rpc("get_my_profile")).then(({ data, error }) => {
       if (!active) return;
       const valid = !error && data?.id === userId && Object.hasOwn(ROLE_DEFINITIONS, data.role);
       setAccess({ userId, profile: valid ? data : null, error: !valid });
