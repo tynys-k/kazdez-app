@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -1993,11 +1993,14 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Сохранено"); load();
   }
   async function removeGuarantee(g) {
-    // удаляем связанные движения по счетам (внесение + возвраты этого обеспечения)
-    const retIds = guaranteeReturns.filter((r) => r.guarantee_id === g.id).map((r) => r.id);
-    await supabase.from("money_moves").delete().eq("source", "tender_pledge").eq("ref_id", g.id);
-    if (retIds.length) await supabase.from("money_moves").delete().eq("source", "tender_return").in("ref_id", retIds);
-    await supabase.from("tender_guarantees").delete().eq("id", g.id);
+    const rpcName = "delete_tender_guarantee_atomic";
+    const { error } = await supabase.rpc(rpcName, { p_guarantee_id: g.id });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное удаление ещё не включено. Выполни supabase/${ATOMIC_GUARANTEE_DELETIONS_MIGRATION} — обеспечение не было удалено.`
+        : error.message;
+      showToast("Ошибка: " + message); return;
+    }
     await logAction("Тендеры", `Обеспечение удалено: ${fmt(g.amount)} ₸`);
     showToast("Удалено"); load();
   }
@@ -2041,8 +2044,14 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Возврат добавлен"); load(); return null;
   }
   async function removeGuaranteeReturn(r) {
-    await supabase.from("money_moves").delete().eq("source", "tender_return").eq("ref_id", r.id);
-    await supabase.from("guarantee_returns").delete().eq("id", r.id);
+    const rpcName = "delete_tender_guarantee_return_atomic";
+    const { error } = await supabase.rpc(rpcName, { p_return_id: r.id });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное удаление ещё не включено. Выполни supabase/${ATOMIC_GUARANTEE_DELETIONS_MIGRATION} — возврат не был удалён.`
+        : error.message;
+      showToast("Ошибка: " + message); return;
+    }
     await logAction("Тендеры", `Возврат удалён: ${fmt(r.amount)} ₸`);
     showToast("Удалено"); load();
   }
