@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, ON_SITE_ESTIMATES_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, ON_SITE_ESTIMATES_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { yandexRouteUrl } from "./routePlanning";
@@ -2200,20 +2200,17 @@ function Dashboard({ session, profile }) {
     await logAction("Абонент", `Удалён: ${contract.client_name}`); showToast("Удалено"); load();
   }
   async function createContractJob(contract) {
-    const payload = {
-      type: "Плановая", scheduled_date: contract.next_service_date, scheduled_time: "", address: contract.address, source: "Абонентский договор",
-      pest: contract.service, price_options: [{ label: "Абонентское обслуживание", amount: Number(contract.price) || 0 }], client_phone: contract.phone,
-      contact_name: contract.client_name, guarantee_months: 0, status: "new", service_contract_id: contract.id, created_by: session.user.id,
-    };
-    // Плановый выезд по договору — тоже заказ: у него своя цена и свой
-    // результат. Иначе год обслуживания остаётся цепочкой заявок, которая
-    // нигде не сходится в сумму.
-    const orderId = await ensureOrder({ ...payload, quoted_price: Number(contract.price) || 0 });
-    const ins = await insertCompatibleJob(supabase, { ...payload, order_id: orderId, visit_no: 1, visit_kind: "contract" });
-    if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
-    if (orderId && ins.data?.id) await supabase.from("orders").update({ root_job_id: ins.data.id }).eq("id", orderId);
-    const next = parseIso(contract.next_service_date) || new Date(); next.setDate(next.getDate() + (Number(contract.interval_days) || 30));
-    await supabase.from("service_contracts").update({ last_generated_date: contract.next_service_date, next_service_date: isoOf(next), updated_at: new Date().toISOString() }).eq("id", contract.id);
+    const rpcName = "create_contract_visit_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_contract_id: contract.id,
+      p_expected_service_date: contract.next_service_date,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасные выезды по договорам ещё не включены. Выполни supabase/${ATOMIC_CONTRACT_VISITS_MIGRATION} — заявка не была создана.`
+        : error.message;
+      showToast("Ошибка: " + message); return;
+    }
     await logAction("Абонент", `Создана плановая заявка: ${contract.client_name} · ${isoToRu(contract.next_service_date)}`);
     showToast("Плановая заявка создана"); setTab("jobs"); reloadJobs();
   }

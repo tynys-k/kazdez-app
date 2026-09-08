@@ -11,6 +11,7 @@ export const ATOMIC_CHEMICAL_SALES_MIGRATION = "2026-09-08_atomic_chemical_sales
 export const ATOMIC_PARTNER_SETTLEMENTS_MIGRATION = "2026-09-08_atomic_partner_settlements.sql";
 export const ATOMIC_LEAD_CONVERSION_MIGRATION = "2026-09-08_atomic_lead_conversion.sql";
 export const ON_SITE_ESTIMATES_MIGRATION = "2026-09-08_on_site_estimates.sql";
+export const ATOMIC_CONTRACT_VISITS_MIGRATION = "2026-09-08_atomic_contract_visits.sql";
 
 export function createFinancialRequestId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
