@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
@@ -1163,21 +1163,23 @@ function Dashboard({ session, profile }) {
   }
 
   async function saveChemSale(payload) {
-    const { id, ...fields } = payload;
-    const res = id
-      ? await supabase.from("chemical_sales").update(fields).eq("id", id).select().single()
-      : await supabase.from("chemical_sales").insert({ ...fields, created_by: session.user.id }).select().single();
-    if (res.error) { showToast("Ошибка: " + res.error.message); return res.error.message; }
-
-    if (!id && payload.from_tech_id) {
-      const { error: adjError } = await supabase.from("inventory_adjustments").insert({
-        tech_id: payload.from_tech_id, chemical_id: payload.chemical_id,
-        amount_delta: -(Number(payload.amount) || 0), kind: "sold_partner",
-        event_date: payload.sold_on,
-        note: `Продан партнёру: ${partnerById(payload.partner_id)?.name || "партнёр"}`,
-        created_by: session.user.id,
-      });
-      if (adjError) showToast("Продажа записана, но остаток сотрудника не изменился: " + adjError.message);
+    const rpcName = "save_chemical_sale_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_request_id: payload.request_id,
+      p_sale_id: payload.id || null,
+      p_partner_id: payload.partner_id,
+      p_chemical_id: payload.chemical_id,
+      p_from_tech_id: payload.from_tech_id || null,
+      p_amount: payload.amount,
+      p_unit_price: payload.unit_price,
+      p_sold_on: payload.sold_on,
+      p_note: payload.note || null,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасная продажа ещё не включена. Выполни supabase/${ATOMIC_CHEMICAL_SALES_MIGRATION} — продажа не была записана.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
 
     await logAction("Склад", `Продажа партнёру: ${partnerById(payload.partner_id)?.name || "?"} · ${chemById(payload.chemical_id)?.name || "?"} · ${fmt(payload.total)} ₸`);

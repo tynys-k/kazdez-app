@@ -7,6 +7,7 @@ export const ATOMIC_PAYROLL_MIGRATION = "2026-09-08_atomic_payroll.sql";
 export const ATOMIC_MARKETING_SPEND_MIGRATION = "2026-09-08_atomic_marketing_spend.sql";
 export const ATOMIC_JOB_RECEIPTS_MIGRATION = "2026-09-08_atomic_job_receipts.sql";
 export const ATOMIC_STOCK_RECEIPTS_MIGRATION = "2026-09-08_atomic_stock_receipts.sql";
+export const ATOMIC_CHEMICAL_SALES_MIGRATION = "2026-09-08_atomic_chemical_sales.sql";
 
 export function createFinancialRequestId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
