@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, ON_SITE_ESTIMATES_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_CREATION_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { yandexRouteUrl } from "./routePlanning";
@@ -1257,25 +1257,6 @@ function Dashboard({ session, profile }) {
     || branches[0]?.id
     || null;
 
-  // Заказ — то, за что клиент платит; визит — выезд. Заказ заводится вместе с
-  // первым визитом, дальше все выезды по нему цепляются к тому же заказу.
-  //
-  // Если заказ завести не удалось (миграция ещё не прогнана, прав не хватило),
-  // заявка всё равно создаётся. Остановить приём заявок из-за отчётности —
-  // худшее, что программа может сделать с работающим бизнесом.
-  async function ensureOrder(job) {
-    const { data, error } = await supabase.from("orders").insert({
-      address: job.address || null, object_id: job.object_id || null,
-      client_phone: job.client_phone || null, contact_name: job.contact_name || null,
-      branch_id: job.branch_id || defaultBranchId(),
-      agreed_price: job.quoted_price ?? null,
-      status: "open", opened_on: job.scheduled_date || null,
-      created_by: session.user.id,
-    }).select("id").single();
-    if (error) { logClientError(error, "ensureOrder"); return null; }
-    return data?.id || null;
-  }
-
   // Номер визита внутри заказа. Считаем по уже загруженным заявкам: заказ —
   // это единицы визитов, а не тысячи, и лишний запрос к базе тут не нужен.
   function nextVisitNo(orderId) {
@@ -1295,36 +1276,29 @@ function Dashboard({ session, profile }) {
   }
 
   async function createJob(payload) {
-    if (payload.pricing_mode === "on_site_estimate") {
-      const { error: estimateSchemaError } = await supabase.from("jobs").select("pricing_mode").limit(1);
-      if (estimateSchemaError) {
-        showToast(`Оценка на месте ещё не включена. Выполни supabase/${ON_SITE_ESTIMATES_MIGRATION} — заявка не была создана.`);
-        return false;
-      }
-    }
+    const { request_id: requestId, ...jobPayload } = payload;
     const quoted = quotedPriceFor(payload);
-    const objectId = await ensureObject(payload);
-    const orderId = await ensureOrder({ ...payload, object_id: objectId, quoted_price: quoted });
-    const { data: created, error, omittedColumns } = await insertCompatibleJob(supabase, {
-      ...payload, quoted_price: quoted, object_id: objectId,
-      branch_id: payload.branch_id || defaultBranchId(), order_id: orderId,
-      visit_no: 1, visit_kind: payload.service_contract_id ? "contract" : "primary",
-      created_by: session.user.id, work_stage: payload.assigned_to ? "assigned" : "new",
+    const rpcName = "create_job_atomic";
+    const { data: createdId, error } = await supabase.rpc(rpcName, {
+      p_request_id: requestId,
+      p_job: {
+        ...jobPayload,
+        quoted_price: quoted,
+        branch_id: payload.branch_id || defaultBranchId(),
+      },
     });
-    if (error) { showToast("Ошибка: " + error.message); return false; }
-    if (omittedColumns.length) logClientError({
-      kind: "schema_compatibility", place: "createJob",
-      message: `Заявка создана без полей ${omittedColumns.join(", ")}: примените SQL-миграции Supabase`,
-    });
-    // Корневой визит записывается в заказ: по нему повторный запуск переноса
-    // видит, что заказ уже заведён, и не плодит дубли.
-    if (orderId && created?.id) await supabase.from("orders").update({ root_job_id: created.id }).eq("id", orderId);
+    if (error) {
+      showToast(atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Сначала примени миграцию ${ATOMIC_JOB_CREATION_MIGRATION} в Supabase — заявка не была создана`
+        : "Ошибка: " + error.message);
+      return false;
+    }
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Создание", `${payload.pest} · ${payload.address}`);
-    await recordClientEvent({ ...payload, id: created?.id, client_phone: created?.client_phone || payload.client_phone }, "created", "Заявка создана", `${payload.pest || "Услуга"} · ${isoToRu(payload.scheduled_date) || "дата уточняется"}`);
+    await recordClientEvent({ ...payload, id: createdId }, "created", "Заявка создана", `${payload.pest || "Услуга"} · ${isoToRu(payload.scheduled_date) || "дата уточняется"}`);
     setModal(null);
-    showToast(omittedColumns.length ? "Заявка создана в режиме совместимости — обновите базу" : "Заявка создана");
+    showToast("Заявка создана");
     reloadJobs();
     return true;
   }
