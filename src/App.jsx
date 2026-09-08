@@ -336,7 +336,11 @@ function Dashboard({ session, profile }) {
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [doneSortDir, setDoneSortDir] = useState("desc");
+  const [doneBrandFilter, setDoneBrandFilter] = useState("all");
+  const [expandedDoneId, setExpandedDoneId] = useState("");
   const [techFilter, setTechFilter] = useState("");
+  const [stockChemFilter, setStockChemFilter] = useState("");
+  const [teamTechFilter, setTeamTechFilter] = useState("");
   const [toast, setToast] = useState("");
   const [pMode, setPMode] = useState("all");
   const [brandFilter, setBrandFilter] = useState("all");
@@ -2819,7 +2823,16 @@ function Dashboard({ session, profile }) {
   const filteredActive = statusMatched.filter(matchSearch).filter((j) => dateInFilter(j.scheduled_date, jobsDateFilter));
   const sorted = [...filteredActive].sort((a, b) => jobTime(a) - jobTime(b));
   const groups = groupByDate(sorted);
-  const doneFiltered = doneJobs.filter(matchSearch).filter((j) => dateInFilter(j.scheduled_date, doneDateFilter));
+  const doneFiltered = doneJobs
+    .filter(matchSearch)
+    .filter((j) => dateInFilter(j.scheduled_date, doneDateFilter))
+    .filter((j) => {
+      if (doneBrandFilter === "all") return true;
+      const partnerJob = j.brand === "partner" || !!j.partner_id || !!j.partner_name;
+      if (doneBrandFilter === "partner") return partnerJob;
+      if (doneBrandFilter === "Sanitex") return j.brand === "Sanitex";
+      return !partnerJob && j.brand !== "Sanitex";
+    });
   const doneSorted = [...doneFiltered].sort((a, b) => {
     const da = new Date(a.scheduled_date || a.reported_at || 0).getTime();
     const db = new Date(b.scheduled_date || b.reported_at || 0).getTime();
@@ -3381,7 +3394,7 @@ function Dashboard({ session, profile }) {
           const hours = []; for (let h = 7; h <= 23; h++) hours.push(h);
           return (
             <>
-              <div className="kd-tabbar" style={{ marginBottom: 10 }}>
+              <div className="kd-tabbar kd-schedule-toolbar" style={{ marginBottom: 10 }}>
                 <div className="kd-title" style={{ fontSize: 18 }}>График · {isoToRu(scheduleDate)}{isToday ? " (сегодня)" : ""}</div>
                 <div className="kd-tabactions">
                   <button className="kd-arrow" onClick={() => shiftDay(-1)}><ChevronLeft size={18} /></button>
@@ -3392,8 +3405,18 @@ function Dashboard({ session, profile }) {
                   <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "offCalendar" })}>📅 Выходные</button>
                 </div>
               </div>
-              {offToday.length > 0 && <div className="kd-hint" style={{ marginBottom: 10 }}>🌴 Сегодня отдыхают: {offToday.map((d) => personName(d.tech_id)).join(", ")}. Их колонки затемнены — не назначай туда выезды.</div>}
-              <div className="kd-timeline">
+              {offToday.length > 0 && <div className="kd-hint kd-schedule-off" style={{ marginBottom: 10 }}>🌴 Отдыхают: {offToday.map((d) => personName(d.tech_id)).join(", ")}</div>}
+              <div className="kd-schedule-mobile">
+                {dayJobs.length === 0 && <div className="kd-empty">На этот день заявок нет.</div>}
+                {[...dayJobs].sort((a, b) => jobTime(a) - jobTime(b)).map((j) => (
+                  <button type="button" key={j.id} className="kd-schedule-row" onClick={() => setModal({ kind: "edit", job: j })}>
+                    <strong>{j.scheduled_time || "Без времени"}</strong>
+                    <span><b>{addressPlain(j.address) || j.pest}</b><small>{j.pest} · {j.assigned_to ? personName(j.assigned_to) : "не назначено"}</small></span>
+                    <ChevronRight size={16} />
+                  </button>
+                ))}
+              </div>
+              <div className="kd-timeline kd-schedule-desktop">
                 <div className="kd-tlgrid" style={{ gridTemplateColumns: `56px repeat(${cols.length}, minmax(230px, 1fr))` }}>
                   <div className="kd-tlhead kd-tlcorner"></div>
                   {cols.map((c) => {
@@ -3458,9 +3481,17 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "done" && (
           <>
-            <div className="kd-seg" style={{ marginBottom: 14 }}>
-              <button className={`kd-segbtn ${doneSortDir === "desc" ? "on" : ""}`} onClick={() => setDoneSortDir("desc")}>Сначала новые</button>
-              <button className={`kd-segbtn ${doneSortDir === "asc" ? "on" : ""}`} onClick={() => setDoneSortDir("asc")}>Сначала старые</button>
+            <div className="kd-done-filters">
+              <div className="kd-seg">
+                <button className={`kd-segbtn ${doneSortDir === "desc" ? "on" : ""}`} onClick={() => setDoneSortDir("desc")}>Сначала новые</button>
+                <button className={`kd-segbtn ${doneSortDir === "asc" ? "on" : ""}`} onClick={() => setDoneSortDir("asc")}>Сначала старые</button>
+              </div>
+              <select className="kd-techselect" value={doneBrandFilter} onChange={(e) => { setDoneBrandFilter(e.target.value); setExpandedDoneId(""); }}>
+                <option value="all">Все бренды</option>
+                <option value="KazDez">KazDez</option>
+                <option value="Sanitex">Sanitex</option>
+                <option value="partner">Партнёрские</option>
+              </select>
             </div>
             <DateFilterBar filter={doneDateFilter} onChange={setDoneDateFilter} hide={["tomorrow"]} />
             {doneFiltered.length === 0 ? <div className="kd-empty">{doneJobs.length === 0 ? "Выполненных заявок пока нет." : "По этому поиску ничего не найдено."}</div> :
@@ -3469,7 +3500,7 @@ function Dashboard({ session, profile }) {
                   <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} compact={expandedDoneId !== j.id} onExpand={() => setExpandedDoneId(j.id)} onCollapse={() => setExpandedDoneId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                       onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                       onCopyPublicLink={() => copyPublicJobLink(j)}
@@ -5218,7 +5249,19 @@ function Dashboard({ session, profile }) {
               <div className="kd-row total"><span>Оборудование и СИЗ на руках у сотрудников</span><strong>{fmt(totalEquipValue)} ₸</strong></div>
             </div>
             {inventory.length === 0 && <div className="kd-empty">Склад пуст. Добавь препарат через «+ Препарат».</div>}
-            {inventory.map((c) => (
+            {inventory.length > 0 && <div className="kd-card kd-stock-picker">
+              <div><div className="kd-section" style={{ margin: 0 }}>Препараты · {inventory.length}</div><div className="kd-muted">Выбери препарат — ниже откроется только его карточка.</div></div>
+              <select value={stockChemFilter} onChange={(e) => setStockChemFilter(e.target.value)}>
+                <option value="">— выбрать препарат —</option>
+                <option value="all">Показать все препараты</option>
+                {inventory.map((c) => <option value={c.id} key={c.id}>{c.name}{c.low ? " · мало" : ""}</option>)}
+              </select>
+              <div className="kd-stock-index" aria-label="Список препаратов">
+                {inventory.map((c) => <button type="button" key={c.id} className={stockChemFilter === c.id ? "on" : ""} onClick={() => setStockChemFilter(c.id)}>{c.name}{c.low && <span>мало</span>}</button>)}
+              </div>
+            </div>}
+            {inventory.length > 0 && !stockChemFilter && <div className="kd-hint">Нажми на название препарата выше, чтобы увидеть остаток, партии, поставщиков и прогноз.</div>}
+            {inventory.filter((c) => stockChemFilter === "all" || c.id === stockChemFilter).map((c) => (
               <div key={c.id} className={`kd-card ${c.low ? "low" : ""}`}>
                 <div className="kd-card-head">
                   <div className="kd-pest">{c.name}{c.low && <span className="kd-lowtag">мало</span>}{c.orderSoon && !c.low && <span className="kd-lowtag">пора заказывать</span>}</div>
@@ -5331,7 +5374,18 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "team" && (
           <div className="kd-list">
-            {canAccess("action.team_manage") && <div className="kd-card kd-access-card">
+            <div className="kd-card kd-team-picker">
+              <div><div className="kd-section" style={{ margin: 0 }}>Сотрудник</div><div className="kd-muted">Выбери мастера — останутся только его препараты, выплаты и оборудование.</div></div>
+              <select value={teamTechFilter} onChange={(e) => setTeamTechFilter(e.target.value)}>
+                <option value="">Все сотрудники и настройки</option>
+                {techs.map((t) => <option value={t.id} key={t.id}>{t.full_name || "Без имени"}</option>)}
+              </select>
+              <div className="kd-team-index">
+                {techs.map((t) => <button type="button" className={teamTechFilter === t.id ? "on" : ""} key={t.id} onClick={() => setTeamTechFilter(t.id)}><span className="kd-tech-avatar">{(t.full_name || "?").slice(0, 1)}</span>{t.full_name || "Без имени"}</button>)}
+                {teamTechFilter && <button type="button" onClick={() => setTeamTechFilter("")}>Показать всех</button>}
+              </div>
+            </div>
+            {!teamTechFilter && canAccess("action.team_manage") && <div className="kd-card kd-access-card">
               <div className="kd-tabbar" style={{ marginBottom: 12 }}>
                 <div><div className="kd-section" style={{ margin: 0 }}>Сотрудники и права доступа</div><div className="kd-muted">Добавление, блокировка, роли и персональные разрешения</div></div>
                 <button className="kd-btn primary" onClick={() => setModal({ kind: "userAccess", user: null })}><UserPlus size={15} />Добавить сотрудника</button>
@@ -5354,7 +5408,7 @@ function Dashboard({ session, profile }) {
                 })}
               </div>
             </div>}
-            {canAccess("action.settings") && <div className="kd-card">
+            {!teamTechFilter && canAccess("action.settings") && <div className="kd-card">
               <div className="kd-tabbar" style={{ marginBottom: 10 }}>
                 <div>
                   <div className="kd-section" style={{ margin: 0 }}>Филиалы · {branches.length}</div>
@@ -5380,7 +5434,7 @@ function Dashboard({ session, profile }) {
                 </div>
               ))}
             </div>}
-            {canAccess("action.team_manage") && <div className="kd-card">
+            {!teamTechFilter && canAccess("action.team_manage") && <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>Допуски и документы{docAlerts.length ? ` · ${docAlerts.length}` : ""}</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>
                 Медкнижка, санминимум, инструктаж по ТБ. Напоминаем за месяц до конца срока: сотрудник с просроченной медкнижкой на объекте — это штраф и остановка работ.
@@ -5413,7 +5467,7 @@ function Dashboard({ session, profile }) {
                 );
               })}
             </div>}
-            {canAccess("action.team_manage") && <div className="kd-card">
+            {!teamTechFilter && canAccess("action.team_manage") && <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>Инструктаж и материалы</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>
                 Кто подтвердил, что ознакомился. Отметку ставит сам человек в разделе с материалами — за него это сделать нельзя, иначе подпись ничего не подтверждает.
@@ -5435,7 +5489,7 @@ function Dashboard({ session, profile }) {
                 );
               })}
             </div>}
-            {canAccess("action.team_manage") && <div className="kd-card">
+            {!teamTechFilter && canAccess("action.team_manage") && <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>История сотрудников</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>
                 Приём, изменения оклада, переводы и взыскания. Изменение оклада записывается само — вручную это забывают.
@@ -5464,7 +5518,7 @@ function Dashboard({ session, profile }) {
                 );
               })}
             </div>}
-            {canAccess("action.team_manage") && <div className="kd-card">
+            {!teamTechFilter && canAccess("action.team_manage") && <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>Обучение{trainingAlerts.length ? ` · перепроверить ${trainingAlerts.length}` : ""}</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>
                 Скрипты лежат на Диске, но факт обучения — здесь. Рядом стоит конверсия: без неё непонятно, кто провалился и по какой теме.
@@ -5505,7 +5559,7 @@ function Dashboard({ session, profile }) {
                 );
               })}
             </div>}
-            <div className="kd-card">
+            {!teamTechFilter && <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>Отчёты за период</div>
               <DateFilterBar filter={teamRepFilter} onChange={setTeamRepFilter} hide={["tomorrow"]} />
               {(() => {
@@ -5530,9 +5584,9 @@ function Dashboard({ session, profile }) {
                   </>
                 );
               })()}
-            </div>
-            <div className="kd-section">Остатки, выплаты и имущество дезинфекторов</div>
-            {techs.map((t) => {
+            </div>}
+            <div className="kd-section">{teamTechFilter ? "Препараты, выплаты и оборудование сотрудника" : "Остатки, выплаты и имущество дезинфекторов"}</div>
+            {techs.filter((t) => !teamTechFilter || t.id === teamTechFilter).map((t) => {
               const cnt = jobs.filter((j) => j.assigned_to === t.id).length;
               const ledger = techLedger(t.id);
               return (
