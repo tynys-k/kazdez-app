@@ -1727,6 +1727,7 @@ function ChemSalePayModal({ sale, accounts = [], partnerName, onClose, onSave })
 }
 
 function ChemSaleModal({ sale, partners = [], chemicals = [], techs = [], accounts = [], techBalance, onClose, onSave, onPay }) {
+  const requestIdRef = useRef(sale?.request_id || createFinancialRequestId());
   const [partnerId, setPartnerId] = useState(sale?.partner_id || "");
   const [chemId, setChemId] = useState(sale?.chemical_id || "");
   const [fromTech, setFromTech] = useState(sale?.from_tech_id || "");
@@ -1754,7 +1755,7 @@ function ChemSaleModal({ sale, partners = [], chemicals = [], techs = [], accoun
   async function save() {
     setSaving(true); setProblem("");
     const failed = await onSave({
-      id: sale?.id, partner_id: partnerId, chemical_id: chemId,
+      id: sale?.id, request_id: requestIdRef.current, partner_id: partnerId, chemical_id: chemId,
       from_tech_id: fromTech || null, amount: base,
       unit_price: Number(price) || 0, total, sold_on: soldOn,
       note: note.trim() || null,
