@@ -5,7 +5,7 @@ import { supabase } from "./supabaseClient";
 import SessionGate from "./SessionGate";
 import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
 import {
-  ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
+  ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2, BarChart3,
   Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera,
 } from "lucide-react";
 
@@ -19,6 +19,7 @@ import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { yandexRouteUrl } from "./routePlanning";
+import { AnalyticsTab } from "./analytics";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -3056,6 +3057,7 @@ function Dashboard({ session, profile }) {
     { id: "subscriptions", icon: Repeat2, label: `Абоненты${dueContracts.length ? " · " + dueContracts.length : ""}` },
     { id: "routes", icon: Route, label: "Маршруты" },
     { id: "growth", icon: TrendingUp, label: `Прибыль по заявкам${lossJobs.length ? " · ⚠ " + lossJobs.length : ""}` },
+    { id: "analytics", icon: BarChart3, label: "Аналитика" },
     { id: "finance", icon: Wallet, label: "Выручка и чек" },
     { id: "opex", icon: Landmark, label: "Счета и расходы" },
     { id: "cash", icon: Banknote, label: `Наличные от бригад${deposits.filter((d) => d.status === "pending").length ? " · " + deposits.filter((d) => d.status === "pending").length : ""}` },
@@ -3084,7 +3086,7 @@ function Dashboard({ session, profile }) {
   const navGroups = [
     { label: "Ежедневная работа", ids: ["today", "jobs", "schedule", "routes", "tasks"] },
     { label: "Клиенты и возвраты", ids: ["leads", "retention", "subscriptions", "repeats"] },
-    { label: "Деньги", ids: ["finance", "growth", "opex", "cash"] },
+    { label: "Деньги и аналитика", ids: ["finance", "analytics", "growth", "opex", "cash"] },
     { label: "Архив заявок", ids: ["done", "canceled"] },
     { label: "Команда и склад", ids: ["team", "payroll", "partners", "stock", "myequip"] },
   ];
@@ -4037,6 +4039,16 @@ function Dashboard({ session, profile }) {
               </div>
             </section>
           </div>
+        )}
+
+        {!loading && tab === "analytics" && (
+          <AnalyticsTab
+            jobs={jobs}
+            channels={mktChannels}
+            topups={mktTopups}
+            settings={settings}
+            onOpenMarketing={() => { setOpexView("marketing"); setTab("opex"); }}
+          />
         )}
 
         {!loading && tab === "retention" && (

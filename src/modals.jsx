@@ -4124,7 +4124,7 @@ const ACCESS_GROUPS = [
     title: "Разделы",
     items: [
       "today", "jobs", "schedule", "done", "canceled", "tasks", "repeats", "leads", "retention",
-      "subscriptions", "routes", "growth", "finance", "opex", "cash", "stock", "team", "partners",
+      "subscriptions", "routes", "analytics", "growth", "finance", "opex", "cash", "stock", "team", "partners",
       "tenders", "docs", "materials", "knowledge", "myequip",
     ].map((t) => [`tab.${t}`, TAB_LABELS[t] || (t === "myequip" ? "Моё оборудование" : t)]),
   },
