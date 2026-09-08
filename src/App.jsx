@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
@@ -1540,31 +1540,41 @@ function Dashboard({ session, profile }) {
     await logAction("Удалено навсегда", `${row.job.pest} · ${row.job.address}`);
     showToast("Удалено навсегда"); reloadJobs();
   }
-  async function addChem(c) {
-    const { error } = await supabase.from("chemicals").insert(c);
-    if (error) { showToast("Ошибка: " + error.message); return; }
+  async function addChem(c, requestId) {
+    const rpcName = "create_chemical_with_stock_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_request_id: requestId, p_name: c.name, p_active_substance: c.active_substance,
+      p_default_concentration: c.default_concentration, p_unit_kind: c.unit_kind,
+      p_amount: c.purchased_ml, p_price_per_liter: c.price_per_liter, p_min_amount: c.min_ml,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасный приход ещё не включён. Выполни supabase/${ATOMIC_STOCK_RECEIPTS_MIGRATION} — препарат не был добавлен.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
+    }
     await logAction("Склад", `Новый препарат: ${c.name} (${fmtAmount(c.purchased_ml, c.unit_kind)})`);
-    setModal(null); showToast("Препарат добавлен"); reloadStock();
+    setModal(null); showToast("Препарат добавлен"); reloadStock(); return null;
   }
   async function stockIn(chem, addMl, newPrice, extra = {}) {
-    const patch = { purchased_ml: (Number(chem.purchased_ml) || 0) + addMl };
-    if (newPrice != null) patch.price_per_liter = newPrice;
-    const { error } = await supabase.from("chemicals").update(patch).eq("id", chem.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    // Карточка препарата хранит только текущую цену, и каждый приход её
-    // затирает. Поэтому приход записываем отдельной строкой: себестоимость
-    // старых заявок должна считаться по цене того дня, а не сегодняшней.
+    const rpcName = "post_chemical_purchase_atomic";
+    const purchaseDate = extra.purchase_date || new Date().toISOString().slice(0, 10);
     const price = newPrice != null ? newPrice : (Number(chem.price_per_liter) || null);
-    const { error: pError } = await supabase.from("chemical_purchases").insert({
-      chemical_id: chem.id,
-      purchase_date: extra.purchase_date || new Date().toISOString().slice(0, 10),
-      amount: addMl, price_per_liter: price,
-      supplier: extra.supplier || null, created_by: session.user.id,
+    const { error } = await supabase.rpc(rpcName, {
+      p_request_id: extra.request_id, p_chemical_id: chem.id, p_amount: addMl,
+      p_price_per_liter: price, p_purchase_date: purchaseDate,
+      p_supplier: extra.supplier || null, p_batch_no: extra.batch_no || null,
+      p_expires_on: extra.expires_on || null,
     });
-    if (pError) showToast("Приход оформлен, но в историю закупа не попал: " + pError.message);
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасный приход ещё не включён. Выполни supabase/${ATOMIC_STOCK_RECEIPTS_MIGRATION} — остаток не был изменён.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
+    }
     const supplierNote = extra.supplier ? ` · ${extra.supplier}` : "";
     await logAction("Склад", `Приход: ${chem.name} +${fmtAmount(addMl, chem.unit_kind)}${price != null ? ` по ${fmt(price)} ₸` : ""}${supplierNote}`);
-    setModal(null); showToast("Приход оформлен"); reloadStock();
+    setModal(null); showToast("Приход оформлен"); reloadStock(); return null;
   }
   async function removeChem(chem) {
     await supabase.from("chemicals").delete().eq("id", chem.id);

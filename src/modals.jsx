@@ -1281,16 +1281,19 @@ function ProofModal({ job, proof, media = { before: [], after: [], signatureUrl:
 }
 
 function AddChemModal({ onClose, onSave }) {
+  const requestIdRef = useRef(createFinancialRequestId());
   const [name, setName] = useState(""); const [unitKind, setUnitKind] = useState("volume");
   const [qty, setQty] = useState(""); const [price, setPrice] = useState(""); const [minQ, setMinQ] = useState("1");
   const [substance, setSubstance] = useState(""); const [conc, setConc] = useState("");
   const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
   const u = chemUnit(unitKind);
   const ok = name && qty && price;
   async function save() {
-    setSaving(true);
+    setSaving(true); setProblem("");
     const f = u.factor || 1000;
-    await onSave({ name, active_substance: substance.trim() || null, default_concentration: Number(conc) || null, unit_kind: unitKind, purchased_ml: (Number(qty) || 0) * f, price_per_liter: Number(price) || 0, min_ml: (Number(minQ) || 0) * f });
+    const failed = await onSave({ name, active_substance: substance.trim() || null, default_concentration: Number(conc) || null, unit_kind: unitKind, purchased_ml: (Number(qty) || 0) * f, price_per_liter: Number(price) || 0, min_ml: (Number(minQ) || 0) * f }, requestIdRef.current);
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
     setSaving(false);
   }
   return (
@@ -1298,6 +1301,7 @@ function AddChemModal({ onClose, onSave }) {
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Добавить"}</button>
     </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-grid2">
         <Field label="Название"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Культ / контейнеры / ловушки" /></Field>
         <Field label="Измеряется в">
@@ -1326,11 +1330,13 @@ function AddChemModal({ onClose, onSave }) {
 }
 
 function StockInModal({ chem, purchases = [], onClose, onSave }) {
+  const requestIdRef = useRef(createFinancialRequestId());
   const [qty, setQty] = useState(""); const [price, setPrice] = useState(""); const [saving, setSaving] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [supplier, setSupplier] = useState("");
   const [batch, setBatch] = useState("");
   const [expires, setExpires] = useState("");
+  const [problem, setProblem] = useState("");
   const u = chemUnit(chem.unit_kind);
   // История нужна прямо здесь: перед тем как оформить приход, видно, у кого
   // и почём брали раньше.
@@ -1338,16 +1344,18 @@ function StockInModal({ chem, purchases = [], onClose, onSave }) {
   const prev = hist.find((p) => p.price_per_liter != null);
   const diff = price && prev?.price_per_liter ? Number(price) - Number(prev.price_per_liter) : 0;
   async function save() {
-    setSaving(true);
-    await onSave(chem, (Number(qty) || 0) * (u.factor || 1000), price ? Number(price) : null,
-      { purchase_date: date, supplier: supplier.trim() || null, batch_no: batch.trim() || null, expires_on: expires || null });
+    setSaving(true); setProblem("");
+    const failed = await onSave(chem, (Number(qty) || 0) * (u.factor || 1000), price ? Number(price) : null,
+      { purchase_date: date, supplier: supplier.trim() || null, batch_no: batch.trim() || null, expires_on: expires || null, request_id: requestIdRef.current });
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
     setSaving(false);
   }
   return (
     <ModalShell title={`Приход: ${chem.name}`} onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={!qty || saving} onClick={save}>{saving ? "…" : "Оформить"}</button>
+      <button className="kd-btn primary" disabled={!(Number(qty) > 0) || !date || saving} onClick={save}>{saving ? "…" : "Оформить"}</button>
     </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-muted" style={{ marginBottom: 12 }}>Текущая цена: {fmt(chem.price_per_liter)} ₸/{u.big}</div>
       <Field label={`Докуплено (${u.big})`}><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
       <Field label={`Цена за ${u.big} в этом приходе`}><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="оставь пустым, если та же" /></Field>
