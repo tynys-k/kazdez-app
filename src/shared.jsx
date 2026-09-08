@@ -671,6 +671,7 @@ function buildMsg(job, header) {
   if (job.floor) lines.push(`Этаж: ${job.floor}`);
   if (job.area) lines.push(`Метраж: ${job.area} м²`);
   lines.push(`Вид: ${job.pest || ""}`);
+  if (job.pricing_mode === "on_site_estimate") lines.push("Цена: определяется после оценки на месте");
   const prices = (job.price_options || []).filter((p) => p.amount);
   if (prices.length) {
     lines.push("Цена:");

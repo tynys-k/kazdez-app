@@ -98,6 +98,7 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
       <div className="kd-addr"><AddressText text={job.address} /></div>
       {job.note && <div className="kd-notebox">📝 {job.note}</div>}
       <div className="kd-prices">
+        {job.pricing_mode === "on_site_estimate" && <span className="kd-doctag">Оценка на месте{job.assessment_completed_at ? ` · ${fmt(job.assessed_amount)} ₸` : ""}</span>}
         {(job.price_options || []).map((p, i) => (<span className="kd-price" key={i}>{fmt(p.amount)} ₸{p.label ? <em> · {p.label}</em> : null}</span>))}
         {job.source && <span className="kd-srctag">{job.source}</span>}
         {job.docs_needed && <span className="kd-doctag">{job.docs_done ? "Документы готовы" : "Нужны документы"}</span>}
@@ -327,12 +328,13 @@ function jobToForm(job) {
     p1label: po[0]?.label || "С запахом", p1amount: po[0]?.amount ?? "",
     p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
     client_phone: job.client_phone || "+7 ", contact_name: job.contact_name || "", extra_contacts: Array.isArray(job.extra_contacts) ? job.extra_contacts : [], guarantee_months: job.guarantee_months ?? 6,
+    pricing_mode: job.pricing_mode || "quoted",
     brand: job.brand || "KazDez", partner_id: job.partner_id || "", partner_share: job.partner_share ?? "",
     note: job.note || "", assigned_to: job.assigned_to || "", executor_kind: job.executor_partner_id ? "partner" : "tech", executor_partner_id: job.executor_partner_id || "", executor_share_pct: job.executor_share_pct ?? "", joint_work: !!job.joint_work, joint_supplier: job.joint_supplier || "us", joint_cost_share: job.joint_cost_share ?? "", partner_comp: job.partner_comp ?? "",
   };
 }
 
-const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
+const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", pricing_mode: "quoted", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
 
 function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, findBlocked, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, onClose, onSave }) {
   const draftKey = newJobDraftStorageKey(draftOwnerId);
@@ -352,7 +354,8 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
   // Цена по прайсу: подставляем в пустое поле, но не переписываем введённое
   // руками — менеджер мог договориться о другой сумме, и затирать её нельзя.
-  const priceMatch = calcPriceFor(f.pest, f.area, priceList);
+  const isOnSiteEstimate = f.pricing_mode === "on_site_estimate";
+  const priceMatch = isOnSiteEstimate ? null : calcPriceFor(f.pest, f.area, priceList);
   const priceHint = !priceMatch ? null : (
     <div className="kd-hint" style={{ marginTop: -4 }}>
       По прайсу{priceMatch.exact ? "" : " (площадь не указана)"}: <strong>{fmt(priceMatch.price)} ₸</strong>
@@ -372,7 +375,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
     until.setMonth(until.getMonth() + Number(j.guarantee_months || 0));
     return until.getTime() >= Date.now();
   });
-  const ok = phoneDigits.length >= 10 && f.address && f.pest && (f.p1amount || f.p2amount || f.type === "Осмотр");
+  const ok = phoneDigits.length >= 10 && f.address && f.pest && (f.p1amount || f.p2amount || f.type === "Осмотр" || isOnSiteEstimate);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState("");
@@ -406,11 +409,11 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
     setSaveError("");
     try {
       const price_options = [];
-      if (f.p1amount) price_options.push({ label: f.p1label, amount: Number(f.p1amount) });
-      if (f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
+      if (!isOnSiteEstimate && f.p1amount) price_options.push({ label: f.p1label, amount: Number(f.p1amount) });
+      if (!isOnSiteEstimate && f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
       const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
       const isPartner = f.brand === "partner";
-      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
+      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, pricing_mode: f.pricing_mode || "quoted", client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
         executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
         executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
       if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
@@ -541,15 +544,20 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
         <Field label="Этаж"><input value={f.floor} onChange={set("floor")} inputMode="numeric" placeholder="5" /></Field>
         <Field label="Метраж (м²)"><input value={f.area} onChange={set("area")} inputMode="numeric" placeholder="45" /></Field>
       </div>}
-      {f.type === "Осмотр" && <div className="kd-muted" style={{ marginBottom: 10 }}>Для осмотра цену можно не заполнять.</div>}
-      {formMode === "quick" ? (
+      <label className="kd-check" style={{ marginBottom: 10 }}>
+        <input type="checkbox" checked={isOnSiteEstimate} onChange={(e) => setF({ ...f, pricing_mode: e.target.checked ? "on_site_estimate" : "quoted", p1amount: e.target.checked ? "" : f.p1amount, p2amount: e.target.checked ? "" : f.p2amount })} />
+        <span><strong>Цена после оценки на месте</strong><small style={{ display: "block", marginTop: 2 }}>Дезинфектор назовёт точную сумму на объекте. Ориентир для клиента напишите в комментарии ниже.</small></span>
+      </label>
+      {isOnSiteEstimate && <div className="kd-hint" style={{ marginBottom: 10 }}>Исходной цены нет — эта заявка не попадёт в процент поднятия. После осмотра сотрудник укажет фактическую сумму в обычном отчёте.</div>}
+      {f.type === "Осмотр" && !isOnSiteEstimate && <div className="kd-muted" style={{ marginBottom: 10 }}>Для осмотра цену можно не заполнять.</div>}
+      {!isOnSiteEstimate && (formMode === "quick" ? (
         <Field label="Стоимость (₸)"><input value={f.p1amount} onChange={set("p1amount")} inputMode="numeric" placeholder="15000" /></Field>
       ) : <div className="kd-grid2">
           <Field label="Цена 1 — подпись"><input value={f.p1label} onChange={set("p1label")} /></Field>
           <Field label="Цена 1 — сумма (₸)"><input value={f.p1amount} onChange={set("p1amount")} inputMode="numeric" placeholder="15000" /></Field>
           <Field label="Цена 2 — подпись"><input value={f.p2label} onChange={set("p2label")} /></Field>
           <Field label="Цена 2 — сумма (₸)"><input value={f.p2amount} onChange={set("p2amount")} inputMode="numeric" placeholder="20000" /></Field>
-        </div>}
+        </div>)}
       {priceHint}
       {formMode === "expanded" && <>
       <datalist id="kd-contact-roles">{["Муж", "Жена", "Сестра", "Брат", "Коллега", "Директор", "Диспетчер", "Охранник", "Бухгалтер", "Администратор", "Сосед"].map((r) => <option key={r} value={r} />)}</datalist>
@@ -571,7 +579,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
       </div>
       </>}
       <Field label="Примечание / комментарий (видно только команде, клиенту не идёт)">
-        <textarea className="kd-textarea" value={f.note} onChange={set("note")} placeholder="Напр.: домофон не работает, звонить за 30 мин, есть собака" />
+        <textarea className="kd-textarea" value={f.note} onChange={set("note")} placeholder={isOnSiteEstimate ? "Напр.: клиенту сказали ориентировочно 10–20 тыс. ₸; точная цена после осмотра" : "Напр.: домофон не работает, звонить за 30 мин, есть собака"} />
       </Field>
       </fieldset>
     </ModalShell>
@@ -707,6 +715,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, draftOwnerId,
   // Прайсовая цена зафиксирована при оформлении заявки. Если её нет — сравнивать
   // не с чем, и мешать сдать отчёт мы не имеем права.
   const quoted = Number(job.quoted_price) || 0;
+  const isOnSiteEstimate = job.pricing_mode === "on_site_estimate";
   const gap = quoted > 0 && total > 0 ? Math.round((total - quoted) / quoted * 100) : null;
   const needsReason = gap !== null && gap <= -Math.abs(discountThreshold);
   const isDebt = needsReason && discountReason === "debt";
@@ -786,6 +795,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, draftOwnerId,
       <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address}</div>
       <PartnerOrigin name={partnerName || job.partner_name} />
+      {isOnSiteEstimate && <div className="kd-hint" style={{ marginBottom: 12 }}><strong>Оценка на месте.</strong> Укажите фактически согласованную с клиентом сумму в оплате ниже. Она станет итоговой ценой заказа, но не будет считаться «поднятием» от нуля.</div>}
       {!navigator.onLine && <div className="kd-offline-draft"><Info size={17} /><div><strong>Нет связи</strong><span>Заполняйте отчёт — черновик сохраняется на этом устройстве. Отправьте его после восстановления интернета.</span></div></div>}
       {offlineSaved && !draftStorage.error && <div className="kd-allgood"><CheckCircle2 size={18} />Черновик сохранён на устройстве</div>}
 
