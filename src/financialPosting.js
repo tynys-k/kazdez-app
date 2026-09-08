@@ -14,6 +14,7 @@ export const ON_SITE_ESTIMATES_MIGRATION = "2026-09-08_on_site_estimates.sql";
 export const ATOMIC_CONTRACT_VISITS_MIGRATION = "2026-09-08_atomic_contract_visits.sql";
 export const ATOMIC_QUALITY_CONTROL_MIGRATION = "2026-09-08_atomic_quality_control.sql";
 export const ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION = "2026-09-08_atomic_equipment_transfers.sql";
+export const ATOMIC_JOB_CREATION_MIGRATION = "2026-09-08_atomic_job_creation.sql";
 
 export function createFinancialRequestId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();

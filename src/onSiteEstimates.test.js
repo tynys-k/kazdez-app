@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { ON_SITE_ESTIMATES_MIGRATION } from "./financialPosting";
+import { ATOMIC_JOB_CREATION_MIGRATION, ON_SITE_ESTIMATES_MIGRATION } from "./financialPosting";
 
 const sql = fs.readFileSync(path.join(process.cwd(), "supabase", ON_SITE_ESTIMATES_MIGRATION), "utf8");
+const creationSql = fs.readFileSync(path.join(process.cwd(), "supabase", ATOMIC_JOB_CREATION_MIGRATION), "utf8");
 const app = fs.readFileSync(path.join(process.cwd(), "src", "App.jsx"), "utf8");
 const modals = fs.readFileSync(path.join(process.cwd(), "src", "modals.jsx"), "utf8");
 
@@ -37,8 +38,10 @@ describe("оценка и продажа на месте", () => {
     expect(app).toContain("assessmentSales");
   });
 
-  it("не создаёт оценочную заявку до применения миграции", () => {
-    expect(app).toMatch(/select\("pricing_mode"\)\.limit\(1\)/);
-    expect(app).toContain("ON_SITE_ESTIMATES_MIGRATION");
+  it("проверяет режим оценки внутри атомарного создания", () => {
+    expect(creationSql).toMatch(/coalesce\(v_input\.pricing_mode, 'quoted'\) not in \('quoted', 'on_site_estimate'\)/i);
+    expect(creationSql).toMatch(/if v_input\.pricing_mode = 'on_site_estimate'[\s\S]*v_input\.quoted_price := null/i);
+    expect(app).toMatch(/async function createJob[\s\S]{0,700}create_job_atomic/i);
+    expect(app).toContain("ATOMIC_JOB_CREATION_MIGRATION");
   });
 });

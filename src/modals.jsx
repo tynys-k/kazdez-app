@@ -343,6 +343,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
     draftRef.current = !initial ? readLocalDraft(draftKey, draftOwnerId) : null;
   }
   const draft = draftRef.current;
+  const requestIdRef = useRef(initial ? null : (draft?.requestId || createFinancialRequestId()));
   const startingForm = initial || draft?.form || emptyJobForm(defaultGuarantee);
   const [f, setF] = useState(startingForm);
   const [formMode, setFormMode] = useState(initial ? "expanded" : (draft?.mode || "quick"));
@@ -380,7 +381,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState("");
   const hasDraft = JSON.stringify(f) !== JSON.stringify(emptyJobForm(defaultGuarantee));
-  const draftStorage = useLocalDraft(draftKey, hasDraft ? { ownerId: String(draftOwnerId), form: f, mode: formMode } : null, !initial);
+  const draftStorage = useLocalDraft(draftKey, hasDraft ? { ownerId: String(draftOwnerId), requestId: requestIdRef.current, form: f, mode: formMode } : null, !initial);
 
   function requestClose() {
     if (savingRef.current) return;
@@ -397,6 +398,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
   }
 
   function clearDraft() {
+    requestIdRef.current = createFinancialRequestId();
     setF(emptyJobForm(defaultGuarantee));
     setFormMode("quick");
     setDraftRestored(false);
@@ -417,6 +419,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
         executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
         executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
       if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
+      if (!initial) payload.request_id = requestIdRef.current;
       if (!keepStatus) payload.status = payload.assigned_to ? "assigned" : "new";
       else if (f.status === "new" || f.status === "assigned") payload.status = payload.assigned_to ? "assigned" : "new";
       const saved = await onSave(payload);
