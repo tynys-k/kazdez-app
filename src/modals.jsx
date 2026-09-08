@@ -170,9 +170,9 @@ function JobCard({ job, onObject, blocked, isAdmin, assignedName, partnerName, p
             {job.status === "done" && job.type === "Первичная" && onAct && <button className="kd-btn ghost sm" onClick={onAct}>Акт</button>}
             {job.status === "done" && job.type !== "Первичная" && onCert && <button className="kd-btn ghost sm" onClick={onCert}>Сертификат</button>}
             {job.status === "done" && !job.repeat_state && <button className="kd-btn ghost sm" onClick={onRepeat}>На повтор</button>}
-            {share > 0 && <button className="kd-btn ghost sm" onClick={() => onPayPartner(!job.partner_paid)}>{job.partner_paid ? "Отменить выплату" : "Выплатить долю"}</button>}
-            {job.partner_comp > 0 && <button className="kd-btn ghost sm" onClick={() => onCompPaid(!job.partner_comp_paid)}>{job.partner_comp_paid ? "Компенсация не получена" : "Компенсация получена"}</button>}
-            {job.executor_partner_id && job.status === "done" && job.executor_settlement === "qr_full" && <button className="kd-btn ghost sm" onClick={() => onExecutorPaid(!job.executor_paid)}>{job.executor_paid ? "Доля не выплачена" : "Выплатить долю исполнителю"}</button>}
+            {share > 0 && !job.partner_paid && onPayPartner && <button className="kd-btn ghost sm" onClick={onPayPartner}>Выплатить долю</button>}
+            {job.partner_comp > 0 && !job.partner_comp_paid && onCompPaid && <button className="kd-btn ghost sm" onClick={onCompPaid}>Компенсация получена</button>}
+            {job.executor_partner_id && job.status === "done" && job.executor_settlement === "qr_full" && !job.executor_paid && onExecutorPaid && <button className="kd-btn ghost sm" onClick={onExecutorPaid}>Выплатить долю исполнителю</button>}
             {job.status === "done" && <button className="kd-btn ghost sm" onClick={() => onTechExtras()}>Бонус / дорожные</button>}
             <button className="kd-btn ghost danger sm" onClick={onDelete}><Trash2 size={14} />Удалить</button>
           </div>
@@ -3351,6 +3351,38 @@ function TransferPayModal({ job, accounts, onClose, onConfirm }) {
   );
 }
 
+function JobSettlementModal({ job, kind, amount, partnerName, accounts, onClose, onConfirm }) {
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+  const incoming = kind === "partner_compensation";
+  const title = incoming ? "Получить компенсацию от партнёра" : kind === "executor_payout" ? "Выплатить исполнителю" : "Выплатить долю партнёру";
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onConfirm(job, kind, accountId || null, date || null);
+    if (failed) setProblem(typeof failed === "string" ? failed : "Расчёт не прошёл.");
+    setSaving(false);
+  }
+  return (
+    <ModalShell title={title} onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={saving || !accountId || !date || amount <= 0} onClick={save}>{saving ? "…" : incoming ? "Провести поступление" : "Провести выплату"}</button>
+    </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
+      <div className="kd-paytotal"><span>{partnerName || "Партнёр"}</span><strong>{fmt(amount)} ₸</strong></div>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>
+        {incoming ? "Сумма поступит на выбранный счёт, а заявка одновременно отметится рассчитанной." : "Сумма спишется с выбранного счёта, а заявка одновременно отметится оплаченной."}
+      </div>
+      <Field label={incoming ? "На какой счёт поступило" : "С какого счёта выплатили"}>
+        <select value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">— выбери счёт —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+      </Field>
+      <Field label={incoming ? "Дата поступления" : "Дата выплаты"}><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      {(!accountId || !date) && <div className="kd-hint">Счёт и дата обязательны: галочка и деньги сохраняются только вместе.</div>}
+    </ModalShell>
+  );
+}
+
 function TechExtrasModal({ job, techName, techs = [], helpers: initialHelpers = [], onClose, onSave }) {
   const [bonus, setBonus] = useState(job.tech_bonus ?? "");
   const [travel, setTravel] = useState(job.tech_travel ?? "");
@@ -4196,4 +4228,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };

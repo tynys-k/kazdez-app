@@ -16,10 +16,10 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
-import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -1496,11 +1496,26 @@ function Dashboard({ session, profile }) {
     await logAction("Заявка", `Партнёр выполнил: ${job.pest} · ${fmt(amount)} ₸ · ${settlement === "qr_full" ? "QR нам, должны долю" : "получили нашу долю"}`);
     setModal(null); showToast("Заявка закрыта"); load(); return null;
   }
-  async function toggleExecutorPaid(job, paid) {
-    const { error } = await supabase.from("jobs").update({ executor_paid: paid }).eq("id", job.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    await logAction("Заявка", `Доля исполнителю ${paid ? "выплачена" : "помечена невыплаченной"}: ${job.pest}`);
-    load();
+  async function postJobPartnerSettlement(job, settlementKind, accountId, settledOn) {
+    const rpcName = "post_job_partner_settlement_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_job_id: job.id, p_kind: settlementKind,
+      p_account_id: accountId, p_settled_on: settledOn,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасные расчёты с партнёрами ещё не включены. Выполни supabase/${ATOMIC_PARTNER_SETTLEMENTS_MIGRATION} — деньги и заявка не были изменены.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
+    }
+    const labels = {
+      partner_payout: "Доля партнёру выплачена",
+      executor_payout: "Доля исполнителю выплачена",
+      partner_compensation: "Компенсация от партнёра получена",
+    };
+    await logAction("Расчёты с партнёрами", `${labels[settlementKind] || "Расчёт проведён"}: ${job.pest}`);
+    setModal(null); showToast(labels[settlementKind] || "Расчёт проведён");
+    load(["jobs", "accounts", "money_moves"]); return null;
   }
   async function requestReportEdit(job, reason) {
     const { error } = await supabase.rpc("request_report_edit", { p_job: job.id, p_reason: reason || null });
@@ -1679,18 +1694,6 @@ function Dashboard({ session, profile }) {
     await supabase.from("partners").delete().eq("id", p.id);
     await logAction("Партнёр", `Удалён: ${p.name}`);
     showToast("Партнёр удалён"); load();
-  }
-  async function markPartnerPaid(job, paid) {
-    const { error } = await supabase.from("jobs").update({ partner_paid: paid, partner_paid_at: paid ? new Date().toISOString() : null }).eq("id", job.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    await logAction("Выплата партнёру", `${partnerById(job.partner_id)?.name || "?"} · ${fmt(partnerShareAmt(job))} ₸ · ${paid ? "выплачено" : "отменено"}`);
-    showToast(paid ? "Отмечено как выплачено" : "Отметка снята"); load();
-  }
-  async function markCompPaid(job, paid) {
-    const { error } = await supabase.from("jobs").update({ partner_comp_paid: paid }).eq("id", job.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    await logAction("Компенсация партнёра", `${partnerById(job.partner_id)?.name || "?"} · ${fmt(job.partner_comp)} ₸ · ${paid ? "получено" : "снята отметка"}`);
-    showToast(paid ? "Отмечено как полученное" : "Отметка снята"); load();
   }
   async function saveDoc(payload, existing) {
     const res = existing ? await supabase.from("doc_services").update(payload).eq("id", existing.id) : await supabase.from("doc_services").insert({ ...payload, created_by: session.user.id });
@@ -3342,15 +3345,15 @@ function Dashboard({ session, profile }) {
                         onView={() => setModal({ kind: "view", job: j })}
                         onEdit={() => setModal({ kind: "edit", job: j })}
                         onRepeat={() => askConfirm(`Отправить заявку «${j.pest} · ${j.address}» на повтор? Она уйдёт во вкладку «Повторы».`, () => putOnRepeat(j), { danger: false, confirmLabel: "Да, на повтор" })}
-                        onPayPartner={(paid) => markPartnerPaid(j, paid)}
-                        onCompPaid={(paid) => markCompPaid(j, paid)}
+                        onPayPartner={canManageCash ? () => setModal({ kind: "jobSettlement", job: j, settlementKind: "partner_payout" }) : null}
+                        onCompPaid={canManageCash ? () => setModal({ kind: "jobSettlement", job: j, settlementKind: "partner_compensation" }) : null}
                         onCancel={() => setModal({ kind: "cancelJob", job: j })}
                         onRestore={() => restoreCanceled(j)}
                   onTransferPaid={() => setModal({ kind: "transferPay", job: j })}
                   onTechExtras={() => setModal({ kind: "techExtras", job: j })}
                   executorName={partnerById(j.executor_partner_id)?.name}
                   onExecutorDone={() => setModal({ kind: "executorDone", job: j })}
-                  onExecutorPaid={(paid) => askConfirm(paid ? `Отметить долю исполнителю выплаченной?` : `Снять отметку выплаты доли?`, () => toggleExecutorPaid(j, paid), { danger: false, confirmLabel: "Да" })}
+                  onExecutorPaid={canManageCash ? () => setModal({ kind: "jobSettlement", job: j, settlementKind: "executor_payout" }) : null}
                   onRequestEdit={() => setModal({ kind: "requestEdit", job: j })}
                   onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
@@ -3476,15 +3479,15 @@ function Dashboard({ session, profile }) {
                       onView={() => setModal({ kind: "view", job: j })}
                       onEdit={() => setModal({ kind: "edit", job: j })}
                       onRepeat={() => askConfirm(`Отправить заявку «${j.pest} · ${j.address}» на повтор? Она уйдёт во вкладку «Повторы».`, () => putOnRepeat(j), { danger: false, confirmLabel: "Да, на повтор" })}
-                      onPayPartner={(paid) => markPartnerPaid(j, paid)}
-                        onCompPaid={(paid) => markCompPaid(j, paid)}
+                      onPayPartner={canManageCash ? () => setModal({ kind: "jobSettlement", job: j, settlementKind: "partner_payout" }) : null}
+                        onCompPaid={canManageCash ? () => setModal({ kind: "jobSettlement", job: j, settlementKind: "partner_compensation" }) : null}
                         onCancel={() => setModal({ kind: "cancelJob", job: j })}
                         onRestore={() => restoreCanceled(j)}
                   onTransferPaid={() => setModal({ kind: "transferPay", job: j })}
                   onTechExtras={() => setModal({ kind: "techExtras", job: j })}
                   executorName={partnerById(j.executor_partner_id)?.name}
                   onExecutorDone={() => setModal({ kind: "executorDone", job: j })}
-                  onExecutorPaid={(paid) => askConfirm(paid ? `Отметить долю исполнителю выплаченной?` : `Снять отметку выплаты доли?`, () => toggleExecutorPaid(j, paid), { danger: false, confirmLabel: "Да" })}
+                  onExecutorPaid={canManageCash ? () => setModal({ kind: "jobSettlement", job: j, settlementKind: "executor_payout" }) : null}
                   onRequestEdit={() => setModal({ kind: "requestEdit", job: j })}
                   onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
@@ -3896,15 +3899,15 @@ function Dashboard({ session, profile }) {
                   onView={() => setModal({ kind: "view", job: j })}
                   onEdit={() => setModal({ kind: "edit", job: j })}
                   onRepeat={() => askConfirm(`Отправить заявку «${j.pest} · ${j.address}» на повтор? Она уйдёт во вкладку «Повторы».`, () => putOnRepeat(j), { danger: false, confirmLabel: "Да, на повтор" })}
-                  onPayPartner={(paid) => markPartnerPaid(j, paid)}
-                  onCompPaid={(paid) => markCompPaid(j, paid)}
+                  onPayPartner={canManageCash ? () => setModal({ kind: "jobSettlement", job: j, settlementKind: "partner_payout" }) : null}
+                  onCompPaid={canManageCash ? () => setModal({ kind: "jobSettlement", job: j, settlementKind: "partner_compensation" }) : null}
                   onCancel={() => setModal({ kind: "cancelJob", job: j })}
                   onRestore={() => restoreCanceled(j)}
                   onTransferPaid={() => setModal({ kind: "transferPay", job: j })}
                   onTechExtras={() => setModal({ kind: "techExtras", job: j })}
                   executorName={partnerById(j.executor_partner_id)?.name}
                   onExecutorDone={() => setModal({ kind: "executorDone", job: j })}
-                  onExecutorPaid={(paid) => askConfirm(paid ? `Отметить долю исполнителю выплаченной?` : `Снять отметку выплаты доли?`, () => toggleExecutorPaid(j, paid), { danger: false, confirmLabel: "Да" })}
+                  onExecutorPaid={canManageCash ? () => setModal({ kind: "jobSettlement", job: j, settlementKind: "executor_payout" }) : null}
                   onRequestEdit={() => setModal({ kind: "requestEdit", job: j })}
                   onApproveEdit={() => askConfirm(`Разрешить дезинфектору изменить отчёт по «${j.pest} · ${j.address}»? Свяжись с ним перед этим.`, () => approveReportEdit(j), { danger: false, confirmLabel: "Да, разрешить" })}
                   onRejectEdit={() => askConfirm(`Отклонить запрос на изменение отчёта?`, () => rejectReportEdit(j), { danger: false, confirmLabel: "Да, отклонить" })}
@@ -5958,6 +5961,11 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "chemSalePay" && <ChemSalePayModal sale={modal.sale} accounts={accounts}
         partnerName={partnerById(modal.sale.partner_id)?.name}
         onClose={() => setModal({ kind: "chemSale", sale: modal.sale })} onSave={payChemSale} />}
+      {modal?.kind === "jobSettlement" && <JobSettlementModal
+        job={modal.job} kind={modal.settlementKind} accounts={accounts}
+        amount={modal.settlementKind === "partner_payout" ? partnerShareAmt(modal.job) : modal.settlementKind === "executor_payout" ? executorShareAmt(modal.job) : Number(modal.job.partner_comp) || 0}
+        partnerName={partnerById(modal.settlementKind === "executor_payout" ? modal.job.executor_partner_id : modal.job.partner_id)?.name}
+        onClose={() => setModal(null)} onConfirm={postJobPartnerSettlement} />}
       {modal?.kind === "paperwork" && <PaperworkModal row={modal.row} partners={partners} accounts={accounts} jobs={jobs} clients={clients}
         onClose={() => setModal(null)} onSave={savePaperwork}
         onSettle={(row, money) => setModal({ kind: "settle", row, money })} />}
