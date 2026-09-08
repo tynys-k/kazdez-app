@@ -3262,17 +3262,24 @@ function ExecutorDoneModal({ job, partnerName, accounts, defaultAccountId, onClo
   const [accId, setAccId] = useState(defaultAccountId || accounts[0]?.id || "");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
   const sharePct = Number(job.executor_share_pct) || 0;
   const amt = Number(amount) || 0;
   const partnerPart = Math.round(amt * sharePct / 100);
   const ourPart = amt - partnerPart;
-  const ok = amt > 0;
-  async function save() { setSaving(true); await onConfirm(amt, settlement, settlement === "net_to_us" ? (accId || null) : null, date || null); setSaving(false); }
+  const ok = amt > 0 && (settlement !== "net_to_us" || (accId && date));
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onConfirm(amt, settlement, settlement === "net_to_us" ? (accId || null) : null, date || null);
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
   return (
     <ModalShell title="Партнёр выполнил заявку" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Закрыть заявку"}</button>
     </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-muted" style={{ marginBottom: 12 }}>{job.pest} · {job.address} · исполнитель: <strong>{partnerName || "партнёр"}</strong> (доля {sharePct}%)</div>
       <Field label="Полная сумма заявки (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="20000" /></Field>
       <div className="kd-paytotal"><span>Доля партнёра {sharePct}%</span><strong>{fmt(partnerPart)} ₸</strong></div>
@@ -3285,7 +3292,7 @@ function ExecutorDoneModal({ job, partnerName, accounts, defaultAccountId, onClo
       {settlement === "qr_full" && <div className="kd-hint">Вся сумма {fmt(amt)} ₸ упадёт на QR-счёт автоматически (как обычная QR-оплата). На карточке появится «доля исполнителю к выплате {fmt(partnerPart)} ₸».</div>}
       {settlement === "net_to_us" && (
         <div className="kd-grid2">
-          <Field label="На какой счёт пришло"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— не привязывать —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+          <Field label="На какой счёт пришло"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— выбери счёт —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
           <Field label="Дата"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         </div>
       )}
@@ -3313,16 +3320,24 @@ function TransferPayModal({ job, accounts, onClose, onConfirm }) {
   const [accId, setAccId] = useState(accounts[0]?.id || "");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
-  async function save() { setSaving(true); await onConfirm(accId || null, date || null); setSaving(false); }
+  const [problem, setProblem] = useState("");
+  async function save() {
+    setSaving(true); setProblem("");
+    const failed = await onConfirm(accId || null, date || null);
+    if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
+    setSaving(false);
+  }
   return (
     <ModalShell title="Зачесть оплату перечислением" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Да, оплата пришла"}</button>
+      <button className="kd-btn primary" disabled={saving || !accId || !date} onClick={save}>{saving ? "…" : "Да, оплата пришла"}</button>
     </>}>
+      {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-paytotal"><span>{job.pest} · {job.address}</span><strong>{fmt(job.report_transfer)} ₸</strong></div>
       <div className="kd-muted" style={{ marginBottom: 12 }}>Отметь, когда деньги реально пришли. Сумма зачислится на выбранный счёт в «Финансах».</div>
-      <Field label="На какой счёт пришло"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— не привязывать к счёту —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      <Field label="На какой счёт пришло"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— выбери счёт —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
       <Field label="Дата оплаты"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      {(!accId || !date) && <div className="kd-hint">Счёт и дата обязательны: отметка заявки и поступление денег сохраняются вместе.</div>}
     </ModalShell>
   );
 }
