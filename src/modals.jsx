@@ -8,6 +8,7 @@ import { createFinancialRequestId } from "./financialPosting";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
 import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, addressPlain, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -344,12 +345,14 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
   }
   const draft = draftRef.current;
   const requestIdRef = useRef(initial ? null : (draft?.requestId || createFinancialRequestId()));
-  const startingForm = initial || draft?.form || emptyJobForm(defaultGuarantee);
+  const startingFormRaw = initial || draft?.form || emptyJobForm(defaultGuarantee);
+  const startingForm = { ...startingFormRaw, pest: canonicalPestName(startingFormRaw.pest) };
   const [f, setF] = useState(startingForm);
   const [formMode, setFormMode] = useState(initial ? "expanded" : (draft?.mode || "quick"));
   const [draftRestored, setDraftRestored] = useState(!!draft?.form);
   const initialSnapshot = useRef(JSON.stringify(startingForm));
   const [pestInfoOpen, setPestInfoOpen] = useState(false);
+  const pestOptions = canonicalPestOptions(pestTypes, f.pest);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
@@ -415,7 +418,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
       if (!isOnSiteEstimate && f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
       const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
       const isPartner = f.brand === "partner";
-      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: f.pest, price_options, pricing_mode: f.pricing_mode || "quoted", client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
+      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: canonicalPestName(f.pest), price_options, pricing_mode: f.pricing_mode || "quoted", client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
         executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
         executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
       if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
@@ -479,19 +482,20 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
         </>
       )}
       </>}
-      <datalist id="kd-pests-list">{pestTypes.map((p) => <option key={p.id} value={p.name} />)}</datalist>
       <datalist id="kd-sources-list">{sources.map((s) => <option key={s.id} value={s.name} />)}</datalist>
       <div className="kd-grid2">
         <Field label="Вид (вредитель)">
           <div style={{ display: "flex", gap: 8 }}>
-            <input list="kd-pests-list" value={f.pest} onChange={set("pest")} placeholder="Тараканы" style={{ flex: 1 }} />
+            {pestOptions.length > 0
+              ? <select value={f.pest} onChange={set("pest")} style={{ flex: 1 }}><option value="" disabled>Выбери из справочника</option>{pestOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>
+              : <input value={f.pest} onChange={set("pest")} placeholder="Тараканы" style={{ flex: 1 }} />}
             <button type="button" className="kd-btn ghost" title="Информация по вредителю" onClick={() => setPestInfoOpen((v) => !v)} style={{ minWidth: 46, padding: "0 12px" }}><Info size={17} /></button>
           </div>
         </Field>
         <Field label="Источник"><input list="kd-sources-list" value={f.source} onChange={set("source")} placeholder="OLX" /></Field>
       </div>
       {pestInfoOpen && (() => {
-        const g = pestGuide[(f.pest || "").trim()] || null;
+        const g = pestGuide[(f.pest || "").trim()] || Object.entries(pestGuide).find(([name]) => pestNamesMatch(name, f.pest))?.[1] || null;
         return (
           <div className="kd-notebox" style={{ marginBottom: 12 }}>
             {!f.pest ? "Сначала выбери вид вредителя." : !g ? (

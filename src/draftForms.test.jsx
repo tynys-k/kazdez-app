@@ -103,6 +103,16 @@ describe("report drafts and submission failures", () => {
 });
 
 describe("job form save recovery", () => {
+  it("uses one canonical pest option and saves the canonical name", async () => {
+    const initial = jobToForm({ ...job, pest: "Клопы", type: "Первичная", client_phone: "+77010000000", price_options: [{ label: "Стоимость", amount: 10000 }] });
+    const onSave = vi.fn().mockResolvedValue(true);
+    await act(async () => root.render(<JobFormModal draftOwnerId={ownerId} initial={initial} title="Изменить заявку" submitLabel="Сохранить" pestTypes={[{ id: "1", name: "Клопы" }, { id: "2", name: "клопы" }, { id: "3", name: "Постельные Клопы" }, { id: "4", name: "Тараканы" }]} onSave={onSave} onClose={vi.fn()} />));
+    expect(field("Вид (вредитель)").tagName).toBe("SELECT");
+    expect([...field("Вид (вредитель)").options].map((option) => option.value)).toEqual(["", "Постельные клопы", "Тараканы"]);
+    await click("Сохранить");
+    expect(onSave.mock.calls[0][0].pest).toBe("Постельные клопы");
+  });
+
   it("reenables the form after a thrown save and warns about an uncertain result", async () => {
     const initial = jobToForm({ ...job, type: "Первичная", client_phone: "+77010000000", price_options: [{ label: "Стоимость", amount: 10000 }] });
     const onSave = vi.fn().mockRejectedValue(new Error("network"));

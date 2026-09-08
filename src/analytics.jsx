@@ -1,40 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { BarChart3, BookOpen, CalendarRange, ExternalLink, Megaphone, Target } from "lucide-react";
 import { SEASONALITY_DATA } from "./seasonalityData";
+import { canonicalPestName } from "./pestNormalization";
 
 const MONTHS_SHORT = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
 const EXCLUDED_VISITS = new Set(["guarantee", "control"]);
 
 const money = (value) => `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.round(Number(value) || 0))} ₸`;
 const normalize = (value) => String(value || "").trim().toLocaleLowerCase("ru-RU");
-const PEST_ALIASES = new Map([
-  ["клоп", "Постельные клопы"], ["клопы", "Постельные клопы"],
-  ["постельный клоп", "Постельные клопы"], ["постельные клопы", "Постельные клопы"],
-  ["таракан", "Тараканы"], ["тараканы", "Тараканы"],
-  ["муравей", "Муравьи"], ["муравьи", "Муравьи"],
-  ["блоха", "Блохи"], ["блохи", "Блохи"],
-  ["оса", "Осы"], ["осы", "Осы"],
-  ["крыса", "Крысы"], ["крысы", "Крысы"],
-  ["мышь", "Мыши"], ["мыши", "Мыши"],
-  ["грызун", "Грызуны"], ["грызуны", "Грызуны"],
-  ["комар", "Комары"], ["комары", "Комары"],
-  ["муха", "Мухи"], ["мухи", "Мухи"],
-  ["голубиный клещ", "Голубиные клещи"], ["голубиные клещи", "Голубиные клещи"],
-  ["насекомое", "Насекомые"], ["насекомые", "Насекомые"],
-]);
-
-export function canonicalPestName(value) {
-  const original = String(value || "").trim().replace(/\s+/g, " ");
-  if (!original) return "Не указан";
-  const key = normalize(original).replace(/ё/g, "е");
-  if (PEST_ALIASES.has(key)) return PEST_ALIASES.get(key);
-  const parts = key.split(/\s*(?:\+|\/|,|\sи\s)\s*/).filter(Boolean);
-  if (parts.length > 1 && parts.every((part) => PEST_ALIASES.has(part))) {
-    return [...new Set(parts.map((part) => PEST_ALIASES.get(part)))].join(" + ");
-  }
-  return original.charAt(0).toLocaleUpperCase("ru-RU") + original.slice(1);
-}
-
 export function realDemandJobs(jobs) {
   return (jobs || []).filter((job) => job.status === "done" && !EXCLUDED_VISITS.has(job.visit_kind));
 }
