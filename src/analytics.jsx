@@ -7,6 +7,33 @@ const EXCLUDED_VISITS = new Set(["guarantee", "control"]);
 
 const money = (value) => `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.round(Number(value) || 0))} ₸`;
 const normalize = (value) => String(value || "").trim().toLocaleLowerCase("ru-RU");
+const PEST_ALIASES = new Map([
+  ["клоп", "Постельные клопы"], ["клопы", "Постельные клопы"],
+  ["постельный клоп", "Постельные клопы"], ["постельные клопы", "Постельные клопы"],
+  ["таракан", "Тараканы"], ["тараканы", "Тараканы"],
+  ["муравей", "Муравьи"], ["муравьи", "Муравьи"],
+  ["блоха", "Блохи"], ["блохи", "Блохи"],
+  ["оса", "Осы"], ["осы", "Осы"],
+  ["крыса", "Крысы"], ["крысы", "Крысы"],
+  ["мышь", "Мыши"], ["мыши", "Мыши"],
+  ["грызун", "Грызуны"], ["грызуны", "Грызуны"],
+  ["комар", "Комары"], ["комары", "Комары"],
+  ["муха", "Мухи"], ["мухи", "Мухи"],
+  ["голубиный клещ", "Голубиные клещи"], ["голубиные клещи", "Голубиные клещи"],
+  ["насекомое", "Насекомые"], ["насекомые", "Насекомые"],
+]);
+
+export function canonicalPestName(value) {
+  const original = String(value || "").trim().replace(/\s+/g, " ");
+  if (!original) return "Не указан";
+  const key = normalize(original).replace(/ё/g, "е");
+  if (PEST_ALIASES.has(key)) return PEST_ALIASES.get(key);
+  const parts = key.split(/\s*(?:\+|\/|,|\sи\s)\s*/).filter(Boolean);
+  if (parts.length > 1 && parts.every((part) => PEST_ALIASES.has(part))) {
+    return [...new Set(parts.map((part) => PEST_ALIASES.get(part)))].join(" + ");
+  }
+  return original.charAt(0).toLocaleUpperCase("ru-RU") + original.slice(1);
+}
 
 export function realDemandJobs(jobs) {
   return (jobs || []).filter((job) => job.status === "done" && !EXCLUDED_VISITS.has(job.visit_kind));
@@ -16,7 +43,7 @@ export function buildInternalSeasonality(jobs, year, pest = "all") {
   const demand = realDemandJobs(jobs).filter((job) => {
     const date = String(job.scheduled_date || job.reported_at || "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number(date.slice(0, 4)) !== Number(year)) return false;
-    return pest === "all" || normalize(job.pest) === normalize(pest);
+    return pest === "all" || canonicalPestName(job.pest) === canonicalPestName(pest);
   });
   const months = Array.from({ length: 12 }, (_, month) => ({ month, jobs: 0, revenue: 0 }));
   const byPest = new Map();
@@ -26,16 +53,18 @@ export function buildInternalSeasonality(jobs, year, pest = "all") {
     const revenue = Number(job.report_paid) || 0;
     months[month].jobs += 1;
     months[month].revenue += revenue;
-    const name = String(job.pest || "Не указан").trim() || "Не указан";
-    const row = byPest.get(name) || { name, jobs: 0, revenue: 0, months: Array(12).fill(0) };
+    const originalName = String(job.pest || "Не указан").trim() || "Не указан";
+    const name = canonicalPestName(originalName);
+    const row = byPest.get(name) || { name, jobs: 0, revenue: 0, months: Array(12).fill(0), variants: new Set() };
     row.jobs += 1;
     row.revenue += revenue;
     row.months[month] += 1;
+    row.variants.add(originalName);
     byPest.set(name, row);
   }
   const pests = [...byPest.values()].map((row) => {
     const peak = Math.max(...row.months);
-    return { ...row, avg: row.jobs ? Math.round(row.revenue / row.jobs) : 0, peakMonth: peak ? row.months.indexOf(peak) : null };
+    return { ...row, variants: [...row.variants].sort(), avg: row.jobs ? Math.round(row.revenue / row.jobs) : 0, peakMonth: peak ? row.months.indexOf(peak) : null };
   }).sort((a, b) => b.jobs - a.jobs || b.revenue - a.revenue);
   const totalRevenue = demand.reduce((sum, job) => sum + (Number(job.report_paid) || 0), 0);
   const bestMonth = months.reduce((best, row) => row.jobs > best.jobs ? row : best, months[0]);
@@ -106,6 +135,7 @@ function InternalAnalytics({ jobs }) {
   const maxJobs = Math.max(1, ...stats.months.map((row) => row.jobs));
   const firstDate = allDemand.map((job) => String(job.scheduled_date || job.reported_at || "").slice(0, 10)).filter(Boolean).sort()[0];
   const lastDate = allDemand.map((job) => String(job.scheduled_date || job.reported_at || "").slice(0, 10)).filter(Boolean).sort().at(-1);
+  const mergedPests = allForYear.pests.filter((row) => row.variants.length > 1);
 
   return <div className="kd-stage2">
     <div className="kd-analytics-toolbar kd-card">
@@ -139,6 +169,7 @@ function InternalAnalytics({ jobs }) {
 
     <section className="kd-card">
       <div className="kd-stage2head"><div><div className="kd-title">Что заказывают чаще</div><div className="kd-muted">Нажми на вид работы, чтобы увидеть только его сезон.</div></div><BarChart3 size={20} /></div>
+      {mergedPests.length > 0 && <div className="kd-analytics-merged"><strong>Одинаковые названия объединены</strong>{mergedPests.map((row) => <span key={row.name}>{row.variants.join(" / ")} → <b>{row.name}</b></span>)}</div>}
       {allForYear.pests.length ? <HorizontalBars rows={allForYear.pests.slice(0, 12).map((row) => ({ ...row, label: row.name }))} valueKey="jobs" /> : <div className="kd-empty">За выбранный год выполненных работ пока нет.</div>}
       {allForYear.pests.length > 0 && <div className="kd-analytics-pest-buttons">{allForYear.pests.slice(0, 12).map((row) => <button className={pest === row.name ? "on" : ""} key={row.name} onClick={() => setPest(row.name)}>{row.name}<span>{row.jobs}</span></button>)}</div>}
     </section>
