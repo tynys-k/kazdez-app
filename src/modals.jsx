@@ -7,7 +7,7 @@ import { createReportRequestId } from "./reportSubmission";
 import { createFinancialRequestId } from "./financialPosting";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
-import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, addressPlain, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -59,7 +59,7 @@ function PartnerOrigin({ name, compact = false }) {
   );
 }
 
-function JobCard({ job, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete }) {
+function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete }) {
   const st = STATUS[job.status] || STATUS.new;
   const stageKey = jobWorkStage(job);
   const stage = WORK_STAGE[stageKey];
@@ -70,9 +70,20 @@ function JobCard({ job, onObject, blocked, isAdmin, assignedName, partnerName, p
   const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
   const mapUrl = yandexMapUrl(job.address);
   const whatsappUrl = roleWhatsappUrl(job, isAdmin);
+  if (compact) return (
+    <button type="button" className="kd-done-row" onClick={onExpand} aria-label={`Открыть заявку ${job.id}`}>
+      <span className="kd-done-address">{addressPlain(job.address) || "Адрес не указан"}</span>
+      <span data-label="Дата">{isoToRu(job.scheduled_date) || "—"}</span>
+      <span data-label="Заявка">№ {String(job.order_id || job.id || "").slice(0, 8)}</span>
+      <strong data-label="Сумма">{fmt(job.report_paid)} ₸</strong>
+      <span data-label="Телефон">{job.client_phone || "—"}</span>
+      <span className="kd-brandtag">{brandLabel}</span>
+      <ChevronRight size={17} className="kd-done-open" />
+    </button>
+  );
   return (
     <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
-      <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><div className="kd-cardbadges"><span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>{stageKey !== job.status && <span className="kd-badge subtle" style={{ color: st.color, background: st.bg }}>{st.label}</span>}</div></div>
+      <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><div className="kd-cardbadges">{onCollapse && <button type="button" className="kd-btn ghost sm" onClick={onCollapse}>Свернуть</button>}<span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>{stageKey !== job.status && <span className="kd-badge subtle" style={{ color: st.color, background: st.bg }}>{st.label}</span>}</div></div>
       <div className="kd-meta">
         <span className="kd-brandtag">{brandLabel}</span>
         <span>{job.type}</span><span>·</span><span className="kd-datetimetag">{isoToRu(job.scheduled_date) || "без даты"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
@@ -3839,13 +3850,13 @@ function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, on
 
   return (
     <div className="kd-overlay" onClick={onClose}>
-      <div className="kd-modal" style={{ maxWidth: view === "table" ? 900 : 760, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+      <div className="kd-modal kd-offcalendar" style={{ maxWidth: view === "table" ? 900 : 760, width: "100%" }} onClick={(e) => e.stopPropagation()}>
         <div className="kd-modal-head">
           <h3>🌴 Выходные сотрудников</h3>
           <button className="kd-x" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="kd-modal-body">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
+          <div className="kd-offcalendar-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button className="kd-arrow" onClick={prev}><ChevronLeft size={18} /></button>
               <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 17, minWidth: 150, textAlign: "center" }}>{MONTHS[ym.m]} {ym.y}</div>
@@ -3861,20 +3872,21 @@ function OffCalendarModal({ techs, daysOff, personName, defaultDate, onClose, on
           </div>
 
           {view === "calendar" && <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 6 }}>
+          <div className="kd-offcalendar-week" style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 6 }}>
             {WD.map((w, i) => (
               <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, letterSpacing: ".4px", color: i >= 5 ? "var(--rust)" : "var(--muted)", textTransform: "uppercase" }}>{w}</div>
             ))}
           </div>
 
           {weeks.map((week, wi) => (
-            <div key={wi} style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 6 }}>
+            <div className="kd-offcalendar-week" key={wi} style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 6 }}>
               {week.map((cell, ci) => {
-                if (!cell) return <div key={ci} style={{ ...cellStyle, background: "transparent", border: "1px solid transparent", cursor: "default" }} />;
+                if (!cell) return <div className="kd-offcalendar-cell" key={ci} style={{ ...cellStyle, background: "transparent", border: "1px solid transparent", cursor: "default" }} />;
                 const isToday = cell.iso === todayIso;
                 return (
                   <div
                     key={ci}
+                    className="kd-offcalendar-cell"
                     onClick={onPickDay ? () => onPickDay(cell.iso) : undefined}
                     style={{ ...cellStyle, borderColor: isToday ? "var(--primary)" : "var(--line)", boxShadow: isToday ? "0 0 0 1px var(--primary), 0 6px 18px -10px var(--em-glow)" : "none" }}
                   >

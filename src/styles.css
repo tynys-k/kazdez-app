@@ -548,6 +548,22 @@ body{
 .kd-tluntimed{position:relative;z-index:4;padding:4px;}
 .kd-tlchip{display:block;width:100%;text-align:left;background:var(--surface-sunk);border:1px dashed var(--line-hi);border-radius:8px;padding:6px 9px;font:inherit;font-size:12px;font-weight:700;color:var(--ink-soft);cursor:pointer;margin-bottom:4px;}
 .kd-tldate{font:inherit;font-weight:600;color:var(--ink);padding:7px 9px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);min-height:38px;color-scheme:dark;}
+.kd-schedule-mobile{display:none;}
+.kd-schedule-row{width:100%;display:grid;grid-template-columns:92px minmax(0,1fr) auto;align-items:center;gap:10px;padding:11px 12px;border:0;border-bottom:1px solid var(--line-soft);background:transparent;color:var(--ink);font:inherit;text-align:left;cursor:pointer;}
+.kd-schedule-row:last-child{border-bottom:0;}.kd-schedule-row>strong{font-family:var(--font-mono);font-size:12px;color:var(--primary-d);}.kd-schedule-row>span{min-width:0;}.kd-schedule-row b,.kd-schedule-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.kd-schedule-row b{font-size:13px;}.kd-schedule-row small{margin-top:2px;color:var(--muted);font-size:11px;font-weight:600;}
+
+/* Быстрый выбор вместо длинной прокрутки склада и сотрудников. */
+.kd-stock-picker,.kd-team-picker{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,360px);align-items:center;gap:12px;}
+.kd-stock-picker select,.kd-team-picker select{width:100%;min-height:40px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);color:var(--ink);padding:8px 10px;font:inherit;}
+.kd-stock-index,.kd-team-index{grid-column:1 / -1;display:flex;gap:7px;overflow-x:auto;padding-bottom:3px;scrollbar-width:thin;}
+.kd-stock-index button,.kd-team-index button{display:flex;align-items:center;gap:7px;flex:0 0 auto;border:1px solid var(--line);border-radius:999px;background:var(--surface-sunk);color:var(--ink-soft);padding:7px 11px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;}
+.kd-stock-index button.on,.kd-team-index button.on{border-color:var(--primary);background:var(--primary-tint);color:var(--primary-d);}.kd-stock-index button span{color:var(--rust);font-size:10px;}
+.kd-team-index .kd-tech-avatar{width:23px;height:23px;font-size:10px;}
+
+/* Выполненные заявки: одна строка — одна заявка, подробности только после клика. */
+.kd-done-filters{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;}
+.kd-done-row{width:100%;display:grid;grid-template-columns:minmax(180px,1.8fr) 100px 110px 100px 145px 100px 20px;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink);font:inherit;text-align:left;cursor:pointer;box-shadow:var(--shadow-card);}
+.kd-done-row:hover{border-color:rgba(52,211,153,.35);}.kd-done-address{font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.kd-done-row>span:not(.kd-done-address):not(.kd-brandtag),.kd-done-row>strong{font-size:12px;}.kd-done-row>strong{font-family:var(--font-mono);text-align:right;}.kd-done-open{color:var(--muted);}
 
 /* ===================== DRIVE CARDS ===================== */
 .kd-drivecard{display:flex;align-items:center;gap:14px;padding:16px 17px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);text-decoration:none;color:var(--ink);box-shadow:var(--shadow-card);transition:box-shadow .16s ease,border-color .16s ease,transform .05s ease;}
@@ -761,6 +777,14 @@ body{
   .kd-followlist>div,.kd-upsellgrid>div{align-items:flex-start;flex-direction:column;}
   .kd-followlist .actions,.kd-upsellgrid .actions{justify-content:flex-start;width:100%;}
   .kd-ranktable{margin:0 -4px;}
+  .kd-schedule-desktop{display:none;}
+  .kd-schedule-mobile{display:block;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);overflow:hidden;}
+  .kd-schedule-toolbar{align-items:flex-start;gap:7px;}.kd-schedule-toolbar>.kd-title{width:100%;font-size:15px!important;}.kd-schedule-toolbar .kd-tabactions{width:100%;display:grid;grid-template-columns:36px 1fr 36px 1.4fr;gap:5px;}.kd-schedule-toolbar .kd-arrow{width:36px;height:36px;}.kd-schedule-toolbar .kd-btn,.kd-schedule-toolbar .kd-tldate{min-height:36px;height:36px;padding:5px 7px;font-size:11px;}.kd-schedule-toolbar .kd-tabactions>.kd-btn:nth-last-child(-n+2){grid-column:span 2;}.kd-schedule-off{padding:7px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;}
+  .kd-schedule-row{grid-template-columns:72px minmax(0,1fr) auto;padding:9px 10px;}.kd-schedule-row>strong{font-size:11px;}
+  .kd-stock-picker,.kd-team-picker{grid-template-columns:1fr;padding:14px;gap:9px;}.kd-stock-picker select,.kd-team-picker select{grid-column:1;}.kd-stock-index,.kd-team-index{grid-column:1;margin:0 -2px;}.kd-stock-index button,.kd-team-index button{padding:6px 9px;font-size:11px;}
+  .kd-done-filters{align-items:stretch;flex-direction:column;}.kd-done-filters .kd-techselect{width:100%;}
+  .kd-done-row{grid-template-columns:minmax(0,1fr) auto auto;gap:5px 10px;padding:10px 11px;}.kd-done-address{grid-column:1 / 3;font-size:13px;}.kd-done-row>span[data-label="Дата"]{grid-column:1;}.kd-done-row>span[data-label="Заявка"]{grid-column:2;}.kd-done-row>strong[data-label="Сумма"]{grid-column:3;grid-row:2;text-align:right;}.kd-done-row>span[data-label="Телефон"]{grid-column:1 / 3;color:var(--muted);}.kd-done-row>.kd-brandtag{grid-column:3;grid-row:3;justify-self:end;}.kd-done-open{grid-column:3;grid-row:1;}.kd-card.done{padding:14px 15px;}.kd-card.done .kd-card-foot{padding-top:10px;margin-bottom:10px;gap:4px;}.kd-card.done .kd-quickactions{gap:5px;}.kd-card.done .kd-actions{gap:5px;}
+  .kd-offcalendar .kd-modal-body{padding:12px;}.kd-offcalendar-toolbar{margin-bottom:8px!important;}.kd-offcalendar-toolbar>div{width:100%;justify-content:center!important;}.kd-offcalendar-week{gap:3px!important;margin-bottom:3px!important;}.kd-offcalendar-cell{min-height:48px!important;padding:3px!important;border-radius:7px!important;}.kd-offcalendar-cell>div:last-child span{padding:1px 3px!important;font-size:0!important;}.kd-offcalendar-cell>div:last-child span>span:first-child{width:7px!important;height:7px!important;}.kd-offcalendar-cell>div:last-child span>span:last-child{display:none;}
 }
 
 /* ===================== STAGE 3 · ONE WINDOW ===================== */
