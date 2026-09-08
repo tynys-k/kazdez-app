@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
@@ -1445,19 +1445,17 @@ function Dashboard({ session, profile }) {
     setModal({ kind: "reportSuccess" }); reloadJobs(); return true;
   }
   async function markTransferPaid(job, accountId, paidDate) {
-    const { error } = await supabase.from("jobs").update({ transfer_paid: true, transfer_account_id: accountId || null, transfer_paid_date: paidDate || new Date().toISOString().slice(0, 10) }).eq("id", job.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    if (accountId) {
-      const exists = moves.some((m) => m.source === "job_transfer" && m.ref_id === job.id);
-      if (!exists) {
-        await supabase.from("money_moves").insert({
-          account_id: accountId, direction: "income", amount: Number(job.report_transfer) || 0, move_date: paidDate || new Date().toISOString().slice(0, 10),
-          note: `Оплата перечислением: ${job.pest} · ${job.address}`, source: "job_transfer", ref_id: job.id, created_by: session.user.id,
-        });
-      }
+    if (!accountId || !paidDate) return "Выбери счёт и фактическую дату поступления денег.";
+    const rpcName = "post_job_transfer_payment_atomic";
+    const { error } = await supabase.rpc(rpcName, { p_job_id: job.id, p_account_id: accountId, p_paid_on: paidDate });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное проведение оплаты ещё не включено. Выполни supabase/${ATOMIC_JOB_RECEIPTS_MIGRATION} — заявка не была изменена.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
     await logAction("Оплата", `Перечисление оплачено ${fmt(job.report_transfer)} ₸${accountId ? " → " + (accountById(accountId)?.name || "") : ""}`);
-    setModal(null); showToast("Оплата зачтена"); reloadMoney();
+    setModal(null); showToast("Оплата зачтена"); load(["jobs", "accounts", "money_moves"]); return null;
   }
   async function saveTechExtras(job, bonus, travel, helpers = []) {
     if (blockedByClosedPeriod(job.scheduled_date)) return;
@@ -1480,32 +1478,21 @@ function Dashboard({ session, profile }) {
   // П.3: мы отдали заявку партнёру; он выполнил — админ фиксирует сумму и как прошла оплата
   async function markExecutorDone(job, fullAmount, settlement, accountId, payDate) {
     const amount = Number(fullAmount) || 0;
-    const sharePct = Number(job.executor_share_pct) || 0;
-    const ourPart = Math.round(amount * (100 - sharePct) / 100);
-    const patch = {
-      status: "done", reported_at: new Date().toISOString(),
-      executor_settlement: settlement,
-      report_method: settlement === "qr_full" ? "QR (за партнёра)" : "Перевод нашей доли",
-      // qr_full: клиент оплатил нам ВСЮ сумму по QR → report_qr = вся сумма (авто-зачисление на Kaspi Pay), должны партнёру его долю
-      // net_to_us: партнёр перевёл нам НАШУ долю → выручка = наша доля, долей не должны
-      report_paid: settlement === "qr_full" ? amount : ourPart,
-      report_qr: settlement === "qr_full" ? amount : 0,
-      report_cash: 0,
-      executor_paid: settlement === "qr_full" ? false : true,
-    };
-    const { error } = await supabase.from("jobs").update(patch).eq("id", job.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    if (settlement === "net_to_us" && accountId) {
-      const exists = moves.some((m) => m.source === "executor_net" && m.ref_id === job.id);
-      if (!exists) {
-        await supabase.from("money_moves").insert({
-          account_id: accountId, direction: "income", amount: ourPart, move_date: payDate || new Date().toISOString().slice(0, 10),
-          note: `Наша доля от партнёра-исполнителя: ${job.pest} · ${job.address}`, source: "executor_net", ref_id: job.id, created_by: session.user.id,
-        });
-      }
+    if (settlement === "net_to_us" && (!accountId || !payDate)) return "Для поступления нашей доли выбери счёт и дату.";
+    const rpcName = "complete_executor_job_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_job_id: job.id, p_full_amount: amount, p_settlement: settlement,
+      p_account_id: settlement === "net_to_us" ? accountId : null,
+      p_paid_on: settlement === "net_to_us" ? payDate : null,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное закрытие заявки ещё не включено. Выполни supabase/${ATOMIC_JOB_RECEIPTS_MIGRATION} — заявка не была изменена.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
     await logAction("Заявка", `Партнёр выполнил: ${job.pest} · ${fmt(amount)} ₸ · ${settlement === "qr_full" ? "QR нам, должны долю" : "получили нашу долю"}`);
-    setModal(null); showToast("Заявка закрыта"); load();
+    setModal(null); showToast("Заявка закрыта"); load(); return null;
   }
   async function toggleExecutorPaid(job, paid) {
     const { error } = await supabase.from("jobs").update({ executor_paid: paid }).eq("id", job.id);
