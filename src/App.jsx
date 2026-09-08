@@ -18,6 +18,7 @@ import { installGlobalErrorLogging, logClientError, setErrorActor } from "./erro
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
 import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
+import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -679,6 +680,13 @@ function Dashboard({ session, profile }) {
   const reloadPeople = () => load(["profiles", "tech_documents", "training_records", "employee_events", "safety_acknowledgements", "tech_days_off"]);
 
   useEffect(() => { load(); }, []);
+  // Подготавливаем тяжёлый PDF-модуль после первого экрана. Начальная загрузка
+  // остаётся быстрой, а акт не зависит от того, выкладывали ли новую версию
+  // приложения, пока сотрудник держал вкладку открытой.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { preloadPdfDocuments(); }, 1500);
+    return () => window.clearTimeout(timer);
+  }, []);
   // Журнал и корзина подтягиваются при первом заходе в раздел, а не при
   // каждом открытии приложения.
   useEffect(() => { if (tab === "journal" || tab === "trash") loadJournalData(); }, [tab]);
@@ -911,7 +919,7 @@ function Dashboard({ session, profile }) {
   // сделать гарантийный сертификат по заявке (реальные данные)
   async function certifyJob(job) {
     try {
-      const [documentSettings, { generateCertificate }] = await Promise.all([loadCompanyImages(), import("./pdfDocs")]);
+      const [documentSettings, { generateCertificate }] = await Promise.all([loadCompanyImages(), loadPdfDocuments()]);
       const yr = new Date().getFullYear();
       const num = `ГС-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
       generateCertificate({
@@ -929,13 +937,13 @@ function Dashboard({ session, profile }) {
       }, documentSettings);
     } catch (error) {
       logClientError({ kind: "handled", place: "certifyJob", message: error?.message || String(error), stack: error?.stack });
-      showToast("Не удалось сформировать сертификат");
+      showToast(documentFailureMessage(error, "Сертификат"));
     }
   }
   // сделать акт о проведении дезработ (для первичной обработки — гарантия после второй)
   async function certifyAct(job) {
     try {
-      const [documentSettings, { generateAct }] = await Promise.all([loadCompanyImages(), import("./pdfDocs")]);
+      const [documentSettings, { generateAct }] = await Promise.all([loadCompanyImages(), loadPdfDocuments()]);
       const yr = new Date().getFullYear();
       const num = `АКТ-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
       const chems = (job.chemicals || []).map((l) => {
@@ -957,7 +965,7 @@ function Dashboard({ session, profile }) {
       }, documentSettings);
     } catch (error) {
       logClientError({ kind: "handled", place: "certifyAct", message: error?.message || String(error), stack: error?.stack });
-      showToast("Не удалось сформировать акт");
+      showToast(documentFailureMessage(error, "Акт"));
     }
   }
   const techExtrasTotal = (techId) => jobs.filter((j) => j.assigned_to === techId).reduce((s, j) => s + (Number(j.tech_bonus) || 0) + (Number(j.tech_travel) || 0), 0);

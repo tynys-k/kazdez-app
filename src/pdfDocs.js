@@ -33,6 +33,17 @@ function addDays(iso, n) {
   return `${dd}.${mm}.${d.getFullYear()}`;
 }
 
+// pdfmake supports PNG/JPEG data URLs. Old or manually edited settings may
+// contain an empty/truncated value; omit only that decoration instead of
+// failing the entire customer document.
+export function safePdfImage(value) {
+  if (typeof value !== "string") return null;
+  const match = value.match(/^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  const payload = match[2].replace(/\s/g, "");
+  return payload.length >= 16 && payload.length % 4 === 0 ? `${value.slice(0, value.indexOf(",") + 1)}${payload}` : null;
+}
+
 // ── реквизиты компании из settings ──
 function company(settings = {}) {
   return {
@@ -41,8 +52,8 @@ function company(settings = {}) {
     address: settings.company_address || "—",
     phone: settings.company_phone || "—",
     director: settings.company_director || "Директор",
-    stamp: settings.company_stamp || null,       // data-URL картинки печати
-    signature: settings.company_signature || null, // data-URL картинки подписи
+    stamp: safePdfImage(settings.company_stamp),       // data-URL картинки печати
+    signature: safePdfImage(settings.company_signature), // data-URL картинки подписи
   };
 }
 
