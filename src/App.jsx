@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
@@ -2058,17 +2058,17 @@ function Dashboard({ session, profile }) {
     showToast("Удалено"); load();
   }
   async function convertLeadToJob(lead) {
-    // создаём заявку из лида: телефон, адрес, источник
-    const payload = {
-      type: "Первичная", scheduled_date: null, address: lead.address || "", source: lead.source || "",
-      client_phone: lead.phone || "+7 ", brand: "KazDez", guarantee_months: defaultGuarantee,
-      pest: "", price_options: [], note: lead.name ? `Клиент: ${lead.name}` : null, created_by: session.user.id,
-    };
-    const { data, error } = await supabase.from("jobs").insert(payload).select().single();
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    // помечаем лид как сконвертированный + двигаем в финальную стадию, если есть
-    const finalStage = leadStages.find((s) => s.is_final && !s.is_lost);
-    await supabase.from("leads").update({ converted_job_id: data.id, stage_id: finalStage?.id || lead.stage_id, updated_at: new Date().toISOString() }).eq("id", lead.id);
+    const rpcName = "convert_lead_to_job_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_lead_id: lead.id,
+      p_guarantee_months: defaultGuarantee,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное создание заявки из лида ещё не включено. Выполни supabase/${ATOMIC_LEAD_CONVERSION_MIGRATION} — заявка не была создана.`
+        : error.message;
+      showToast("Ошибка: " + message); return;
+    }
     await ensureCatalog("client_sources", sources, lead.source);
     await logAction("CRM", `Лид «${lead.name || lead.phone || "?"}» → создана заявка`);
     setModal(null); showToast("Заявка создана из лида"); setTab("jobs"); load();
