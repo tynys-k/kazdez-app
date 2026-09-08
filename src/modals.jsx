@@ -3443,13 +3443,20 @@ function MktChannelModal({ item, sources, onClose, onSave }) {
 }
 
 function MktTopupModal({ channel, accounts, onClose, onSave }) {
+  const requestIdRef = useRef(createFinancialRequestId());
   const [amount, setAmount] = useState(String(channel?.monthly_plan || ""));
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [accId, setAccId] = useState("");
+  const [accId, setAccId] = useState(accounts[0]?.id || "");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const ok = Number(amount) > 0 && date;
-  async function save() { setSaving(true); await onSave(Number(amount) || 0, date, accId || null, note.trim() || null); setSaving(false); }
+  const [problem, setProblem] = useState("");
+  const ok = Number(amount) > 0 && date && accId;
+  async function save() {
+    setSaving(true); setProblem("");
+    const message = await onSave(Number(amount) || 0, date, accId || null, note.trim() || null, requestIdRef.current);
+    if (message) setProblem(message);
+    setSaving(false);
+  }
   return (
     <ModalShell title={`Пополнение · ${channel.name}`} onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
@@ -3459,9 +3466,10 @@ function MktTopupModal({ channel, accounts, onClose, onSave }) {
         <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="200000" /></Field>
         <Field label="Дата пополнения"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
       </div>
-      <Field label="С какого счёта (необязательно)"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— не списывать со счёта —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
-      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 12 }}>Если выберешь счёт — сумма спишется с него как расход в «Финансах».</div>
+      <Field label="С какого счёта"><select value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— выбери счёт —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+      <div className="kd-muted" style={{ marginTop: -6, marginBottom: 12 }}>Сумма спишется с выбранного счёта как расход в «Финансах».</div>
       <Field label="Комментарий"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="напр.: первая половина месяца" /></Field>
+      {problem && <div className="kd-err">{problem}</div>}
     </ModalShell>
   );
 }

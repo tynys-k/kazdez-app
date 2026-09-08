@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -2090,25 +2090,46 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Сохранено"); load();
   }
   async function removeMktChannel(ch) {
-    await supabase.from("mkt_channels").delete().eq("id", ch.id);
+    const rpcName = "delete_marketing_channel_atomic";
+    const { error } = await supabase.rpc(rpcName, { p_channel_id: ch.id });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное удаление рекламы ещё не включено. Выполни supabase/${ATOMIC_MARKETING_SPEND_MIGRATION} — канал не был удалён.`
+        : error.message;
+      showToast("Ошибка: " + message); return;
+    }
     await logAction("Маркетинг", `Канал удалён: ${ch.name}`);
     showToast("Удалено"); load();
   }
-  async function addMktTopup(channelId, amount, date, accountId, note) {
-    const { error } = await supabase.from("mkt_topups").insert({ channel_id: channelId, amount: Number(amount) || 0, topup_date: date, account_id: accountId || null, note: note || null, created_by: session.user.id });
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    // если указан счёт — списываем как расход (реклама уходит с реального счёта)
-    if (accountId) {
-      await supabase.from("money_moves").insert({
-        account_id: accountId, direction: "expense", amount: Number(amount) || 0, move_date: date,
-        note: `Реклама: ${(mktChannels.find((c) => c.id === channelId) || {}).name || ""}`, source: "manual", created_by: session.user.id,
-      });
+  async function addMktTopup(channelId, amount, date, accountId, note, requestId) {
+    if (!accountId || !date || !requestId) return "Выбери счёт и дату рекламного расхода.";
+    const rpcName = "post_marketing_spend_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_request_id: requestId,
+      p_channel_id: channelId,
+      p_amount: Number(amount) || 0,
+      p_spent_on: date,
+      p_account_id: accountId,
+      p_note: note || null,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасные рекламные расходы ещё не включены. Выполни supabase/${ATOMIC_MARKETING_SPEND_MIGRATION} — расход не был записан.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
     }
     await logAction("Маркетинг", `Пополнение ${fmt(amount)} ₸`);
-    setModal(null); showToast("Пополнение записано"); load();
+    setModal(null); showToast("Пополнение записано"); load(); return null;
   }
   async function removeMktTopup(t) {
-    await supabase.from("mkt_topups").delete().eq("id", t.id);
+    const rpcName = "delete_marketing_spend_atomic";
+    const { error } = await supabase.rpc(rpcName, { p_topup_id: t.id });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Безопасное удаление рекламы ещё не включено. Выполни supabase/${ATOMIC_MARKETING_SPEND_MIGRATION} — расход не был удалён.`
+        : error.message;
+      showToast("Ошибка: " + message); return;
+    }
     await logAction("Маркетинг", `Пополнение удалено: ${fmt(t.amount)} ₸`);
     showToast("Удалено"); load();
   }
@@ -5166,7 +5187,7 @@ function Dashboard({ session, profile }) {
                           <div className="kd-actions">
                             <button className="kd-btn primary sm" onClick={() => setModal({ kind: "mktTopup", channel: ch })}><Plus size={13} />Пополнил</button>
                             <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "mktChannel", item: ch })}><Pencil size={13} />Изменить</button>
-                            <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить канал «${ch.name}»? Пополнения тоже удалятся.`, () => removeMktChannel(ch))}><Trash2 size={13} /></button>
+                            <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить канал «${ch.name}»? Пополнения и связанные расходы по счетам тоже удалятся.`, () => removeMktChannel(ch))}><Trash2 size={13} /></button>
                           </div>
                           {!ch.source_key && <div className="kd-muted" style={{ marginTop: 6 }}>ROI не считается — не привязан источник. Укажи его в «Изменить», чтобы видеть отдачу.</div>}
                         </div>
@@ -6009,7 +6030,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
       {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} onClose={() => setModal(null)} onSave={saveLead} />}
       {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}
-      {modal?.kind === "mktTopup" && <MktTopupModal channel={modal.channel} accounts={accounts} onClose={() => setModal(null)} onSave={(amount, date, accId, note) => addMktTopup(modal.channel.id, amount, date, accId, note)} />}
+      {modal?.kind === "mktTopup" && <MktTopupModal channel={modal.channel} accounts={accounts} onClose={() => setModal(null)} onSave={(amount, date, accId, note, requestId) => addMktTopup(modal.channel.id, amount, date, accId, note, requestId)} />}
       {modal?.kind === "dayOff" && <DayOffModal techs={techs} defaultDate={modal.date || scheduleDate} daysOff={daysOff} personName={personName} onClose={() => setModal(null)} onAdd={addDayOff} onRemove={removeDayOff} />}
       {modal?.kind === "offCalendar" && <OffCalendarModal techs={techs} daysOff={daysOff} personName={personName} defaultDate={scheduleDate} onClose={() => setModal(null)} onPickDay={(iso) => setModal({ kind: "dayOff", date: iso })} />}
       {modal?.kind === "transferPay" && <TransferPayModal job={modal.job} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markTransferPaid(modal.job, accId, date)} />}
