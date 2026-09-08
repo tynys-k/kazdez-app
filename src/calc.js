@@ -10,6 +10,7 @@
 // расхождение с прежними числами — ошибка, а не улучшение.
 
 import { chemUnit, lineAmount, norm, pricePerBase } from "./shared";
+import { pestNamesMatch } from "./pestNormalization";
 
 // --- препараты по заявке -------------------------------------------------
 
@@ -1713,9 +1714,8 @@ export function discountReport(jobs = [], { inPeriod = () => true, threshold = 2
 // area_to = null означает «и больше»: верхняя ступень всегда открыта, иначе
 // заявка на 300 м² не попала бы ни в одну строку прайса.
 export function priceFor(pest, area, priceList = []) {
-  const key = norm(pest);
-  if (!key) return null;
-  const rows = priceList.filter((r) => norm(r.pest) === key);
+  if (!String(pest || "").trim()) return null;
+  const rows = priceList.filter((r) => pestNamesMatch(r.pest, pest));
   if (!rows.length) return null;
 
   const a = Number(area);

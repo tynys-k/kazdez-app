@@ -20,6 +20,7 @@ import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } fro
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { yandexRouteUrl } from "./routePlanning";
 import { AnalyticsTab } from "./analytics";
+import { canonicalPestName, pestNamesMatch } from "./pestNormalization";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -1034,9 +1035,9 @@ function Dashboard({ session, profile }) {
   }
 
   async function ensureCatalog(table, list, value) {
-    const v = (value || "").trim();
+    const v = table === "pest_types" ? canonicalPestName(value) : (value || "").trim();
     if (!v) return;
-    if (list.some((x) => norm(x.name) === norm(v))) return;
+    if (list.some((x) => table === "pest_types" ? pestNamesMatch(x.name, v) : norm(x.name) === norm(v))) return;
     await supabase.from(table).insert({ name: v });
   }
   // Цена по прайсу считается один раз, при оформлении, и дальше не
@@ -1775,8 +1776,9 @@ function Dashboard({ session, profile }) {
     showToast("Сохранено"); load();
   }
   async function addCatalogItem(table, name) {
-    const v = (name || "").trim();
+    const v = table === "pest_types" ? canonicalPestName(name) : (name || "").trim();
     if (!v) return;
+    if (table === "pest_types" && pestTypes.some((item) => pestNamesMatch(item.name, v))) { showToast("Такой вредитель уже есть в справочнике"); return; }
     const { error } = await supabase.from(table).insert({ name: v });
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Справочник", `Добавлено: ${v}`);

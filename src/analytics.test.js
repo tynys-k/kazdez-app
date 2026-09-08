@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildChannelPlan, buildExternalMonthPlan, buildInternalSeasonality, canonicalPestName, realDemandJobs } from "./analytics";
+import { buildChannelPlan, buildExternalMonthPlan, buildInternalSeasonality, realDemandJobs } from "./analytics";
+import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
 
 describe("seasonality analytics", () => {
   const jobs = [
@@ -32,6 +33,12 @@ describe("seasonality analytics", () => {
     expect(result.pests[0]).toMatchObject({ name: "Постельные клопы", jobs: 3, revenue: 36000 });
     expect(result.pests[0].variants).toEqual(["Клопы", "Постельные Клопы", "клопы"]);
     expect(result.pests[1]).toMatchObject({ name: "Постельные клопы + Тараканы", jobs: 1, revenue: 20000 });
+  });
+
+  it("builds one controlled option from duplicate catalog values", () => {
+    expect(canonicalPestOptions([{ name: "Клопы" }, { name: "клопы" }, { name: "Постельные Клопы" }, { name: "Тараканы" }]))
+      .toEqual(["Постельные клопы", "Тараканы"]);
+    expect(pestNamesMatch("Клопы", "Постельные клопы")).toBe(true);
   });
 
   it("keeps the external monthly budget fully allocated", () => {
