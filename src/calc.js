@@ -11,6 +11,7 @@
 
 import { chemUnit, lineAmount, norm, pricePerBase } from "./shared";
 import { pestNamesMatch } from "./pestNormalization";
+import { canonicalSourceKey, canonicalSourceName } from "./sourceNormalization";
 
 // --- препараты по заявке -------------------------------------------------
 
@@ -1180,14 +1181,14 @@ export function marketingPerJob(jobs = [], { topups = [], channels = [] } = {}) 
 
   const channelBySource = new Map();
   for (const ch of channels) {
-    const key = norm(ch.source_key);
+    const key = canonicalSourceKey(ch.source_key);
     if (key) channelBySource.set(key, ch.id);
   }
 
   const jobsByChannelMonth = new Map();
   for (const j of jobs) {
     if (j.status !== "done" || !j.scheduled_date) continue;
-    const chId = channelBySource.get(norm(j.source));
+    const chId = channelBySource.get(canonicalSourceKey(j.source));
     if (!chId) continue;
     const key = `${chId}|${monthOf(j.scheduled_date)}`;
     jobsByChannelMonth.set(key, (jobsByChannelMonth.get(key) || 0) + 1);
@@ -1195,7 +1196,7 @@ export function marketingPerJob(jobs = [], { topups = [], channels = [] } = {}) 
 
   return function forJob(job) {
     if (!job || job.status !== "done" || !job.scheduled_date) return 0;
-    const chId = channelBySource.get(norm(job.source));
+    const chId = channelBySource.get(canonicalSourceKey(job.source));
     if (!chId) return 0;
     const key = `${chId}|${monthOf(job.scheduled_date)}`;
     const count = jobsByChannelMonth.get(key) || 0;
@@ -1225,13 +1226,13 @@ export function channelEconomics(jobs = [], { topups = [], channels = [], inPeri
 
   const channelBySource = new Map();
   for (const ch of channels) {
-    const key = norm(ch.source_key);
+    const key = canonicalSourceKey(ch.source_key);
     if (key) channelBySource.set(key, String(ch.id));
   }
 
   for (const j of jobs) {
     if (j.status !== "done" || !inPeriod(j.scheduled_date)) continue;
-    const chId = channelBySource.get(norm(j.source));
+    const chId = channelBySource.get(canonicalSourceKey(j.source));
     if (!chId) continue;
     const row = rows.get(chId);
     if (!row) continue;
@@ -1343,8 +1344,9 @@ export function clientStats(jobs = [], { from = null, to = null, phoneKeyOf } = 
 
   const bySource = {};
   for (const c of cohort) {
-    const label = (c.source || "Не указан").trim() || "Не указан";
-    const row = (bySource[label] = bySource[label] || { label, clients: 0, returned: 0, revenue: 0 });
+    const label = canonicalSourceName(c.source) || "Не указан";
+    const key = canonicalSourceKey(label);
+    const row = (bySource[key] = bySource[key] || { label, clients: 0, returned: 0, revenue: 0 });
     row.clients += 1;
     if (c.jobs > 1) row.returned += 1;
     row.revenue += c.revenue;
