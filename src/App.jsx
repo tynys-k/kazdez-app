@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, ON_SITE_ESTIMATES_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, ON_SITE_ESTIMATES_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { yandexRouteUrl } from "./routePlanning";
@@ -2179,11 +2179,24 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Касание", `Завершено: ${item.phone} · ${result}`); showToast("Касание завершено"); reloadJobs();
   }
-  async function saveQualityCheck(job, payload, existing) {
-    const data = { ...payload, checked_by: session.user.id, updated_at: new Date().toISOString() };
-    const res = existing ? await supabase.from("quality_checks").update(data).eq("id", existing.id) : await supabase.from("quality_checks").upsert(data, { onConflict: "job_id" });
-    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
-    if (payload.result === "repeat" && !job.repeat_state) await supabase.from("jobs").update({ repeat_state: "on_repeat", repeat_since: new Date().toISOString() }).eq("id", job.id);
+  async function saveQualityCheck(job, payload) {
+    const rpcName = "save_quality_check_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_job_id: job.id,
+      p_quality: {
+        result: payload.result,
+        rating: payload.rating,
+        note: payload.note,
+        review_requested: payload.review_requested,
+        review_url: payload.review_url,
+      },
+    });
+    if (error) {
+      showToast(atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Сначала примени миграцию ${ATOMIC_QUALITY_CONTROL_MIGRATION} в Supabase`
+        : "Ошибка: " + error.message);
+      return;
+    }
     await logAction("Контроль качества", `${job.client_phone} · оценка ${payload.rating || "—"} · ${payload.result}`);
     setModal(null); showToast(payload.result === "repeat" ? "Сохранено и отправлено в «Повторы»" : "Контроль качества сохранён"); reloadJobs();
   }
@@ -6129,7 +6142,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "doc" && <DocModal doc={modal.doc} partners={partners} onClose={() => setModal(null)} onSave={saveDoc} />}
       {modal?.kind === "economics" && <JobEconomicsModal job={modal.job} economics={jobEconomics(modal.job)} onClose={() => setModal(null)} onSave={(payload) => saveJobEconomics(modal.job, payload)} />}
       {modal?.kind === "followup" && <FollowupModal followup={modal.followup} job={modal.job} lead={modal.lead} defaultKind={modal.defaultKind || "lost"} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveFollowup} />}
-      {modal?.kind === "quality" && <QualityModal job={modal.job} check={qualityByJob(modal.job.id)} defaultReviewUrl={settings.review_url || ""} onClose={() => setModal(null)} onSave={(payload, existing) => saveQualityCheck(modal.job, payload, existing)} />}
+      {modal?.kind === "quality" && <QualityModal job={modal.job} check={qualityByJob(modal.job.id)} defaultReviewUrl={settings.review_url || ""} onClose={() => setModal(null)} onSave={(payload) => saveQualityCheck(modal.job, payload)} />}
       {modal?.kind === "contract" && <ContractModal contract={modal.contract} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveContract} />}
       {confirmState && (
         <ConfirmModal message={confirmState.message} danger={confirmState.danger} confirmLabel={confirmState.confirmLabel}
