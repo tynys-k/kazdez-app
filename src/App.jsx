@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import SessionGate from "./SessionGate";
 import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
-import { insertCompatibleJob } from "./jobPersistence";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2,
   Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera,
@@ -16,7 +15,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_CREATION_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_CREATION_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_ORDER_VISITS_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { yandexRouteUrl } from "./routePlanning";
@@ -1257,14 +1256,6 @@ function Dashboard({ session, profile }) {
     || branches[0]?.id
     || null;
 
-  // Номер визита внутри заказа. Считаем по уже загруженным заявкам: заказ —
-  // это единицы визитов, а не тысячи, и лишний запрос к базе тут не нужен.
-  function nextVisitNo(orderId) {
-    if (!orderId) return 1;
-    const mine = jobs.filter((j) => String(j.order_id || "") === String(orderId));
-    return mine.reduce((max, j) => Math.max(max, Number(j.visit_no) || 0), 0) + 1;
-  }
-
   // Все визиты заказа по порядку. Заявка без заказа — заказ из одного визита:
   // так она не выпадает из карточки, пока перенос ещё не прогнали.
   function visitsOfOrder(job) {
@@ -1362,16 +1353,20 @@ function Dashboard({ session, profile }) {
   async function createRepeatJob(job) {
     // Повторный выезд — визит того же заказа, а не новая продажа. Иначе он
     // навсегда останется заявкой с нулевой выручкой и будет занижать чек.
-    const ins = await insertCompatibleJob(supabase, {
-      type: "Вторичная", scheduled_date: null, scheduled_time: "", address: job.address, floor: job.floor,
-      area: job.area, source: job.source, pest: job.pest, price_options: job.price_options,
-      client_phone: job.client_phone, guarantee_months: job.guarantee_months, status: "new", repeat_of: job.id,
-      object_id: job.object_id || null, branch_id: job.branch_id || null,
-      order_id: job.order_id || null, visit_no: nextVisitNo(job.order_id), visit_kind: "guarantee",
-      created_by: session.user.id,
+    const rpcName = "create_order_visit_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_origin_job_id: job.id,
+      p_kind: "guarantee",
+      p_request_id: null,
+      p_scheduled_date: null,
+      p_note: null,
     });
-    if (ins.error) { showToast("Ошибка: " + ins.error.message); return; }
-    await supabase.from("jobs").update({ repeat_state: "finished" }).eq("id", job.id);
+    if (error) {
+      showToast(atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Сначала примени миграцию ${ATOMIC_ORDER_VISITS_MIGRATION} в Supabase`
+        : "Ошибка: " + error.message);
+      return;
+    }
     await logAction("Повтор", `Создана повторная заявка · ${job.pest} · ${job.address}`);
     showToast("Повторная заявка создана"); reloadJobs();
   }
@@ -1380,20 +1375,20 @@ function Dashboard({ session, profile }) {
   // Раньше такого выезда не существовало как понятия — курс из двух обработок
   // приходилось заводить двумя несвязанными заявками, и заказ распадался.
   async function addVisit(job, payload) {
-    const orderId = job.order_id;
-    if (!orderId) { showToast("У заявки нет заказа — прогоните миграцию orders"); return "Нет заказа"; }
-    const { error } = await insertCompatibleJob(supabase, {
-      type: "Плановая", scheduled_date: payload.date || null, scheduled_time: "",
-      address: job.address, floor: job.floor, area: job.area, source: job.source, pest: job.pest,
-      client_phone: job.client_phone, contact_name: job.contact_name,
-      object_id: job.object_id || null, branch_id: job.branch_id || null,
-      guarantee_months: job.guarantee_months, status: "new",
-      // Цены нет намеренно: контрольный выезд уже оплачен в составе заказа.
-      price_options: [{ label: "Входит в заказ", amount: 0 }],
-      order_id: orderId, visit_no: nextVisitNo(orderId), visit_kind: "control",
-      note: payload.note || null, created_by: session.user.id,
+    const rpcName = "create_order_visit_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_origin_job_id: job.id,
+      p_kind: "control",
+      p_request_id: payload.request_id,
+      p_scheduled_date: payload.date || null,
+      p_note: payload.note || null,
     });
-    if (error) { showToast("Ошибка: " + error.message); return error.message; }
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Сначала примени миграцию ${ATOMIC_ORDER_VISITS_MIGRATION} в Supabase`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
+    }
     await logAction("Заказ", `Добавлен контрольный визит · ${job.pest || ""} · ${job.address}`);
     setModal(null); showToast("Визит добавлен"); reloadJobs();
     return null;
