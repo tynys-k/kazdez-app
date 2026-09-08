@@ -16,9 +16,10 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, ON_SITE_ESTIMATES_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
+import { yandexRouteUrl } from "./routePlanning";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -60,13 +61,6 @@ function yandexMapUrl(text) {
   if (coords) return `https://yandex.com/maps/?rtext=~${coords[1]},${coords[2]}&rtt=auto`;
   const clean = addressPlain(raw);
   return clean && clean !== "📍 точка на карте" ? `https://yandex.com/maps/?text=${encodeURIComponent(clean)}` : "https://yandex.com/maps/";
-}
-
-function yandexRouteUrl(addresses) {
-  const points = addresses.filter(Boolean).slice(0, 8);
-  if (!points.length) return "https://yandex.com/maps/routes/";
-  const rtext = points.length === 1 ? `~${points[0]}` : points.join("~");
-  return `https://yandex.com/maps/?rtext=${encodeURIComponent(rtext)}&rtt=auto`;
 }
 
 const NL = String.fromCharCode(10);
@@ -1049,6 +1043,7 @@ function Dashboard({ session, profile }) {
   // пересчитывается: прайс могут поменять, а сравнивать надо с той ценой, о
   // которой договаривались с клиентом.
   function quotedPriceFor(payload) {
+    if (payload.pricing_mode === "on_site_estimate") return null;
     const hit = calc.priceFor(payload.pest, payload.area, priceList);
     return hit && hit.exact ? hit.price : null;
   }
@@ -1300,6 +1295,13 @@ function Dashboard({ session, profile }) {
   }
 
   async function createJob(payload) {
+    if (payload.pricing_mode === "on_site_estimate") {
+      const { error: estimateSchemaError } = await supabase.from("jobs").select("pricing_mode").limit(1);
+      if (estimateSchemaError) {
+        showToast(`Оценка на месте ещё не включена. Выполни supabase/${ON_SITE_ESTIMATES_MIGRATION} — заявка не была создана.`);
+        return false;
+      }
+    }
     const quoted = quotedPriceFor(payload);
     const objectId = await ensureObject(payload);
     const orderId = await ensureOrder({ ...payload, object_id: objectId, quoted_price: quoted });
@@ -2492,7 +2494,7 @@ function Dashboard({ session, profile }) {
   const fin = (() => {
     const weekIdx = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
     const week = [1, 2, 3, 4, 5, 6, 0].map((dow) => ({ dow, label: WEEKDAYS[dow].slice(0, 2), count: 0, revenue: 0 }));
-    const maxPriceOption = (j) => Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0));
+    const maxPriceOption = (j) => j.pricing_mode === "on_site_estimate" ? 0 : Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0));
     const monthMode = pMode === "month";
     let revenue = 0, cost = 0, cash = 0, qr = 0, partnerShares = 0, executorShares = 0, qrFees = 0, partnerComp = 0; const bySource = {}; const byTech = {}; const byPest = {}; const monthWeeksMap = {};
     jobs.forEach((j) => {
@@ -2522,11 +2524,14 @@ function Dashboard({ session, profile }) {
         if (!byPest[pestKey]) byPest[pestKey] = { pest: pestKey, count: 0, revenue: 0, cost: 0 };
         byPest[pestKey].count++; byPest[pestKey].revenue += paid; byPest[pestKey].cost += jcost;
         if (j.assigned_to) {
-          if (!byTech[j.assigned_to]) byTech[j.assigned_to] = { count: 0, revenue: 0, cost: 0, quoteSum: 0, paidOnQuote: 0, quoteN: 0 };
+          if (!byTech[j.assigned_to]) byTech[j.assigned_to] = { count: 0, revenue: 0, cost: 0, quoteSum: 0, paidOnQuote: 0, quoteN: 0, assessments: 0, assessmentSales: 0, assessmentRevenue: 0 };
           const bt = byTech[j.assigned_to];
           bt.count++; bt.revenue += paid; bt.cost += jcost;
           const quote = maxPriceOption(j);
-          if (quote > 0) { bt.quoteSum += quote; bt.paidOnQuote += paid; bt.quoteN++; }
+          if (j.pricing_mode === "on_site_estimate") {
+            bt.assessments += 1;
+            if (paid > 0) { bt.assessmentSales += 1; bt.assessmentRevenue += paid; }
+          } else if (quote > 0) { bt.quoteSum += quote; bt.paidOnQuote += paid; bt.quoteN++; }
         }
         if (monthMode && dt) {
           const dom = dt.getDate();
@@ -2678,6 +2683,11 @@ function Dashboard({ session, profile }) {
     });
   const upliftRows = techRows.filter((r) => r.markup !== null).sort((a, b) => b.markup - a.markup);
   const upliftTotals = techRows.reduce((s, r) => ({ quote: s.quote + r.v.quoteSum, paid: s.paid + r.v.paidOnQuote }), { quote: 0, paid: 0 });
+  const assessmentTotals = techRows.reduce((s, r) => ({
+    total: s.total + r.v.assessments,
+    sold: s.sold + r.v.assessmentSales,
+    revenue: s.revenue + r.v.assessmentRevenue,
+  }), { total: 0, sold: 0, revenue: 0 });
   // Доля возвратов по гарантии — оценка качества работы, а не скорости.
   const guaranteeRows = calc.guaranteeStats(jobs, { inPeriod: inPeriodIso })
     .filter((r) => r.done > 0 || r.returns > 0);
@@ -4896,6 +4906,11 @@ function Dashboard({ session, profile }) {
               <div className="kd-row"><span>Изначально (сумма макс. цен)</span><strong>{fmt(upliftTotals.quote)} ₸</strong></div>
               <div className="kd-row"><span>Итого получено</span><strong>{fmt(upliftTotals.paid)} ₸</strong></div>
               <div className="kd-row total"><span>Поднятие</span><strong style={{ color: upliftPct >= 0 ? "#0E7C66" : "#B42318" }}>{upliftTotals.paid - upliftTotals.quote >= 0 ? "+" : ""}{fmt(upliftTotals.paid - upliftTotals.quote)} ₸ · {upliftPct} %</strong></div>
+              {assessmentTotals.total > 0 && <div className="kd-card" style={{ marginTop: 10, marginBottom: 10, background: "var(--surface-sunk)", boxShadow: "none" }}>
+                <div className="kd-row"><span>Оценок на месте</span><strong>{assessmentTotals.total}</strong></div>
+                <div className="kd-row"><span>Клиентов согласилось</span><strong>{assessmentTotals.sold} · {Math.round(assessmentTotals.sold / assessmentTotals.total * 100)}%</strong></div>
+                <div className="kd-row total"><span>Продано после оценки</span><strong>{fmt(assessmentTotals.revenue)} ₸</strong></div>
+              </div>}
               {upliftRows.length > 0 && (
                 <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr 1fr 1fr .8fr", marginTop: 10 }}><span>Сотрудник</span><span>Изначально</span><span>Итого</span><span>%</span></div>
               )}
@@ -4907,7 +4922,7 @@ function Dashboard({ session, profile }) {
                   <strong style={{ color: markup >= 0 ? "#0E7C66" : "#B42318" }}>{markup >= 0 ? "+" : ""}{markup} %</strong>
                 </div>
               ))}
-              <div className="kd-muted" style={{ marginTop: 8 }}>Изначальная цена = самый дорогой из озвученных в заявке вариантов. Учитываются только заявки с указанной ценой.</div>
+              <div className="kd-muted" style={{ marginTop: 8 }}>Изначальная цена = самый дорогой из озвученных в заявке вариантов. Заявки «оценка на месте» считаются отдельно и не влияют на процент поднятия.</div>
             </div>
           </>
         )}
