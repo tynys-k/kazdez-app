@@ -972,6 +972,7 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, draftOwnerId,
 // Цены у него нет намеренно — он входит в стоимость заказа. Если за выезд
 // берут деньги, это не контрольный визит, а новая заявка.
 function AddVisitModal({ job, onClose, onSave }) {
+  const requestIdRef = useRef(createFinancialRequestId());
   const [date, setDate] = useState("");
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState("");
@@ -979,7 +980,7 @@ function AddVisitModal({ job, onClose, onSave }) {
 
   async function save() {
     setSaving(true); setProblem("");
-    const failed = await onSave(job, { date: date || null, note: note.trim() || null });
+    const failed = await onSave(job, { date: date || null, note: note.trim() || null, request_id: requestIdRef.current });
     if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
     setSaving(false);
   }
