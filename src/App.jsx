@@ -21,6 +21,7 @@ import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from ".
 import { yandexRouteUrl } from "./routePlanning";
 import { AnalyticsTab } from "./analytics";
 import { canonicalPestName, pestNamesMatch } from "./pestNormalization";
+import { canonicalSourceKey, canonicalSourceName, sourceNamesMatch } from "./sourceNormalization";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -1035,9 +1036,13 @@ function Dashboard({ session, profile }) {
   }
 
   async function ensureCatalog(table, list, value) {
-    const v = table === "pest_types" ? canonicalPestName(value) : (value || "").trim();
+    const v = table === "pest_types" ? canonicalPestName(value)
+      : table === "client_sources" ? canonicalSourceName(value)
+      : (value || "").trim();
     if (!v) return;
-    if (list.some((x) => table === "pest_types" ? pestNamesMatch(x.name, v) : norm(x.name) === norm(v))) return;
+    if (list.some((x) => table === "pest_types" ? pestNamesMatch(x.name, v)
+      : table === "client_sources" ? sourceNamesMatch(x.name, v)
+      : norm(x.name) === norm(v))) return;
     await supabase.from(table).insert({ name: v });
   }
   // Цена по прайсу считается один раз, при оформлении, и дальше не
@@ -1776,9 +1781,12 @@ function Dashboard({ session, profile }) {
     showToast("Сохранено"); load();
   }
   async function addCatalogItem(table, name) {
-    const v = table === "pest_types" ? canonicalPestName(name) : (name || "").trim();
+    const v = table === "pest_types" ? canonicalPestName(name)
+      : table === "client_sources" ? canonicalSourceName(name)
+      : (name || "").trim();
     if (!v) return;
     if (table === "pest_types" && pestTypes.some((item) => pestNamesMatch(item.name, v))) { showToast("Такой вредитель уже есть в справочнике"); return; }
+    if (table === "client_sources" && sources.some((item) => sourceNamesMatch(item.name, v))) { showToast("Такой источник уже есть в справочнике"); return; }
     const { error } = await supabase.from(table).insert({ name: v });
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Справочник", `Добавлено: ${v}`);
@@ -2492,8 +2500,8 @@ function Dashboard({ session, profile }) {
       const dt = parseIso(j.scheduled_date);
       const inR = pMode === "all" || (dt && dt.getTime() >= range.start && dt.getTime() < range.end);
       if (!inR) return;
-      const srcRaw = (j.source || "Не указан").trim() || "Не указан";
-      const srcKey = norm(srcRaw);
+      const srcRaw = canonicalSourceName(j.source) || "Не указан";
+      const srcKey = canonicalSourceKey(srcRaw);
       if (!bySource[srcKey]) bySource[srcKey] = { label: srcRaw, count: 0, revenue: 0 };
       bySource[srcKey].count++;
       if (j.status === "done") {
@@ -2962,12 +2970,12 @@ function Dashboard({ session, profile }) {
   const ratingJobs = jobs.filter((j) => (j.scheduled_date || "") >= ratingStartIso);
   const sourceRatingMap = {};
   ratingJobs.forEach((j) => {
-    const label = (j.source || "Не указан").trim() || "Не указан"; const key = norm(label);
+    const label = canonicalSourceName(j.source) || "Не указан"; const key = canonicalSourceKey(label);
     if (!sourceRatingMap[key]) sourceRatingMap[key] = { key, label, total: 0, done: 0, canceled: 0, revenue: 0, profit: 0, spent: 0 };
     const row = sourceRatingMap[key]; row.total++; if (j.status === "canceled") row.canceled++;
     if (j.status === "done") { row.done++; row.revenue += Number(j.report_paid) || 0; row.profit += jobEconomics(j).profit; }
   });
-  mktChannels.forEach((ch) => { const key = norm(ch.source_key); if (!key || !sourceRatingMap[key]) return; sourceRatingMap[key].spent += mktTopups.filter((t) => t.channel_id === ch.id && t.topup_date >= ratingStartIso).reduce((s, t) => s + (Number(t.amount) || 0), 0); });
+  mktChannels.forEach((ch) => { const key = canonicalSourceKey(ch.source_key); if (!key || !sourceRatingMap[key]) return; sourceRatingMap[key].spent += mktTopups.filter((t) => t.channel_id === ch.id && t.topup_date >= ratingStartIso).reduce((s, t) => s + (Number(t.amount) || 0), 0); });
   const sourceRatings = Object.values(sourceRatingMap).map((r) => ({ ...r, conversion: r.total ? Math.round(r.done / r.total * 100) : 0, avgCheck: r.done ? Math.round(r.revenue / r.done) : 0, roi: r.spent > 0 ? r.revenue / r.spent : null })).sort((a, b) => b.profit - a.profit);
   const managerRatingMap = {};
   ratingJobs.forEach((j) => {
@@ -5170,7 +5178,7 @@ function Dashboard({ session, profile }) {
               // выручка этого календарного месяца по источнику (done-заявки)
               const revenueBySource = (srcKey) => {
                 if (!srcKey) return 0;
-                return jobs.filter((j) => j.status === "done" && j.scheduled_date && j.scheduled_date >= monthStartIso && norm(j.source) === norm(srcKey))
+                return jobs.filter((j) => j.status === "done" && j.scheduled_date && j.scheduled_date >= monthStartIso && sourceNamesMatch(j.source, srcKey))
                   .reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
               };
               const topupsThisMonth = (chId) => mktTopups.filter((t) => t.channel_id === chId && t.topup_date >= monthStartIso);

@@ -2,12 +2,12 @@ import React, { useMemo, useState } from "react";
 import { BarChart3, BookOpen, CalendarRange, ExternalLink, Megaphone, Target } from "lucide-react";
 import { SEASONALITY_DATA } from "./seasonalityData";
 import { canonicalPestName } from "./pestNormalization";
+import { sourceNamesMatch } from "./sourceNormalization";
 
 const MONTHS_SHORT = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
 const EXCLUDED_VISITS = new Set(["guarantee", "control"]);
 
 const money = (value) => `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.round(Number(value) || 0))} ₸`;
-const normalize = (value) => String(value || "").trim().toLocaleLowerCase("ru-RU");
 export function realDemandJobs(jobs) {
   return (jobs || []).filter((job) => job.status === "done" && !EXCLUDED_VISITS.has(job.visit_kind));
 }
@@ -69,7 +69,7 @@ export function buildChannelPlan(channels, jobs, topups, budget) {
   const equalWeight = 1 / channels.length;
   const rows = channels.map((channel) => {
     const share = manualTotal > 0 ? Math.max(0, Number(channel.monthly_plan) || 0) / manualTotal : equalWeight;
-    const linkedJobs = realDemandJobs(jobs).filter((job) => channel.source_key && normalize(job.source) === normalize(channel.source_key));
+    const linkedJobs = realDemandJobs(jobs).filter((job) => sourceNamesMatch(job.source, channel.source_key));
     const revenue = linkedJobs.reduce((sum, job) => sum + (Number(job.report_paid) || 0), 0);
     const spent = (topups || []).filter((topup) => topup.channel_id === channel.id).reduce((sum, topup) => sum + (Number(topup.amount) || 0), 0);
     return {

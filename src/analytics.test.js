@@ -6,7 +6,7 @@ describe("seasonality analytics", () => {
   const jobs = [
     { id: "1", status: "done", scheduled_date: "2026-09-01", pest: "Крысы", report_paid: 10000, source: "Google" },
     { id: "2", status: "done", scheduled_date: "2026-09-10", pest: "Крысы", report_paid: 0, source: "Google" },
-    { id: "3", status: "done", scheduled_date: "2026-10-01", pest: "Тараканы", report_paid: 15000, source: "Instagram" },
+    { id: "3", status: "done", scheduled_date: "2026-10-01", pest: "Тараканы", report_paid: 15000, source: "инста" },
     { id: "4", status: "done", scheduled_date: "2026-09-12", pest: "Крысы", report_paid: 0, visit_kind: "guarantee", source: "Google" },
     { id: "5", status: "canceled", scheduled_date: "2026-09-20", pest: "Крысы", report_paid: 50000, source: "Google" },
   ];
@@ -48,7 +48,7 @@ describe("seasonality analytics", () => {
     expect(rows.reduce((sum, row) => sum + row.amount, 0)).toBeGreaterThanOrEqual(999000);
   });
 
-  it("uses existing channel plans as allocation weights", () => {
+  it("uses existing channel plans as allocation weights and joins source aliases", () => {
     const rows = buildChannelPlan([
       { id: "g", name: "Google", source_key: "Google", monthly_plan: 300000 },
       { id: "i", name: "Instagram", source_key: "Instagram", monthly_plan: 100000 },

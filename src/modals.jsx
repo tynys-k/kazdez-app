@@ -9,6 +9,7 @@ import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, Chevron
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
 import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, addressPlain, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
+import { canonicalSourceName, canonicalSourceOptions } from "./sourceNormalization";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -346,13 +347,14 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
   const draft = draftRef.current;
   const requestIdRef = useRef(initial ? null : (draft?.requestId || createFinancialRequestId()));
   const startingFormRaw = initial || draft?.form || emptyJobForm(defaultGuarantee);
-  const startingForm = { ...startingFormRaw, pest: canonicalPestName(startingFormRaw.pest) };
+  const startingForm = { ...startingFormRaw, pest: canonicalPestName(startingFormRaw.pest), source: canonicalSourceName(startingFormRaw.source) };
   const [f, setF] = useState(startingForm);
   const [formMode, setFormMode] = useState(initial ? "expanded" : (draft?.mode || "quick"));
   const [draftRestored, setDraftRestored] = useState(!!draft?.form);
   const initialSnapshot = useRef(JSON.stringify(startingForm));
   const [pestInfoOpen, setPestInfoOpen] = useState(false);
   const pestOptions = canonicalPestOptions(pestTypes, f.pest);
+  const sourceOptions = canonicalSourceOptions(sources, f.source);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const onBrand = (e) => { const brand = e.target.value; setF({ ...f, brand, partner_id: brand === "partner" ? f.partner_id : "", partner_share: brand === "partner" ? f.partner_share : "" }); };
   const onPartner = (e) => { const partner_id = e.target.value; const p = partners.find((x) => x.id === partner_id); setF({ ...f, partner_id, partner_share: p ? p.default_share : f.partner_share }); };
@@ -397,7 +399,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
 
   function useClientData() {
     if (!latestClient) return;
-    setF({ ...f, address: latestClient.address || f.address, contact_name: latestClient.contact_name || f.contact_name, source: latestClient.source || f.source });
+    setF({ ...f, address: latestClient.address || f.address, contact_name: latestClient.contact_name || f.contact_name, source: canonicalSourceName(latestClient.source) || f.source });
   }
 
   function clearDraft() {
@@ -418,7 +420,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
       if (!isOnSiteEstimate && f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
       const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
       const isPartner = f.brand === "partner";
-      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: f.source, pest: canonicalPestName(f.pest), price_options, pricing_mode: f.pricing_mode || "quoted", client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
+      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: canonicalSourceName(f.source), pest: canonicalPestName(f.pest), price_options, pricing_mode: f.pricing_mode || "quoted", client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
         executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
         executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
       if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
@@ -482,7 +484,6 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
         </>
       )}
       </>}
-      <datalist id="kd-sources-list">{sources.map((s) => <option key={s.id} value={s.name} />)}</datalist>
       <div className="kd-grid2">
         <Field label="Вид (вредитель)">
           <div style={{ display: "flex", gap: 8 }}>
@@ -492,7 +493,9 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
             <button type="button" className="kd-btn ghost" title="Информация по вредителю" onClick={() => setPestInfoOpen((v) => !v)} style={{ minWidth: 46, padding: "0 12px" }}><Info size={17} /></button>
           </div>
         </Field>
-        <Field label="Источник"><input list="kd-sources-list" value={f.source} onChange={set("source")} placeholder="OLX" /></Field>
+        <Field label="Источник">{sourceOptions.length > 0
+          ? <select value={f.source} onChange={set("source")}><option value="">Не указан</option>{sourceOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>
+          : <input value={f.source} onChange={set("source")} placeholder="OLX" />}</Field>
       </div>
       {pestInfoOpen && (() => {
         const g = pestGuide[(f.pest || "").trim()] || Object.entries(pestGuide).find(([name]) => pestNamesMatch(name, f.pest))?.[1] || null;
@@ -3502,14 +3505,15 @@ function DayOffModal({ techs, defaultDate, daysOff, personName, onClose, onAdd, 
 
 function MktChannelModal({ item, sources, onClose, onSave }) {
   const [name, setName] = useState(item?.name || "");
-  const [sourceKey, setSourceKey] = useState(item?.source_key || "");
+  const [sourceKey, setSourceKey] = useState(canonicalSourceName(item?.source_key));
   const [plan, setPlan] = useState(item?.monthly_plan ?? "");
   const [isFixed, setIsFixed] = useState(item?.is_fixed || false);
   const [saving, setSaving] = useState(false);
+  const sourceOptions = canonicalSourceOptions(sources, sourceKey);
   const ok = name.trim();
   async function save() {
     setSaving(true);
-    await onSave({ name: name.trim(), source_key: sourceKey.trim() || null, monthly_plan: Number(plan) || 0, is_fixed: isFixed }, item);
+    await onSave({ name: name.trim(), source_key: canonicalSourceName(sourceKey) || null, monthly_plan: Number(plan) || 0, is_fixed: isFixed }, item);
     setSaving(false);
   }
   return (
@@ -3518,8 +3522,7 @@ function MktChannelModal({ item, sources, onClose, onSave }) {
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
     </>}>
       <Field label="Название канала"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="2ГИС / OLX / Instagram / TikTok" /></Field>
-      <datalist id="kd-mkt-sources">{sources.map((s) => <option key={s.id} value={s.name} />)}</datalist>
-      <Field label="Источник заявок для ROI (из справочника)"><input list="kd-mkt-sources" value={sourceKey} onChange={(e) => setSourceKey(e.target.value)} placeholder="напр.: 2gis / olx / instagram" /></Field>
+      <Field label="Источник заявок для ROI (из справочника)"><select value={sourceKey} onChange={(e) => setSourceKey(e.target.value)}><option value="">Не привязан</option>{sourceOptions.map((source) => <option value={source} key={source}>{source}</option>)}</select></Field>
       <div className="kd-muted" style={{ marginTop: -6, marginBottom: 12 }}>Система посчитает выручку по заявкам с этим источником. Если не указать — ROI не считается (для «Резерв» можно оставить пустым).</div>
       <Field label="Плановый бюджет в месяц (₸)"><input value={plan} onChange={(e) => setPlan(e.target.value)} inputMode="numeric" placeholder="450000" /></Field>
       <label className="kd-check"><input type="checkbox" checked={isFixed} onChange={(e) => setIsFixed(e.target.checked)} /> Фиксированный (сумма не меняется, напр. 2ГИС)</label>
@@ -3564,15 +3567,16 @@ function LeadModal({ lead, stages, sources, onClose, onSave }) {
   const [clientType, setClientType] = useState(lead?.client_type || "person");
   const [phone, setPhone] = useState(lead?.phone || "+7 ");
   const [address, setAddress] = useState(lead?.address || "");
-  const [source, setSource] = useState(lead?.source || "");
+  const [source, setSource] = useState(canonicalSourceName(lead?.source));
   const [stageId, setStageId] = useState(lead?.stage_id || (stages[0]?.id || ""));
   const [kpUrl, setKpUrl] = useState(lead?.kp_url || "");
   const [note, setNote] = useState(lead?.note || "");
   const [saving, setSaving] = useState(false);
+  const sourceOptions = canonicalSourceOptions(sources, source);
   const ok = (name.trim() || (phone.trim() && phone.trim() !== "+7"));
   async function save() {
     setSaving(true);
-    await onSave({ name: name.trim() || null, client_type: clientType, phone: phone.trim() || null, address: address.trim() || null, source: source.trim() || null, stage_id: stageId || null, kp_url: kpUrl.trim() || null, note: note.trim() || null }, lead);
+    await onSave({ name: name.trim() || null, client_type: clientType, phone: phone.trim() || null, address: address.trim() || null, source: canonicalSourceName(source) || null, stage_id: stageId || null, kp_url: kpUrl.trim() || null, note: note.trim() || null }, lead);
     setSaving(false);
   }
   return (
@@ -3590,8 +3594,9 @@ function LeadModal({ lead, stages, sources, onClose, onSave }) {
         <Field label="Стадия"><select value={stageId} onChange={(e) => setStageId(e.target.value)}>{[...stages].sort((a, b) => a.sort - b.sort).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
       </div>
       <Field label="Адрес"><input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="г. Алматы, ..." /></Field>
-      <datalist id="kd-lead-sources">{sources.map((s) => <option key={s.id} value={s.name} />)}</datalist>
-      <Field label="Источник"><input list="kd-lead-sources" value={source} onChange={(e) => setSource(e.target.value)} placeholder="OLX / Instagram / рекомендация" /></Field>
+      <Field label="Источник">{sourceOptions.length > 0
+        ? <select value={source} onChange={(e) => setSource(e.target.value)}><option value="">Не указан</option>{sourceOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>
+        : <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="OLX / Instagram / рекомендация" />}</Field>
       <Field label="Ссылка на файл КП (Google Диск)"><input value={kpUrl} onChange={(e) => setKpUrl(e.target.value)} placeholder="https://drive.google.com/... (файл этого клиента)" /></Field>
       <Field label="Заметка"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что обсудили, детали..." /></Field>
     </ModalShell>

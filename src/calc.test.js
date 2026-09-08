@@ -345,6 +345,14 @@ describe("clientStats", () => {
     ], { phoneKeyOf: pk });
     expect(s.sources[0].label).toBe("Instagram");
   });
+
+  it("варианты названия источника объединяются в одну строку", () => {
+    const s = clientStats([
+      job({ client_phone: "7011111111", scheduled_date: "2026-08-01", source: "Инстаграм" }),
+      job({ client_phone: "7022222222", scheduled_date: "2026-08-02", source: "insta" }),
+    ], { phoneKeyOf: pk });
+    expect(s.sources).toEqual([expect.objectContaining({ label: "Instagram", clients: 2 })]);
+  });
 });
 
 describe("jobDurations и durationStats", () => {
@@ -1767,7 +1775,7 @@ describe("маркетинг на заказ", () => {
   const jobs = [
     { id: "1", status: "done", scheduled_date: "2026-08-10", source: "инстаграм", report_paid: 30000 },
     { id: "2", status: "done", scheduled_date: "2026-08-11", source: "Инстаграм", report_paid: 30000 },
-    { id: "3", status: "done", scheduled_date: "2026-08-12", source: "инстаграм", report_paid: 30000 },
+    { id: "3", status: "done", scheduled_date: "2026-08-12", source: "insta", report_paid: 30000 },
     { id: "4", status: "done", scheduled_date: "2026-08-13", source: "2гис", report_paid: 40000 },
     { id: "5", status: "done", scheduled_date: "2026-08-14", source: "Сарафан", report_paid: 50000 },
   ];
@@ -1783,7 +1791,7 @@ describe("маркетинг на заказ", () => {
     expect(forJob(jobs[4])).toBe(0);
   });
 
-  it("регистр и пробелы в источнике не разводят канал надвое", () => {
+  it("регистр и разные названия источника не разводят канал надвое", () => {
     const forJob = marketingPerJob(jobs, { topups, channels });
     expect(forJob(jobs[1])).toBe(forJob(jobs[2]));
   });
