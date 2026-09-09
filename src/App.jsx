@@ -499,6 +499,10 @@ function Dashboard({ session, profile }) {
   // load() без аргументов обновляет всё. load(["jobs"]) — только заявки:
   // качать сорок таблиц после сохранения одной записи незачем, и именно это
   // съедало почти весь трафик проекта.
+  // У части источников стоит `when`: база их этой роли всё равно не отдаст,
+  // и запрос вернётся пустым. Гасим его на клиенте, чтобы исполнитель не
+  // тратил трафик на семь таблиц, которых не увидит. Защита при этом стоит
+  // в базе, а не здесь: `when` — экономия, а не право доступа.
   const SOURCES = [
     { key: "jobs", label: "Заявки", run: () => fetchAllRows("jobs") },
     { key: "report_chemicals", label: "Препараты в отчётах", run: () => fetchAllRows("report_chemicals") },
@@ -536,8 +540,8 @@ function Dashboard({ session, profile }) {
     { key: "cash_adjustments", label: "Ревизии кассы", run: () => supabase.from("cash_adjustments").select("*").order("created_at", { ascending: false }), set: setCashAdjustments },
     { key: "inventory_adjustments", label: "Ревизии препаратов", run: () => supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }), set: setInventoryAdjustments },
     { key: "job_helpers", label: "Помощники на заявках", run: () => supabase.from("job_helpers").select("*"), set: setJobHelpers },
-    { key: "price_list", label: "Прайс", run: () => supabase.from("price_list").select("*").order("pest").order("area_from"), set: setPriceList },
-    { key: "chemical_purchases", label: "Закуп препаратов", run: () => supabase.from("chemical_purchases").select("*").order("purchase_date", { ascending: false }), set: setChemPurchases },
+    { key: "price_list", when: () => canEditJobs || canManageCash, label: "Прайс", run: () => supabase.from("price_list").select("*").order("pest").order("area_from"), set: setPriceList },
+    { key: "chemical_purchases", when: () => canManageCash || canAccess("action.stock_edit"), label: "Закуп препаратов", run: () => supabase.from("chemical_purchases").select("*").order("purchase_date", { ascending: false }), set: setChemPurchases },
     { key: "tech_documents", label: "Допуски сотрудников", run: () => supabase.from("tech_documents").select("*").order("expires_on", { ascending: true }), set: setTechDocs },
     { key: "training_records", label: "Обучение", run: () => supabase.from("training_records").select("*").order("passed_on", { ascending: false }), set: setTraining },
     { key: "safety_acknowledgements", label: "Инструктаж", run: () => supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }), set: setSafetyAcks },
@@ -566,12 +570,12 @@ function Dashboard({ session, profile }) {
     { key: "repeat_causes", label: "Разбор повторных выездов", run: () => supabase.from("repeat_causes").select("*"), set: setRepeatCauses },
     { key: "job_debts", label: "Долги клиентов", run: () => supabase.from("job_debts").select("*").order("due_on"), set: setDebts },
     { key: "job_equipment", label: "Оборудование на заявках", run: () => supabase.from("job_equipment").select("*"), set: setJobEquipment },
-    { key: "chemical_sales", label: "Продажа препаратов", run: () => supabase.from("chemical_sales").select("*").order("sold_on", { ascending: false }), set: setChemSales },
-    { key: "paperwork", label: "Проведение документов", run: () => supabase.from("paperwork").select("*").order("created_at", { ascending: false }), set: setPaperwork },
-    { key: "paperwork_jobs", label: "Заявки в комплектах", run: () => supabase.from("paperwork_jobs").select("*"), set: setPaperworkJobs },
+    { key: "chemical_sales", when: () => canManageCash || canAccess("action.stock_edit"), label: "Продажа препаратов", run: () => supabase.from("chemical_sales").select("*").order("sold_on", { ascending: false }), set: setChemSales },
+    { key: "paperwork", when: () => canManageCash || canEditDocs, label: "Проведение документов", run: () => supabase.from("paperwork").select("*").order("created_at", { ascending: false }), set: setPaperwork },
+    { key: "paperwork_jobs", when: () => canManageCash || canEditDocs, label: "Заявки в комплектах", run: () => supabase.from("paperwork_jobs").select("*"), set: setPaperworkJobs },
     { key: "clients", label: "Клиенты (карточки)", run: () => supabase.from("clients").select("*"), set: setClients },
     { key: "objects", label: "Объекты", run: () => supabase.from("objects").select("*").order("address"), set: setObjects },
-    { key: "job_discounts", label: "Скидки", run: () => supabase.from("job_discounts").select("*").order("created_at", { ascending: false }), set: setDiscounts },
+    { key: "job_discounts", when: () => canEditJobs || canManageCash, label: "Скидки", run: () => supabase.from("job_discounts").select("*").order("created_at", { ascending: false }), set: setDiscounts },
   ];
 
   // Расход препаратов подмешивается в заявки, поэтому в одиночку заявки не
@@ -591,7 +595,8 @@ function Dashboard({ session, profile }) {
 
   async function load(only = null) {
     const keys = Array.isArray(only) ? withDependencies(only) : null;
-    const picked = keys ? SOURCES.filter((s) => keys.includes(s.key)) : SOURCES;
+    const allowed = SOURCES.filter((s) => !s.when || s.when());
+    const picked = keys ? allowed.filter((s) => keys.includes(s.key)) : allowed;
     const fullVersion = keys ? null : ++fullLoadVersion.current;
     if (!keys) setLoading(true);
     try {
