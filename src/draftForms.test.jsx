@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { JobFormModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, ReportModal, jobToForm } from "./modals";
+import { ContractDetailsModal, JobFormModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, ReportModal, jobToForm } from "./modals";
 import { CHECK_RESULTS, WORK_EQUIPMENT } from "./shared";
 import { reportDraftStorageKey } from "./localDataScope";
 
@@ -172,5 +172,20 @@ describe("lead work queue forms", () => {
     expect(container.textContent).toContain("Менеджер");
     await click("Добавить комментарий");
     expect(onAddNote).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("subscription customer card", () => {
+  it("shows period, visit history and opens the original request", async () => {
+    const onOpenJob = vi.fn();
+    const contract = { id: "contract", client_name: "ТОО Клиент", phone: "+7 700 000 00 00", address: "Алматы", service: "Дезинфекция", interval_days: 90, price: 25000, next_service_date: "2026-10-01", active: true };
+    const jobs = [{ id: "job", service_contract_id: "contract", status: "done", scheduled_date: "2026-07-01", created_at: "2026-06-28T08:00:00Z", pest: "Дезинфекция", assigned_to: "tech", report_paid: 25000 }];
+    await act(async () => root.render(<ContractDetailsModal contract={contract} jobs={jobs} managerName="Менеджер" techName={() => "Мастер"} todayIso="2026-09-09" onOpenJob={onOpenJob} onCreateJob={vi.fn()} onEdit={vi.fn()} onClose={vi.fn()} />));
+    expect(container.textContent).toContain("Ежеквартально");
+    expect(container.textContent).toContain("последняя 01.07.2026");
+    expect(container.textContent).toContain("Выполнен");
+    expect(container.textContent).toContain("Мастер");
+    await click("Открыть заявку");
+    expect(onOpenJob).toHaveBeenCalledWith(jobs[0]);
   });
 });
