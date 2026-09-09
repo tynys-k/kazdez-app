@@ -21,7 +21,7 @@ import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from ".
 import { yandexRouteUrl } from "./routePlanning";
 import { AnalyticsTab } from "./analytics";
 import { canonicalPestName, pestNamesMatch } from "./pestNormalization";
-import { canonicalSourceKey, canonicalSourceName, sourceNamesMatch } from "./sourceNormalization";
+import { canonicalSourceKey, canonicalSourceName, canonicalSourceOptions, sourceNamesMatch } from "./sourceNormalization";
 import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, LeadTouchModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
@@ -270,6 +270,12 @@ function Dashboard({ session, profile }) {
   const [leadStages, setLeadStages] = useState([]);
   const [leadStageFilter, setLeadStageFilter] = useState("all");
   const [leadQueueFilter, setLeadQueueFilter] = useState("all");
+  const [leadSearch, setLeadSearch] = useState("");
+  const [leadSort, setLeadSort] = useState("newest");
+  const [leadFreshness, setLeadFreshness] = useState("all");
+  const [leadOwnerFilter, setLeadOwnerFilter] = useState("");
+  const [leadSourceFilter, setLeadSourceFilter] = useState("");
+  const [leadClientTypeFilter, setLeadClientTypeFilter] = useState("");
   const [partnerSearch, setPartnerSearch] = useState("");
   const [teamRepFilter, setTeamRepFilter] = useState({ preset: "month" });
   const [mktChannels, setMktChannels] = useState([]);
@@ -3016,6 +3022,27 @@ function Dashboard({ session, profile }) {
   // Сколько лидов ждут ответа. Первая стадия воронки = «ещё никто не взял».
   const leadSla = calc.leadSlaStats(leads, { firstStageId: leadStages[0]?.id || null, closedStageIds: closedLeadStageIds });
   const leadOwners = allProfiles.filter((person) => person.is_active !== false && ["admin", "manager"].includes(person.role));
+  const leadSourceOptions = canonicalSourceOptions([...sources, ...leads.map((lead) => ({ name: lead.source }))]);
+  const filteredLeadList = calc.filterAndSortLeads(leads, {
+    search: leadSearch, sort: leadSort, freshness: leadFreshness,
+    ownerId: leadOwnerFilter, source: leadSourceFilter, clientType: leadClientTypeFilter,
+  });
+  const leadMatchesCurrentView = (lead) => {
+    if (lead.converted_job_id) return false;
+    const stage = leadStageById(lead.stage_id);
+    if (!stage || (leadStageFilter !== "all" && String(stage.id) !== String(leadStageFilter))) return false;
+    if (leadQueueFilter === "all") return leadStageFilter !== "all" || (!stage.is_final && !stage.is_lost);
+    return !stage.is_final && !stage.is_lost && calc.leadNextActionState(lead).kind === leadQueueFilter;
+  };
+  const displayedLeadCount = filteredLeadList.filter(leadMatchesCurrentView).length;
+  const totalLeadCount = leads.filter(leadMatchesCurrentView).length;
+  const leadFiltersActive = !!(leadSearch || leadSort !== "newest" || leadFreshness !== "all"
+    || leadOwnerFilter || leadSourceFilter || leadClientTypeFilter || leadStageFilter !== "all" || leadQueueFilter !== "all");
+  const resetLeadFilters = () => {
+    setLeadSearch(""); setLeadSort("newest"); setLeadFreshness("all");
+    setLeadOwnerFilter(""); setLeadSourceFilter(""); setLeadClientTypeFilter("");
+    setLeadStageFilter("all"); setLeadQueueFilter("all");
+  };
   const dashboardAlerts = [
     overdueJobs.length ? { id: "overdue-jobs", label: "Просроченные заявки", value: overdueJobs.length, tab: "jobs", tone: "danger" } : null,
     unassignedSoon.length ? { id: "unassigned", label: "Не назначены на сегодня/завтра", value: unassignedSoon.length, tab: "jobs", tone: "warning" } : null,
@@ -3712,6 +3739,29 @@ function Dashboard({ session, profile }) {
               </div>
             )}
             {leadStages.length === 0 && <div className="kd-empty">Стадии воронки не заданы. Добавь их в Настройках → «Стадии воронки».</div>}
+            <div className="kd-lead-filterbar">
+              <div className="kd-searchbar kd-lead-search">
+                <Search size={16} className="kd-search-icon" />
+                <input className="kd-search" value={leadSearch} onChange={(e) => setLeadSearch(e.target.value)} placeholder="Имя, телефон или адрес…" aria-label="Поиск клиентов" />
+                {leadSearch && <button className="kd-x" onClick={() => setLeadSearch("")} aria-label="Очистить поиск"><X size={15} /></button>}
+              </div>
+              <label className="kd-lead-filter"><span>Порядок</span><select value={leadSort} onChange={(e) => setLeadSort(e.target.value)} aria-label="Порядок клиентов">
+                <option value="newest">Сначала новые</option><option value="next_action">По сроку действия</option><option value="recent_touch">Недавно изменённые</option><option value="oldest">Сначала старые</option>
+              </select></label>
+              <label className="kd-lead-filter"><span>Свежесть</span><select value={leadFreshness} onChange={(e) => setLeadFreshness(e.target.value)} aria-label="Свежесть клиентов">
+                <option value="all">За всё время</option><option value="today">Новые сегодня</option><option value="7">За 7 дней</option><option value="30">За 30 дней</option>
+              </select></label>
+              <label className="kd-lead-filter"><span>Ответственный</span><select value={leadOwnerFilter} onChange={(e) => setLeadOwnerFilter(e.target.value)} aria-label="Ответственный менеджер">
+                <option value="">Все менеджеры</option><option value="unassigned">Без ответственного</option>{leadOwners.map((person) => <option key={person.id} value={person.id}>{person.full_name || "Без имени"}</option>)}
+              </select></label>
+              <label className="kd-lead-filter"><span>Источник</span><select value={leadSourceFilter} onChange={(e) => setLeadSourceFilter(e.target.value)} aria-label="Источник клиента">
+                <option value="">Все источники</option><option value="missing">Без источника</option>{leadSourceOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select></label>
+              <label className="kd-lead-filter"><span>Тип</span><select value={leadClientTypeFilter} onChange={(e) => setLeadClientTypeFilter(e.target.value)} aria-label="Тип клиента">
+                <option value="">Все клиенты</option><option value="person">Физлица</option><option value="company">Юрлица</option>
+              </select></label>
+              <div className="kd-lead-filter-foot"><span>Показано: <strong>{displayedLeadCount}</strong> из {totalLeadCount}</span>{leadFiltersActive && <button className="kd-btn ghost sm" onClick={resetLeadFilters}><X size={13} />Сбросить фильтры</button>}</div>
+            </div>
             {/* фильтр по стадии */}
             {leadStages.length > 0 && (
               <div className="kd-datechips" style={{ marginBottom: 10 }}>
@@ -3725,22 +3775,16 @@ function Dashboard({ session, profile }) {
               <div className="kd-datechips" style={{ marginBottom: 6 }}>
                 <button className={`kd-datechip ${leadStageFilter === "all" ? "on" : ""}`} onClick={() => { setLeadStageFilter("all"); setLeadQueueFilter("all"); }}>Все стадии</button>
                 {[...leadStages].sort((a, b) => a.sort - b.sort).map((st) => {
-                  const cnt = leads.filter((l) => l.stage_id === st.id && !l.converted_job_id).length;
+                  const cnt = filteredLeadList.filter((l) => l.stage_id === st.id && !l.converted_job_id).length;
                   return <button key={st.id} className={`kd-datechip ${leadStageFilter === st.id ? "on" : ""}`} onClick={() => { setLeadStageFilter(st.id); setLeadQueueFilter("all"); }}>{st.name}{cnt ? ` · ${cnt}` : ""}</button>;
                 })}
               </div>
             )}
             {[...leadStages].sort((a, b) => a.sort - b.sort).filter((st) => leadStageFilter === "all" || st.id === leadStageFilter).map((st) => {
-              const stageLeads = leads.filter((l) => l.stage_id === st.id && !l.converted_job_id)
+              const stageLeads = filteredLeadList.filter((l) => l.stage_id === st.id && !l.converted_job_id)
                 .filter((lead) => leadQueueFilter === "all"
                   ? leadStageFilter !== "all" || (!st.is_final && !st.is_lost)
-                  : !st.is_final && !st.is_lost && calc.leadNextActionState(lead).kind === leadQueueFilter)
-                .sort((a, b) => {
-                  const actionRank = { overdue: 0, today: 1, missing: 2, planned: 3 };
-                  const aState = calc.leadNextActionState(a), bState = calc.leadNextActionState(b);
-                  if (actionRank[aState.kind] !== actionRank[bState.kind]) return actionRank[aState.kind] - actionRank[bState.kind];
-                  return new Date(a.next_action_at || a.updated_at || 0) - new Date(b.next_action_at || b.updated_at || 0);
-                });
+                  : !st.is_final && !st.is_lost && calc.leadNextActionState(lead).kind === leadQueueFilter);
               if (leadStageFilter === "all" && stageLeads.length === 0) return null;
               const sortedStages = [...leadStages].sort((a, b) => a.sort - b.sort);
               const stIdx = sortedStages.findIndex((x) => x.id === st.id);

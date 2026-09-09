@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
-  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadNextActionState, leadSlaStats, dayLoad,
+  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadNextActionState, leadSlaStats, filterAndSortLeads, dayLoad,
   priceFor,
   turnoverReport, chemPriceOn, chemForecast, supplierPrices,
   docStatus, docsNeedingAttention, guaranteeCostOf, guaranteeStats, dormantClients,
@@ -598,6 +598,38 @@ describe("ожидание лида", () => {
       lead({ id: "lost", stage_id: "lost", next_action: null, next_action_at: null }),
     ], { firstStageId: "s1", closedStageIds: ["lost"], now });
     expect(s).toMatchObject({ open: 3, overdue: 1, dueToday: 1, missingPlan: 1 });
+  });
+});
+
+describe("фильтры списка лидов", () => {
+  const now = new Date("2026-09-09T12:00:00Z");
+  const leads = [
+    { id: "old", name: "Алия", phone: "+7 700 111 22 33", address: "Алматы", source: "Инстаграм", client_type: "person", owner_id: "m1", created_at: "2026-07-01T09:00:00Z", updated_at: "2026-09-08T09:00:00Z", next_action: "Позвонить", next_action_at: "2026-09-08T10:00:00Z" },
+    { id: "new", name: "ТОО Арман", phone: "+7 701 999 88 77", address: "Каскелен", source: "Instagram Ads", client_type: "company", owner_id: "m2", created_at: "2026-09-09T10:00:00Z", updated_at: "2026-09-09T10:00:00Z", next_action: "КП", next_action_at: "2026-09-09T14:00:00Z" },
+    { id: "week", name: "Без владельца", phone: "+7 702 555 44 33", address: "Талгар", source: "", client_type: "person", owner_id: null, created_at: "2026-09-05T10:00:00Z", updated_at: "2026-09-07T10:00:00Z", next_action: null, next_action_at: null },
+  ];
+
+  it("по умолчанию показывает свежих клиентов сверху", () => {
+    expect(filterAndSortLeads(leads, {}, now).map((lead) => lead.id)).toEqual(["new", "week", "old"]);
+  });
+
+  it("умеет показать старых первыми и сортировать по сроку", () => {
+    expect(filterAndSortLeads(leads, { sort: "oldest" }, now)[0].id).toBe("old");
+    expect(filterAndSortLeads(leads, { sort: "next_action" }, now).map((lead) => lead.id)).toEqual(["old", "new", "week"]);
+  });
+
+  it("ищет телефон без учёта пробелов", () => {
+    expect(filterAndSortLeads(leads, { search: "7019998877" }, now).map((lead) => lead.id)).toEqual(["new"]);
+  });
+
+  it("фильтрует менеджера, тип и исторические варианты источника", () => {
+    expect(filterAndSortLeads(leads, { ownerId: "m2", clientType: "company", source: "Instagram" }, now).map((lead) => lead.id)).toEqual(["new"]);
+    expect(filterAndSortLeads(leads, { ownerId: "unassigned", source: "missing" }, now).map((lead) => lead.id)).toEqual(["week"]);
+  });
+
+  it("оставляет клиентов за выбранный свежий период", () => {
+    expect(filterAndSortLeads(leads, { freshness: "today" }, now).map((lead) => lead.id)).toEqual(["new"]);
+    expect(filterAndSortLeads(leads, { freshness: "7" }, now).map((lead) => lead.id)).toEqual(["new", "week"]);
   });
 });
 

@@ -38,4 +38,18 @@ describe("compact operational UI", () => {
     expect(app).toContain("techFilter");
     expect(app).toMatch(/doneJobs\s*\.filter\(matchSearch\)/);
   });
+
+  it("adds the practical CRM filters and defaults to newest leads", () => {
+    for (const state of ["leadSearch", "leadSort", "leadFreshness", "leadOwnerFilter", "leadSourceFilter", "leadClientTypeFilter"]) {
+      expect(app).toContain(state);
+    }
+    expect(app).toContain('useState("newest")');
+    expect(app).toContain("Сбросить фильтры");
+  });
+
+  it("keeps the CRM filter panel compact on phones", () => {
+    expect(app).toContain('className="kd-lead-filterbar"');
+    expect(css).toMatch(/@media \(max-width:720px\)[\s\S]*\.kd-lead-filterbar\{grid-template-columns:1fr 1fr/);
+    expect(css).toContain(".kd-lead-search,.kd-lead-filter-foot{grid-column:1/-1;}");
+  });
 });
