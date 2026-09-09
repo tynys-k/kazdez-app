@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { JobFormModal, ReportModal, jobToForm } from "./modals";
+import { JobFormModal, LeadModal, LeadStageSelectModal, LeadTouchModal, ReportModal, jobToForm } from "./modals";
 import { CHECK_RESULTS, WORK_EQUIPMENT } from "./shared";
 import { reportDraftStorageKey } from "./localDataScope";
 
@@ -123,5 +123,41 @@ describe("job form save recovery", () => {
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(button("Сохранить").disabled).toBe(false);
     expect(container.textContent).toContain("сервер мог принять запрос");
+  });
+});
+
+describe("lead work queue forms", () => {
+  const stages = [
+    { id: "new", name: "Новый", sort: 10, is_final: false, is_lost: false },
+    { id: "lost", name: "Отказ", sort: 20, is_final: true, is_lost: true },
+  ];
+
+  it("saves a new lead only with a concrete future action", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    await act(async () => root.render(<LeadModal stages={stages} sources={[]} owners={[{ id: "manager", full_name: "Менеджер" }]} defaultOwnerId="manager" onSave={onSave} onClose={vi.fn()} />));
+    await change(field("Имя клиента"), "Айгуль");
+    expect(field("Следующий шаг").value).toBe("Позвонить клиенту");
+    expect(field("Когда сделать").value).not.toBe("");
+    await click("Сохранить");
+    expect(onSave.mock.calls[0][0]).toMatchObject({ name: "Айгуль", stage_id: "new", next_action: "Позвонить клиенту", lost_reason: null, owner_id: "manager" });
+    expect(new Date(onSave.mock.calls[0][0].next_action_at).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("requires a reason before moving a lead to lost", async () => {
+    const onPick = vi.fn().mockResolvedValue(null);
+    await act(async () => root.render(<LeadStageSelectModal lead={{ id: "lead", name: "Клиент", stage_id: "new", next_action: "Позвонить" }} stages={stages} initialStageId="lost" onPick={onPick} onClose={vi.fn()} />));
+    expect(button("Сохранить стадию").disabled).toBe(true);
+    await change(field("Почему клиент отказался"), "Выбрал конкурента");
+    await click("Сохранить стадию");
+    expect(onPick).toHaveBeenCalledWith("lost", { next_action: null, next_action_at: null, lost_reason: "Выбрал конкурента" });
+  });
+
+  it("records a touch together with the next promise", async () => {
+    const onSave = vi.fn().mockResolvedValue(null);
+    await act(async () => root.render(<LeadTouchModal lead={{ id: "lead", name: "Клиент" }} ownerName="Менеджер" onSave={onSave} onClose={vi.fn()} />));
+    await change(field("Что сделать дальше"), "Отправить КП");
+    await click("Зафиксировать касание");
+    expect(onSave.mock.calls[0][0]).toBe("Отправить КП");
+    expect(new Date(onSave.mock.calls[0][1]).getTime()).toBeGreaterThan(Date.now());
   });
 });

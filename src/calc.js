@@ -1542,11 +1542,29 @@ export function leadWaitingHours(lead, now = new Date()) {
   return Number.isFinite(hours) && hours >= 0 ? Math.floor(hours) : null;
 }
 
+// Конкретное обещание менеджера важнее приблизительного «давно не трогали».
+// Состояние используется и в верхней очереди CRM, и на самой карточке лида.
+export function leadNextActionState(lead, now = new Date()) {
+  const label = String(lead?.next_action || "").trim();
+  const due = lead?.next_action_at ? new Date(lead.next_action_at) : null;
+  if (!label || !due || !Number.isFinite(due.getTime())) return { kind: "missing", due: null };
+
+  const current = now instanceof Date ? now : new Date(now);
+  if (!Number.isFinite(current.getTime())) return { kind: "planned", due };
+  if (due.getTime() < current.getTime()) return { kind: "overdue", due };
+
+  const tomorrow = new Date(current);
+  tomorrow.setHours(24, 0, 0, 0);
+  return { kind: due.getTime() < tomorrow.getTime() ? "today" : "planned", due };
+}
+
 // firstStageId — первая стадия воронки: лид в ней ещё никто не взял в работу.
-export function leadSlaStats(leads = [], { firstStageId = null, reactionHours = 2, staleDays = 3, now = new Date() } = {}) {
-  const open = leads.filter((l) => !l.converted_job_id);
+export function leadSlaStats(leads = [], { firstStageId = null, closedStageIds = [], reactionHours = 2, staleDays = 3, now = new Date() } = {}) {
+  const closed = new Set(closedStageIds.map(String));
+  const open = leads.filter((l) => !l.converted_job_id && !closed.has(String(l.stage_id)));
   const rows = open.map((l) => ({ lead: l, hours: leadWaitingHours(l, now) }));
   const untouched = rows.filter((r) => r.hours !== null && firstStageId && String(r.lead.stage_id) === String(firstStageId));
+  const actions = open.map((lead) => leadNextActionState(lead, now));
   return {
     open: open.length,
     // Не отвечено дольше норматива — самое дорогое: клиент уходит к тем, кто взял трубку.
@@ -1554,6 +1572,9 @@ export function leadSlaStats(leads = [], { firstStageId = null, reactionHours = 
     // Взяли в работу и забыли.
     stale: rows.filter((r) => r.hours !== null && r.hours >= staleDays * 24
       && (!firstStageId || String(r.lead.stage_id) !== String(firstStageId))).length,
+    overdue: actions.filter((action) => action.kind === "overdue").length,
+    dueToday: actions.filter((action) => action.kind === "today").length,
+    missingPlan: actions.filter((action) => action.kind === "missing").length,
     longestHours: rows.reduce((m, r) => (r.hours !== null && r.hours > m ? r.hours : m), 0),
     reactionHours, staleDays,
   };

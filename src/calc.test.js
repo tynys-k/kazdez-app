@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   jobChemCost, partnerShareAmt, executorShareAmt, jobEconomics,
   techCashOnHand, techCashCollected, techDepositedPending, techLedger, isClosedDate,
-  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadSlaStats, dayLoad,
+  clientStats, allocationPerJob, jobFullEconomics, jobDurations, durationStats, cashForecast, monthlyOpexAverage, salaryForMonth, absenceDaysInMonth, helpersTotal, helperEarnings, leadWaitingHours, leadNextActionState, leadSlaStats, dayLoad,
   priceFor,
   turnoverReport, chemPriceOn, chemForecast, supplierPrices,
   docStatus, docsNeedingAttention, guaranteeCostOf, guaranteeStats, dormantClients,
@@ -577,6 +577,27 @@ describe("ожидание лида", () => {
   it("без указания первой стадии не выдумывает просрочку по реакции", () => {
     const s = leadSlaStats([lead({ updated_at: hoursAgo(99) })], { firstStageId: null, now });
     expect(s.lateReaction).toBe(0);
+  });
+
+  it("различает просроченный, сегодняшний и будущий следующий шаг", () => {
+    expect(leadNextActionState(lead({ next_action: "Позвонить", next_action_at: hoursAgo(1) }), now).kind).toBe("overdue");
+    expect(leadNextActionState(lead({ next_action: "Отправить КП", next_action_at: new Date(now.getTime() + 3600000).toISOString() }), now).kind).toBe("today");
+    expect(leadNextActionState(lead({ next_action: "Уточнить решение", next_action_at: new Date(now.getTime() + 24 * 3600000).toISOString() }), now).kind).toBe("planned");
+  });
+
+  it("не считает пустое обещание планом", () => {
+    expect(leadNextActionState(lead({ next_action: "", next_action_at: "2026-09-02T12:00:00Z" }), now).kind).toBe("missing");
+    expect(leadNextActionState(lead({ next_action: "Позвонить", next_action_at: null }), now).kind).toBe("missing");
+  });
+
+  it("считает очередь по срокам и исключает закрытые стадии", () => {
+    const s = leadSlaStats([
+      lead({ id: "late", next_action: "Позвонить", next_action_at: hoursAgo(1) }),
+      lead({ id: "today", next_action: "КП", next_action_at: new Date(now.getTime() + 3600000).toISOString() }),
+      lead({ id: "empty", next_action: null, next_action_at: null }),
+      lead({ id: "lost", stage_id: "lost", next_action: null, next_action_at: null }),
+    ], { firstStageId: "s1", closedStageIds: ["lost"], now });
+    expect(s).toMatchObject({ open: 3, overdue: 1, dueToday: 1, missingPlan: 1 });
   });
 });
 

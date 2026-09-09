@@ -15,14 +15,14 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_CREATION_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_ORDER_VISITS_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_CREATION_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_ORDER_VISITS_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, LEAD_WORK_QUEUE_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { yandexRouteUrl } from "./routePlanning";
 import { AnalyticsTab } from "./analytics";
 import { canonicalPestName, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceKey, canonicalSourceName, sourceNamesMatch } from "./sourceNormalization";
-import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, LeadTouchModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -269,6 +269,7 @@ function Dashboard({ session, profile }) {
   const [leads, setLeads] = useState([]);
   const [leadStages, setLeadStages] = useState([]);
   const [leadStageFilter, setLeadStageFilter] = useState("all");
+  const [leadQueueFilter, setLeadQueueFilter] = useState("all");
   const [partnerSearch, setPartnerSearch] = useState("");
   const [teamRepFilter, setTeamRepFilter] = useState({ preset: "month" });
   const [mktChannels, setMktChannels] = useState([]);
@@ -2016,23 +2017,41 @@ function Dashboard({ session, profile }) {
     load();
   }
   async function saveLead(payload, existing) {
+    const row = { ...payload, owner_id: payload.owner_id || existing?.owner_id || session.user.id };
     const res = existing
-      ? await supabase.from("leads").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", existing.id)
-      : await supabase.from("leads").insert({ ...payload, created_by: session.user.id });
-    if (res.error) { showToast("Ошибка: " + res.error.message); return; }
+      ? await supabase.from("leads").update({ ...row, updated_at: new Date().toISOString() }).eq("id", existing.id)
+      : await supabase.from("leads").insert({ ...row, created_by: session.user.id });
+    if (res.error) {
+      const schemaMissing = /next_action|owner_id|lost_reason|schema cache/i.test(res.error.message || "");
+      showToast(schemaMissing ? `Сначала выполни supabase/${LEAD_WORK_QUEUE_MIGRATION} — лид не был изменён.` : "Ошибка: " + res.error.message);
+      return false;
+    }
     await logAction("CRM", `Лид ${existing ? "изменён" : "создан"}: ${payload.name || payload.phone || "без имени"}`);
     setModal(null); showToast("Сохранено"); load();
+    return true;
   }
-  async function touchLead(lead) {
-    await supabase.from("leads").update({ updated_at: new Date().toISOString() }).eq("id", lead.id);
-    await logAction("CRM", `Касание с клиентом: ${lead.name || lead.phone || "?"}`);
-    showToast("Отмечено касание"); load();
+  async function touchLead(lead, nextAction, nextActionAt) {
+    const rpcName = "touch_lead_atomic";
+    const { error } = await supabase.rpc(rpcName, { p_lead_id: lead.id, p_next_action: nextAction, p_next_action_at: nextActionAt });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Очередь продаж ещё не включена. Выполни supabase/${LEAD_WORK_QUEUE_MIGRATION} — касание не было изменено.`
+        : error.message;
+      showToast("Ошибка: " + message); return message;
+    }
+    await logAction("CRM", `Касание: ${lead.name || lead.phone || "?"} · дальше: ${nextAction}`);
+    setModal(null); showToast("Касание и следующий шаг сохранены"); load(); return null;
   }
-  async function setLeadStage(lead, stageId) {
-    await supabase.from("leads").update({ stage_id: stageId, updated_at: new Date().toISOString() }).eq("id", lead.id);
+  async function setLeadStage(lead, stageId, workflow = {}) {
+    const { error } = await supabase.from("leads").update({ stage_id: stageId, ...workflow, updated_at: new Date().toISOString() }).eq("id", lead.id);
+    if (error) {
+      const schemaMissing = /next_action|lost_reason|schema cache/i.test(error.message || "");
+      const message = schemaMissing ? `Сначала выполни supabase/${LEAD_WORK_QUEUE_MIGRATION}.` : error.message;
+      showToast("Ошибка: " + message); return message;
+    }
     const stName = leadStages.find((s) => s.id === stageId)?.name || "";
     await logAction("CRM", `Лид «${lead.name || lead.phone || "?"}» → ${stName}`);
-    load();
+    setModal(null); showToast("Стадия и следующий шаг сохранены"); load(); return null;
   }
   async function removeLead(lead) {
     await supabase.from("leads").delete().eq("id", lead.id);
@@ -2851,7 +2870,8 @@ function Dashboard({ session, profile }) {
   const tenderOverdue = tenderServices.filter((s) => !s.done && s.due_date && s.due_date < todayIsoT).length;
   const activeTenders = tenders.filter((t) => t.status !== "closed" && t.status !== "lost").length;
   const leadStageById = (id) => leadStages.find((s) => s.id === id);
-  const activeLeads = leads.filter((l) => { const st = leadStageById(l.stage_id); return !l.converted_job_id && !(st && st.is_lost); }).length;
+  const closedLeadStageIds = leadStages.filter((stage) => stage.is_final || stage.is_lost).map((stage) => stage.id);
+  const activeLeads = leads.filter((l) => { const st = leadStageById(l.stage_id); return !l.converted_job_id && !(st && (st.is_lost || st.is_final)); }).length;
   const servicesOf = (tid) => tenderServices.filter((s) => s.tender_id === tid).sort((a, b) => a.seq - b.seq);
   const guaranteesOf = (tid) => tenderGuarantees.filter((g) => g.tender_id === tid);
   const visibleTasks = canManageTasks ? tasks : tasks.filter((t) => t.assignee_id === session.user.id);
@@ -2986,13 +3006,15 @@ function Dashboard({ session, profile }) {
   });
   const managerRatings = Object.values(managerRatingMap).map((r) => ({ ...r, conversion: r.total ? Math.round(r.done / r.total * 100) : 0, avgCheck: r.done ? Math.round(r.revenue / r.done) : 0 })).sort((a, b) => b.profit - a.profit);
   // Сколько лидов ждут ответа. Первая стадия воронки = «ещё никто не взял».
-  const leadSla = calc.leadSlaStats(leads, { firstStageId: leadStages[0]?.id || null });
+  const leadSla = calc.leadSlaStats(leads, { firstStageId: leadStages[0]?.id || null, closedStageIds: closedLeadStageIds });
+  const leadOwners = allProfiles.filter((person) => person.is_active !== false && ["admin", "manager"].includes(person.role));
   const dashboardAlerts = [
     overdueJobs.length ? { id: "overdue-jobs", label: "Просроченные заявки", value: overdueJobs.length, tab: "jobs", tone: "danger" } : null,
     unassignedSoon.length ? { id: "unassigned", label: "Не назначены на сегодня/завтра", value: unassignedSoon.length, tab: "jobs", tone: "warning" } : null,
     overdueTaskList.length ? { id: "tasks", label: "Просроченные задачи", value: overdueTaskList.length, tab: "tasks", tone: "danger" } : null,
     // Лиды — работа менеджера: у исполнителя это лишний шум и чужие данные.
     canEditJobs && leadSla.lateReaction ? { id: "lead-sla", label: `Лиды без ответа дольше ${leadSla.reactionHours} ч`, value: leadSla.lateReaction, tab: "leads", tone: "danger" } : null,
+    canEditJobs && leadSla.overdue ? { id: "lead-actions", label: "Просрочены следующие шаги по лидам", value: leadSla.overdue, tab: "leads", tone: "danger" } : null,
     pendingDeposits.length ? { id: "cash", label: "Наличка ждёт подтверждения", value: pendingDeposits.length, tab: "cash", tone: "warning" } : null,
     isAdmin && lowCount ? { id: "stock", label: "Заканчиваются препараты", value: lowCount, tab: "stock", tone: "danger" } : null,
     // Предупреждение до того, как остаток стал критическим: по расходу видно,
@@ -3674,26 +3696,43 @@ function Dashboard({ session, profile }) {
               </div>
             </div>
             {leadSla.open > 0 && (
-              <div className="kd-kpigrid" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))", marginBottom: 12 }}>
+              <div className="kd-kpigrid kd-lead-kpis" style={{ marginBottom: 12 }}>
                 <div className="kd-kpicard"><span>В работе</span><strong>{leadSla.open}</strong><small>не превратились в заявку</small></div>
-                <div className="kd-kpicard"><span>Без ответа дольше {leadSla.reactionHours} ч</span><strong className={leadSla.lateReaction ? "neg" : ""}>{leadSla.lateReaction}</strong><small>клиент уходит к тем, кто перезвонил</small></div>
-                <div className="kd-kpicard"><span>Зависли дольше {leadSla.staleDays} дн.</span><strong className={leadSla.stale ? "neg" : ""}>{leadSla.stale}</strong><small>взяли в работу и забыли</small></div>
+                <div className="kd-kpicard"><span>Просрочено</span><strong className={leadSla.overdue ? "neg" : ""}>{leadSla.overdue}</strong><small>обещанный шаг уже надо сделать</small></div>
+                <div className="kd-kpicard"><span>На сегодня</span><strong>{leadSla.dueToday}</strong><small>ещё не просрочены</small></div>
+                <div className="kd-kpicard"><span>Без плана</span><strong className={leadSla.missingPlan ? "neg" : ""}>{leadSla.missingPlan}</strong><small>нужно назначить действие</small></div>
               </div>
             )}
             {leadStages.length === 0 && <div className="kd-empty">Стадии воронки не заданы. Добавь их в Настройках → «Стадии воронки».</div>}
             {/* фильтр по стадии */}
             {leadStages.length > 0 && (
+              <div className="kd-datechips" style={{ marginBottom: 10 }}>
+                <button className={`kd-datechip ${leadQueueFilter === "all" ? "on" : ""}`} onClick={() => { setLeadQueueFilter("all"); setLeadStageFilter("all"); }}>Вся очередь · {leadSla.open}</button>
+                <button className={`kd-datechip ${leadQueueFilter === "overdue" ? "on" : ""}`} onClick={() => { setLeadQueueFilter("overdue"); setLeadStageFilter("all"); }}>Просрочено · {leadSla.overdue}</button>
+                <button className={`kd-datechip ${leadQueueFilter === "today" ? "on" : ""}`} onClick={() => { setLeadQueueFilter("today"); setLeadStageFilter("all"); }}>Сегодня · {leadSla.dueToday}</button>
+                {leadSla.missingPlan > 0 && <button className={`kd-datechip ${leadQueueFilter === "missing" ? "on" : ""}`} onClick={() => { setLeadQueueFilter("missing"); setLeadStageFilter("all"); }}>Без плана · {leadSla.missingPlan}</button>}
+              </div>
+            )}
+            {leadStages.length > 0 && (
               <div className="kd-datechips" style={{ marginBottom: 6 }}>
-                <button className={`kd-datechip ${leadStageFilter === "all" ? "on" : ""}`} onClick={() => setLeadStageFilter("all")}>Все стадии</button>
+                <button className={`kd-datechip ${leadStageFilter === "all" ? "on" : ""}`} onClick={() => { setLeadStageFilter("all"); setLeadQueueFilter("all"); }}>Все стадии</button>
                 {[...leadStages].sort((a, b) => a.sort - b.sort).map((st) => {
                   const cnt = leads.filter((l) => l.stage_id === st.id && !l.converted_job_id).length;
-                  return <button key={st.id} className={`kd-datechip ${leadStageFilter === st.id ? "on" : ""}`} onClick={() => setLeadStageFilter(st.id)}>{st.name}{cnt ? ` · ${cnt}` : ""}</button>;
+                  return <button key={st.id} className={`kd-datechip ${leadStageFilter === st.id ? "on" : ""}`} onClick={() => { setLeadStageFilter(st.id); setLeadQueueFilter("all"); }}>{st.name}{cnt ? ` · ${cnt}` : ""}</button>;
                 })}
               </div>
             )}
             {[...leadStages].sort((a, b) => a.sort - b.sort).filter((st) => leadStageFilter === "all" || st.id === leadStageFilter).map((st) => {
               const stageLeads = leads.filter((l) => l.stage_id === st.id && !l.converted_job_id)
-                .sort((a, b) => new Date(a.updated_at || 0) - new Date(b.updated_at || 0));
+                .filter((lead) => leadQueueFilter === "all"
+                  ? leadStageFilter !== "all" || (!st.is_final && !st.is_lost)
+                  : !st.is_final && !st.is_lost && calc.leadNextActionState(lead).kind === leadQueueFilter)
+                .sort((a, b) => {
+                  const actionRank = { overdue: 0, today: 1, missing: 2, planned: 3 };
+                  const aState = calc.leadNextActionState(a), bState = calc.leadNextActionState(b);
+                  if (actionRank[aState.kind] !== actionRank[bState.kind]) return actionRank[aState.kind] - actionRank[bState.kind];
+                  return new Date(a.next_action_at || a.updated_at || 0) - new Date(b.next_action_at || b.updated_at || 0);
+                });
               if (leadStageFilter === "all" && stageLeads.length === 0) return null;
               const sortedStages = [...leadStages].sort((a, b) => a.sort - b.sort);
               const stIdx = sortedStages.findIndex((x) => x.id === st.id);
@@ -3720,6 +3759,15 @@ function Dashboard({ session, profile }) {
                           {l.phone && <a href={`tel:${(l.phone || "").replace(/\s/g, "")}`} style={{ color: "var(--primary-d)", fontWeight: 700 }}>{l.phone}</a>}
                         </div>
                         {l.address && <div className="kd-addr" style={{ marginTop: 2 }}><AddressText text={l.address} /></div>}
+                        {!st.is_final && !st.is_lost && (() => {
+                          const action = calc.leadNextActionState(l);
+                          const labels = { overdue: "Просрочено", today: "Сегодня", planned: "Запланировано", missing: "Нет следующего шага" };
+                          return <div className={`kd-leadnext ${action.kind}`}>
+                            <CalendarClock size={15} />
+                            <span><strong>{l.next_action || labels.missing}</strong><small>{l.next_action_at ? `${labels[action.kind]} · ${fmtTs(l.next_action_at)}` : "Назначь действие и срок"}{l.owner_id ? ` · ${profileById(l.owner_id)?.full_name || "ответственный"}` : " · ответственный не указан"}</small></span>
+                          </div>;
+                        })()}
+                        {st.is_lost && <div className="kd-notebox">Причина отказа: {l.lost_reason || "не указана"}</div>}
                         {(() => {
                           const d = daysSince(l.updated_at);
                           const stale = d >= 7;
@@ -3737,8 +3785,8 @@ function Dashboard({ session, profile }) {
                         </div>
                         {l.note && <div className="kd-notebox">📝 {l.note}</div>}
                         <div className="kd-actions">
-                          {nextStage && <button className="kd-btn primary sm" onClick={() => setLeadStage(l, nextStage.id)}>{nextStage.name}<ArrowRight size={13} /></button>}
-                          <button className="kd-btn ghost sm" onClick={() => touchLead(l)}>Касание сегодня</button>
+                          {nextStage && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l, initialStageId: nextStage.id })}>{nextStage.name}<ArrowRight size={13} /></button>}
+                          {!st.is_final && !st.is_lost && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadTouch", lead: l })}>Зафиксировать касание</button>}
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l })}>Стадия</button>
                           <button className="kd-btn ghost sm" onClick={() => askConfirm(`Создать заявку из клиента «${l.name || l.phone || "?"}»? Перенесём телефон, адрес и источник.`, () => convertLeadToJob(l), { danger: false, confirmLabel: "Да, создать" })}><Plus size={13} />Заявка</button>
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "lead", lead: l })}><Pencil size={13} /></button>
@@ -6118,7 +6166,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
-      {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} onClose={() => setModal(null)} onSave={saveLead} />}
+      {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} owners={leadOwners} defaultOwnerId={session.user.id} onClose={() => setModal(null)} onSave={saveLead} />}
+      {modal?.kind === "leadTouch" && <LeadTouchModal lead={modal.lead} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : actorName} onClose={() => setModal(null)} onSave={(nextAction, nextActionAt) => touchLead(modal.lead, nextAction, nextActionAt)} />}
       {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}
       {modal?.kind === "mktTopup" && <MktTopupModal channel={modal.channel} accounts={accounts} onClose={() => setModal(null)} onSave={(amount, date, accId, note, requestId) => addMktTopup(modal.channel.id, amount, date, accId, note, requestId)} />}
       {modal?.kind === "dayOff" && <DayOffModal techs={techs} defaultDate={modal.date || scheduleDate} daysOff={daysOff} personName={personName} onClose={() => setModal(null)} onAdd={addDayOff} onRemove={removeDayOff} />}
@@ -6127,7 +6176,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techExtras" && <TechExtrasModal job={modal.job} techs={techs} helpers={jobHelpers.filter((h) => String(h.job_id) === String(modal.job.id))} techName={techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} onSave={(bonus, travel, helpers) => saveTechExtras(modal.job, bonus, travel, helpers)} />}
       {modal?.kind === "requestEdit" && <RequestEditModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => requestReportEdit(modal.job, reason)} />}
       {modal?.kind === "executorDone" && <ExecutorDoneModal job={modal.job} partnerName={partnerById(modal.job.executor_partner_id)?.name} accounts={accounts} defaultAccountId={settings.cash_account_id || ""} onClose={() => setModal(null)} onConfirm={(amount, settlement, accId, date) => markExecutorDone(modal.job, amount, settlement, accId, date)} />}
-      {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} onClose={() => setModal(null)} onPick={(sid) => { setLeadStage(modal.lead, sid); setModal(null); }} />}
+      {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} initialStageId={modal.initialStageId} onClose={() => setModal(null)} onPick={(sid, workflow) => setLeadStage(modal.lead, sid, workflow)} />}
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
       {modal?.kind === "returnGuarantee" && <ReturnGuaranteeModal g={modal.g} remaining={modal.remaining} accounts={accounts} onClose={() => setModal(null)} onConfirm={(amount, date, accId, note, requestId) => addGuaranteeReturn(modal.g, amount, date, accId, note, requestId)} />}
