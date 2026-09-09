@@ -1580,6 +1580,59 @@ export function leadSlaStats(leads = [], { firstStageId = null, closedStageIds =
   };
 }
 
+// Поиск и сортировка лидов вынесены из интерфейса, чтобы один и тот же набор
+// фильтров давал предсказуемый результат на компьютере и на телефоне.
+export function filterAndSortLeads(leads = [], {
+  search = "", sort = "newest", freshness = "all", ownerId = "", source = "", clientType = "",
+} = {}, now = new Date()) {
+  const current = now instanceof Date ? now : new Date(now);
+  const currentMs = Number.isFinite(current.getTime()) ? current.getTime() : Date.now();
+  const query = String(search || "").trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е");
+  const queryDigits = query.replace(/\D/g, "");
+  const startOfToday = new Date(currentMs); startOfToday.setHours(0, 0, 0, 0);
+  const freshnessStart = freshness === "today" ? startOfToday.getTime()
+    : ["7", "30"].includes(String(freshness)) ? currentMs - Number(freshness) * 86400000
+      : null;
+  const timeOf = (lead, field, fallback = null) => {
+    const value = lead?.[field] || (fallback ? lead?.[fallback] : null);
+    const time = value ? new Date(value).getTime() : NaN;
+    return Number.isFinite(time) ? time : null;
+  };
+
+  const filtered = leads.filter((lead) => {
+    if (ownerId === "unassigned" ? !!lead.owner_id : ownerId && String(lead.owner_id) !== String(ownerId)) return false;
+    if (source === "missing" ? !!String(lead.source || "").trim() : source && canonicalSourceKey(lead.source) !== canonicalSourceKey(source)) return false;
+    if (clientType && lead.client_type !== clientType) return false;
+    const created = timeOf(lead, "created_at", "updated_at");
+    if (freshnessStart !== null && (created === null || created < freshnessStart || created > currentMs)) return false;
+    if (query) {
+      const text = [lead.name, lead.phone, lead.address, lead.source, lead.note]
+        .map((value) => String(value || "").toLocaleLowerCase("ru-RU").replace(/ё/g, "е"))
+        .join(" ");
+      const digits = [lead.phone, lead.name, lead.address].map((value) => String(value || "").replace(/\D/g, "")).join(" ");
+      if (!text.includes(query) && !(queryDigits.length >= 3 && digits.includes(queryDigits))) return false;
+    }
+    return true;
+  });
+
+  return filtered.sort((a, b) => {
+    if (sort === "oldest") {
+      return (timeOf(a, "created_at", "updated_at") ?? Number.POSITIVE_INFINITY)
+        - (timeOf(b, "created_at", "updated_at") ?? Number.POSITIVE_INFINITY);
+    }
+    if (sort === "recent_touch") {
+      return (timeOf(b, "updated_at", "created_at") ?? 0) - (timeOf(a, "updated_at", "created_at") ?? 0);
+    }
+    if (sort === "next_action") {
+      const rank = { overdue: 0, today: 1, planned: 2, missing: 3 };
+      const aState = leadNextActionState(a, current), bState = leadNextActionState(b, current);
+      if (rank[aState.kind] !== rank[bState.kind]) return rank[aState.kind] - rank[bState.kind];
+      return (aState.due?.getTime() ?? Number.POSITIVE_INFINITY) - (bState.due?.getTime() ?? Number.POSITIVE_INFINITY);
+    }
+    return (timeOf(b, "created_at", "updated_at") ?? 0) - (timeOf(a, "created_at", "updated_at") ?? 0);
+  });
+}
+
 // --- загрузка бригады на день --------------------------------------------
 
 // Рабочий день дезинфектора. Не настройка: величина нужна только как ориентир

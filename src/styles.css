@@ -526,6 +526,9 @@ body{
 .kd-leadnext>svg{flex:0 0 auto;margin-top:2px;}.kd-leadnext>span{min-width:0;}.kd-leadnext strong{display:block;font-size:13px;}.kd-leadnext small{display:block;margin-top:2px;color:var(--muted);font-size:11px;line-height:1.35;}
 .kd-leadnext.overdue,.kd-leadnext.missing{border-color:var(--rust);background:var(--rust-tint);color:var(--rust);}.kd-leadnext.overdue small,.kd-leadnext.missing small{color:var(--rust);}
 .kd-leadnext.today{border-color:var(--amber);background:var(--amber-tint);color:var(--amber);}.kd-leadnext.today small{color:var(--amber);}
+.kd-lead-filterbar{display:grid;grid-template-columns:minmax(240px,2fr) repeat(5,minmax(125px,1fr));gap:9px;align-items:end;padding:12px;margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);}
+.kd-lead-filterbar .kd-searchbar{min-width:0;}.kd-lead-filter{display:flex;flex-direction:column;gap:4px;min-width:0;}.kd-lead-filter>span{font-family:var(--font-display);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);}.kd-lead-filter select{width:100%;min-width:0;min-height:46px;padding:10px 30px 10px 10px;border:1px solid var(--line);border-radius:13px;background:var(--surface-sunk);color:var(--ink);font:inherit;font-size:12.5px;font-weight:700;}
+.kd-lead-filter-foot{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--muted);font-size:12px;font-weight:650;}.kd-lead-filter-foot strong{color:var(--ink);}
 .kd-mktbar{height:8px;background:var(--surface-sunk);border:1px solid var(--line-soft);border-radius:999px;overflow:hidden;margin:8px 0;}
 .kd-mktbarfill{height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:999px;transition:width .3s ease;box-shadow:0 0 10px 0 var(--em-glow);}
 
@@ -765,6 +768,7 @@ body{
   .kd-todayhero-actions{justify-content:flex-start;width:100%;}
   .kd-kpigrid{grid-template-columns:1fr 1fr;}
   .kd-lead-kpis{grid-template-columns:1fr 1fr;}
+  .kd-lead-filterbar{grid-template-columns:1fr 1fr;padding:10px;gap:8px;}.kd-lead-search,.kd-lead-filter-foot{grid-column:1/-1;}.kd-lead-filter select{min-height:42px;padding-top:8px;padding-bottom:8px;font-size:12px;}
   /* В две колонки 30px моноширинного не помещается — суммы вида «172 500 ₸»
      переносили знак валюты на отдельную строку и ломали высоту плиток. */
   .kd-kpigrid strong,.kd-kpicard>strong{font-size:22px;letter-spacing:-.6px;}
