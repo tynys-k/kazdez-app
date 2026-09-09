@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { JobFormModal, LeadModal, LeadStageSelectModal, LeadTouchModal, ReportModal, jobToForm } from "./modals";
+import { JobFormModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, ReportModal, jobToForm } from "./modals";
 import { CHECK_RESULTS, WORK_EQUIPMENT } from "./shared";
 import { reportDraftStorageKey } from "./localDataScope";
 
@@ -152,12 +152,25 @@ describe("lead work queue forms", () => {
     expect(onPick).toHaveBeenCalledWith("lost", { next_action: null, next_action_at: null, lost_reason: "Выбрал конкурента" });
   });
 
-  it("records a touch together with the next promise", async () => {
+  it("records what happened, what the client said and the next promise", async () => {
     const onSave = vi.fn().mockResolvedValue(null);
-    await act(async () => root.render(<LeadTouchModal lead={{ id: "lead", name: "Клиент" }} ownerName="Менеджер" onSave={onSave} onClose={vi.fn()} />));
+    await act(async () => root.render(<LeadActivityModal lead={{ id: "lead", name: "Клиент" }} ownerName="Менеджер" onSave={onSave} onClose={vi.fn()} />));
+    await click("WhatsApp");
+    await change(field("Результат общения"), "proposal_sent");
+    await change(field("Что обсудили / что сказал клиент"), "Отправили расчёт, ждёт решение");
     await change(field("Что сделать дальше"), "Отправить КП");
-    await click("Зафиксировать касание");
-    expect(onSave.mock.calls[0][0]).toBe("Отправить КП");
-    expect(new Date(onSave.mock.calls[0][1]).getTime()).toBeGreaterThan(Date.now());
+    await click("Сохранить контакт");
+    expect(onSave.mock.calls[0][0]).toMatchObject({ kind: "whatsapp", outcome: "proposal_sent", comment: "Отправили расчёт, ждёт решение", nextAction: "Отправить КП" });
+    expect(new Date(onSave.mock.calls[0][0].nextActionAt).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("shows a chronological CRM history with author and comment", async () => {
+    const onAddNote = vi.fn();
+    await act(async () => root.render(<LeadHistoryModal lead={{ id: "lead", name: "Клиент", next_action: "Перезвонить", next_action_at: "2026-09-10T08:00:00Z" }} stageName="Новый лид" ownerName="Менеджер" activities={[{ id: "event", kind: "call", outcome: "connected", comment: "Нужен расчёт", occurred_at: "2026-09-09T08:00:00Z", created_by: "manager" }]} profileName={() => "Менеджер"} onAddNote={onAddNote} onAddContact={vi.fn()} onClose={vi.fn()} />));
+    expect(container.textContent).toContain("Звонок · Связались");
+    expect(container.textContent).toContain("Нужен расчёт");
+    expect(container.textContent).toContain("Менеджер");
+    await click("Добавить комментарий");
+    expect(onAddNote).toHaveBeenCalledTimes(1);
   });
 });
