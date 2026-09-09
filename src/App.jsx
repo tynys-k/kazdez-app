@@ -23,7 +23,8 @@ import { AnalyticsTab } from "./analytics";
 import { canonicalPestName, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceKey, canonicalSourceName, canonicalSourceOptions, sourceNamesMatch } from "./sourceNormalization";
 import { groupLeadActivities, leadActivitySummary } from "./leadActivities";
-import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { contractHistorySummary, subscriptionIntervalLabel } from "./subscriptionHistory";
+import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -2250,7 +2251,7 @@ function Dashboard({ session, profile }) {
       showToast("Ошибка: " + message); return;
     }
     await logAction("Абонент", `Создана плановая заявка: ${contract.client_name} · ${isoToRu(contract.next_service_date)}`);
-    showToast("Плановая заявка создана"); setTab("jobs"); reloadJobs();
+    setModal(null); showToast("Плановая заявка создана"); setTab("jobs"); reloadJobs();
   }
   async function saveEquipment(payload, existing) {
     const res = existing ? await supabase.from("equipment").update(payload).eq("id", existing.id) : await supabase.from("equipment").insert(payload);
@@ -4331,7 +4332,25 @@ function Dashboard({ session, profile }) {
               <div className="kd-kpicard"><span>Неактивных</span><strong>{contracts.length - activeContracts.length}</strong><small>приостановленные договоры</small></div>
             </div>
             {contracts.length === 0 && <div className="kd-empty">Абонентских договоров нет. Добавь первый договор кнопкой «+ Абонент».</div>}
-            <div className="kd-contractgrid">{contracts.map((c) => { const due = c.active !== false && c.next_service_date <= todayIso; return <div className={`kd-card ${due ? "low" : ""}`} key={c.id}><div className="kd-card-head"><div className="kd-pest">{c.client_name}</div><span className="kd-badge" style={{ color: c.active !== false ? "#0E7C66" : "#6E7871", background: c.active !== false ? "#E4F3EE" : "#F0F0EE" }}>{c.active !== false ? "активен" : "пауза"}</span></div><div className="kd-addr">{c.address}</div><div className="kd-row"><span>Услуга</span><strong>{c.service}</strong></div><div className="kd-row"><span>Каждые</span><strong>{c.interval_days} дн.</strong></div><div className="kd-row"><span>Следующий выезд</span><strong className={due ? "kd-neg" : ""}>{isoToRu(c.next_service_date)}</strong></div><div className="kd-row total"><span>Стоимость</span><strong>{fmt(c.price)} ₸</strong></div><div className="kd-actions">{c.active !== false && <button className="kd-btn primary sm" onClick={() => createContractJob(c)}><Plus size={13} />Создать заявку</button>}<button className="kd-btn ghost sm" onClick={() => setModal({ kind: "contract", contract: c })}>Изменить</button><button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить договор «${c.client_name}»?`, () => removeContract(c))}><Trash2 size={13} /></button></div></div>; })}</div>
+            <div className="kd-contractgrid">{contracts.map((c) => {
+              const history = contractHistorySummary(c, jobs, todayIso);
+              const due = history.dueWithoutJob || history.overdue > 0;
+              return <div className={`kd-card kd-subscription-card ${due ? "low" : ""}`} key={c.id}>
+                <div className="kd-card-head"><div className="kd-pest">{c.client_name}</div><span className="kd-badge" style={{ color: c.active !== false ? "#0E7C66" : "#6E7871", background: c.active !== false ? "#E4F3EE" : "#F0F0EE" }}>{c.active !== false ? "активен" : "пауза"}</span></div>
+                <div className="kd-addr">{c.address}</div>
+                <div className="kd-subscription-period"><Repeat2 size={15} /><span><strong>{subscriptionIntervalLabel(c.interval_days)}</strong><small>{c.service}</small></span></div>
+                <div className="kd-row"><span>Последний выезд</span><strong>{history.lastDone ? isoToRu(history.lastDone.scheduled_date) : "Ещё не было"}</strong></div>
+                <div className="kd-row"><span>История</span><strong>{history.done} выполнено · {history.total} всего</strong></div>
+                <div className="kd-row"><span>{history.nextCreated ? "Ближайшая заявка" : history.dueWithoutJob ? "Заявка на цикл" : "Следующий цикл"}</span><strong className={due ? "kd-neg" : ""}>{history.nextCreated ? isoToRu(history.nextCreated.scheduled_date) : history.dueWithoutJob ? "Ещё не создана" : isoToRu(c.next_service_date)}</strong></div>
+                <div className="kd-row total"><span>Стоимость выезда</span><strong>{fmt(c.price)} ₸</strong></div>
+                <div className="kd-actions">
+                  {c.active !== false && <button className={`kd-btn ${history.dueWithoutJob ? "primary" : "ghost"} sm`} onClick={() => createContractJob(c)}><Plus size={13} />Создать заявку</button>}
+                  <button className={`kd-btn ${history.dueWithoutJob ? "ghost" : "primary"} sm`} onClick={() => setModal({ kind: "contractDetails", contract: c })}><FolderOpen size={13} />Открыть карточку</button>
+                  <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "contract", contract: c })}><Pencil size={13} />Изменить</button>
+                  <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить договор «${c.client_name}»?`, () => removeContract(c))}><Trash2 size={13} /></button>
+                </div>
+              </div>;
+            })}</div>
           </div>
         )}
 
@@ -6266,6 +6285,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "economics" && <JobEconomicsModal job={modal.job} economics={jobEconomics(modal.job)} onClose={() => setModal(null)} onSave={(payload) => saveJobEconomics(modal.job, payload)} />}
       {modal?.kind === "followup" && <FollowupModal followup={modal.followup} job={modal.job} lead={modal.lead} defaultKind={modal.defaultKind || "lost"} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveFollowup} />}
       {modal?.kind === "quality" && <QualityModal job={modal.job} check={qualityByJob(modal.job.id)} defaultReviewUrl={settings.review_url || ""} onClose={() => setModal(null)} onSave={(payload) => saveQualityCheck(modal.job, payload)} />}
+      {modal?.kind === "contractDetails" && <ContractDetailsModal contract={modal.contract} jobs={jobs} managerName={profileById(modal.contract?.manager_id)?.full_name || ""} techName={(id) => techById(id)?.full_name || profileById(id)?.full_name || ""} todayIso={todayIso} onClose={() => setModal(null)} onEdit={() => setModal({ kind: "contract", contract: modal.contract })} onCreateJob={() => createContractJob(modal.contract)} onOpenJob={(job) => setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job })} />}
       {modal?.kind === "contract" && <ContractModal contract={modal.contract} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveContract} />}
       {confirmState && (
         <ConfirmModal message={confirmState.message} danger={confirmState.danger} confirmLabel={confirmState.confirmLabel}

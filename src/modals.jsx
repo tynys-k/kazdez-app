@@ -11,6 +11,7 @@ import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, MET
 import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceName, canonicalSourceOptions } from "./sourceNormalization";
 import { LEAD_ACTIVITY_KINDS, LEAD_ACTIVITY_OUTCOMES, leadActivityKindLabel, leadActivityOutcomeLabel } from "./leadActivities";
+import { contractHistorySummary, contractVisitState, subscriptionIntervalLabel } from "./subscriptionHistory";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -4286,6 +4287,56 @@ function ContractModal({ contract, people = [], onClose, onSave }) {
   </ModalShell>;
 }
 
+function ContractDetailsModal({ contract, jobs = [], managerName, techName, todayIso, onClose, onEdit, onCreateJob, onOpenJob }) {
+  const summary = contractHistorySummary(contract, jobs, todayIso);
+  const digits = String(contract?.phone || "").replace(/\D/g, "");
+  const nextState = summary.overdue
+    ? { tone: "overdue", title: `${summary.overdue} просроченный выезд`, text: "Заявка была создана, но работа ещё не завершена." }
+    : summary.dueWithoutJob
+      ? { tone: "missing", title: "Заявка ещё не создана", text: `Плановая дата ${isoToRu(contract.next_service_date)}${summary.dueDays ? ` прошла ${summary.dueDays} дн. назад` : " наступила сегодня"}.` }
+      : summary.nextCreated
+        ? { tone: "planned", title: "Ближайшая заявка создана", text: `${isoToRu(summary.nextCreated.scheduled_date) || "Дата уточняется"} · ${techName(summary.nextCreated.assigned_to) || "исполнитель не назначен"}` }
+        : { tone: "planned", title: "Следующий цикл", text: isoToRu(contract.next_service_date) || "Дата не назначена" };
+  return <ModalShell title="Карточка абонента" onClose={onClose} wide footer={<>
+    <button className="kd-btn ghost" onClick={onEdit}><Pencil size={14} />Изменить договор</button>
+    {contract.active !== false && <button className="kd-btn primary" onClick={onCreateJob}><Plus size={14} />Создать следующий выезд</button>}
+  </>}>
+    <div className="kd-subscription-head">
+      <div><strong>{contract.client_name || "Абонент"}</strong><span>{contract.service || "Услуга не указана"} · {subscriptionIntervalLabel(contract.interval_days)}</span></div>
+      <span className="kd-badge" style={{ color: contract.active !== false ? "#0E7C66" : "#6E7871", background: contract.active !== false ? "#E4F3EE" : "#F0F0EE" }}>{contract.active !== false ? "активен" : "пауза"}</span>
+    </div>
+    <div className="kd-subscription-actions">
+      {digits && <a className="kd-btn ghost sm" href={`tel:+${digits}`}><Phone size={14} />{contract.phone}</a>}
+      {digits && <a className="kd-btn wa sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={14} />WhatsApp</a>}
+    </div>
+    <div className="kd-subscription-info">
+      <div><span>Адрес</span><strong>{contract.address || "Не указан"}</strong></div>
+      <div><span>Период</span><strong>{subscriptionIntervalLabel(contract.interval_days)}</strong></div>
+      <div><span>Стоимость выезда</span><strong>{fmt(contract.price)} ₸</strong></div>
+      <div><span>Ответственный</span><strong>{managerName || "Не назначен"}</strong></div>
+    </div>
+    <div className="kd-client360-kpis kd-subscription-kpis">
+      <div><span>Всего заявок</span><strong>{summary.total}</strong><small>по этому договору</small></div>
+      <div><span>Выполнено</span><strong>{summary.done}</strong><small>{summary.lastDone ? `последняя ${isoToRu(summary.lastDone.scheduled_date)}` : "выездов ещё не было"}</small></div>
+      <div><span>В работе</span><strong>{summary.active}</strong><small>{summary.overdue ? `просрочено ${summary.overdue}` : "без просрочек"}</small></div>
+      <div><span>Получено</span><strong>{fmt(summary.revenue)} ₸</strong><small>по готовым заявкам</small></div>
+    </div>
+    <div className={`kd-subscription-next ${nextState.tone}`}><div><strong>{nextState.title}</strong><span>{nextState.text}</span></div>{contract.active !== false && summary.dueWithoutJob && <button className="kd-btn primary sm" onClick={onCreateJob}>Создать сейчас</button>}</div>
+    {contract.note && <div className="kd-notebox" style={{ marginTop: 12 }}>Примечание: {contract.note}</div>}
+    <div className="kd-section" style={{ marginTop: 18 }}>История обслуживаний · {summary.rows.length}</div>
+    {summary.rows.length === 0 ? <div className="kd-empty" style={{ marginTop: 8 }}>По договору ещё не создано ни одной заявки.</div> : <div className="kd-subscription-history">{summary.rows.map((job) => {
+      const state = contractVisitState(job, todayIso);
+      const amount = job.status === "done" ? Number(job.report_paid) || 0 : Number(job.quoted_price) || 0;
+      return <div className={`kd-subscription-visit ${state.kind}`} key={job.id}>
+        <div className="kd-subscription-visitdate"><strong>{isoToRu(job.scheduled_date) || "Без даты"}</strong><span>{job.created_at ? `заявка создана ${fmtTs(job.created_at)}` : ""}</span></div>
+        <div><strong>{job.pest || contract.service || "Плановый выезд"}</strong><span>{techName(job.assigned_to) || "Исполнитель не назначен"}{job.cancel_reason ? ` · ${job.cancel_reason}` : ""}</span></div>
+        <div className="kd-subscription-visitend"><span className={`kd-visitstatus ${state.kind}`}>{state.label}</span><strong>{fmt(amount)} ₸</strong></div>
+        <button className="kd-btn ghost sm" onClick={() => onOpenJob(job)}>Открыть заявку</button>
+      </div>;
+    })}</div>}
+  </ModalShell>;
+}
+
 // ----------------------------- Доступы сотрудников -----------------------------
 // Каталог прав для окна «Права доступа». Ярлыки вкладок берём из TAB_LABELS,
 // чтобы названия совпадали с боковым меню.
@@ -4424,4 +4475,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
