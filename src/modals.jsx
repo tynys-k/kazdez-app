@@ -3562,7 +3562,18 @@ function MktTopupModal({ channel, accounts, onClose, onSave }) {
   );
 }
 
-function LeadModal({ lead, stages, sources, onClose, onSave }) {
+function localDateTimeInput(value, defaultHours = 0) {
+  const date = value ? new Date(value) : new Date(Date.now() + defaultHours * 3600000);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function localDateTimeIso(value) {
+  const date = value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, onClose, onSave }) {
   const [name, setName] = useState(lead?.name || "");
   const [clientType, setClientType] = useState(lead?.client_type || "person");
   const [phone, setPhone] = useState(lead?.phone || "+7 ");
@@ -3571,12 +3582,30 @@ function LeadModal({ lead, stages, sources, onClose, onSave }) {
   const [stageId, setStageId] = useState(lead?.stage_id || (stages[0]?.id || ""));
   const [kpUrl, setKpUrl] = useState(lead?.kp_url || "");
   const [note, setNote] = useState(lead?.note || "");
+  const [nextAction, setNextAction] = useState(lead?.next_action || "Позвонить клиенту");
+  const [nextActionAt, setNextActionAt] = useState(localDateTimeInput(lead?.next_action_at, 1));
+  const [lostReason, setLostReason] = useState(lead?.lost_reason || "");
+  const [ownerId, setOwnerId] = useState(lead?.owner_id || defaultOwnerId || owners[0]?.id || "");
   const [saving, setSaving] = useState(false);
   const sourceOptions = canonicalSourceOptions(sources, source);
-  const ok = (name.trim() || (phone.trim() && phone.trim() !== "+7"));
+  const selectedStage = stages.find((stage) => String(stage.id) === String(stageId));
+  const isLost = !!selectedStage?.is_lost;
+  const isClosed = !!lead?.converted_job_id || !!selectedStage?.is_final;
+  const actionDate = nextActionAt ? new Date(nextActionAt) : null;
+  const futureAction = actionDate && Number.isFinite(actionDate.getTime()) && actionDate.getTime() > Date.now();
+  const ok = !!(name.trim() || (phone.trim() && phone.trim() !== "+7"))
+    && (isLost ? !!lostReason.trim() : isClosed ? true : !!nextAction.trim() && !!futureAction);
   async function save() {
     setSaving(true);
-    await onSave({ name: name.trim() || null, client_type: clientType, phone: phone.trim() || null, address: address.trim() || null, source: canonicalSourceName(source) || null, stage_id: stageId || null, kp_url: kpUrl.trim() || null, note: note.trim() || null }, lead);
+    await onSave({
+      name: name.trim() || null, client_type: clientType, phone: phone.trim() || null,
+      address: address.trim() || null, source: canonicalSourceName(source) || null,
+      stage_id: stageId || null, kp_url: kpUrl.trim() || null, note: note.trim() || null,
+      next_action: isClosed || isLost ? null : nextAction.trim(),
+      next_action_at: isClosed || isLost ? null : localDateTimeIso(nextActionAt),
+      lost_reason: isLost ? lostReason.trim() : null,
+      owner_id: ownerId || null,
+    }, lead);
     setSaving(false);
   }
   return (
@@ -3597,21 +3626,93 @@ function LeadModal({ lead, stages, sources, onClose, onSave }) {
       <Field label="Источник">{sourceOptions.length > 0
         ? <select value={source} onChange={(e) => setSource(e.target.value)}><option value="">Не указан</option>{sourceOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>
         : <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="OLX / Instagram / рекомендация" />}</Field>
+      {owners.length > 0 && <Field label="Ответственный менеджер"><select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>{owners.map((person) => <option key={person.id} value={person.id}>{person.full_name || "Без имени"}</option>)}</select></Field>}
+      {isLost ? (
+        <Field label="Почему клиент отказался"><textarea className="kd-textarea" value={lostReason} onChange={(e) => setLostReason(e.target.value)} placeholder="Например: дорого, выбрал конкурента, передумал" /></Field>
+      ) : isClosed ? (
+        <div className="kd-hint" style={{ marginBottom: 12 }}>Лид закрыт — следующий контакт назначать не нужно.</div>
+      ) : (
+        <div className="kd-grid2">
+          <Field label="Следующий шаг"><input value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder="Позвонить / отправить КП / уточнить решение" /></Field>
+          <Field label="Когда сделать"><input type="datetime-local" min={localDateTimeInput(null)} value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} /></Field>
+        </div>
+      )}
       <Field label="Ссылка на файл КП (Google Диск)"><input value={kpUrl} onChange={(e) => setKpUrl(e.target.value)} placeholder="https://drive.google.com/... (файл этого клиента)" /></Field>
       <Field label="Заметка"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что обсудили, детали..." /></Field>
     </ModalShell>
   );
 }
 
-function LeadStageSelectModal({ lead, stages, onClose, onPick }) {
+function LeadTouchModal({ lead, ownerName, onClose, onSave }) {
+  const [nextAction, setNextAction] = useState(lead?.next_action || "Позвонить клиенту");
+  const currentDue = lead?.next_action_at && new Date(lead.next_action_at).getTime() > Date.now() ? lead.next_action_at : null;
+  const [nextActionAt, setNextActionAt] = useState(localDateTimeInput(currentDue, 24));
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+  const due = nextActionAt ? new Date(nextActionAt) : null;
+  const ok = nextAction.trim() && due && Number.isFinite(due.getTime()) && due.getTime() > Date.now();
+  async function save() {
+    if (!ok || saving) return;
+    setSaving(true); setProblem("");
+    const error = await onSave(nextAction.trim(), localDateTimeIso(nextActionAt));
+    if (error) setProblem(error);
+    setSaving(false);
+  }
   return (
-    <ModalShell title="Перевести на стадию" onClose={onClose} footer={<button className="kd-btn ghost" onClick={onClose}>Закрыть</button>}>
+    <ModalShell title="Касание с клиентом" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : "Зафиксировать касание"}</button>
+    </>}>
+      <div className="kd-hint" style={{ marginBottom: 12 }}><strong>{lead?.name || lead?.phone || "Клиент"}</strong>{ownerName ? ` · ответственный: ${ownerName}` : ""}</div>
+      <Field label="Что сделать дальше"><input value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder="Позвонить / отправить КП / уточнить решение" /></Field>
+      <Field label="Когда сделать"><input type="datetime-local" min={localDateTimeInput(null)} value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} /></Field>
+      <div className="kd-muted">Текущее касание будет зафиксировано сейчас, а клиент сразу попадёт в очередь на выбранное время.</div>
+      {problem && <div className="kd-err" style={{ marginTop: 10 }}>{problem}</div>}
+    </ModalShell>
+  );
+}
+
+function LeadStageSelectModal({ lead, stages, initialStageId, onClose, onPick }) {
+  const [stageId, setStageId] = useState(initialStageId || lead.stage_id || "");
+  const [nextAction, setNextAction] = useState(lead?.next_action || "Позвонить клиенту");
+  const currentDue = lead?.next_action_at && new Date(lead.next_action_at).getTime() > Date.now() ? lead.next_action_at : null;
+  const [nextActionAt, setNextActionAt] = useState(localDateTimeInput(currentDue, 24));
+  const [lostReason, setLostReason] = useState(lead?.lost_reason || "");
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+  const selected = stages.find((stage) => String(stage.id) === String(stageId));
+  const needsPlan = selected && !selected.is_final && !selected.is_lost;
+  const due = nextActionAt ? new Date(nextActionAt) : null;
+  const ok = !!selected && (selected.is_lost ? !!lostReason.trim() : !needsPlan || (!!nextAction.trim() && due && Number.isFinite(due.getTime()) && due.getTime() > Date.now()));
+  async function save() {
+    if (!ok || saving) return;
+    setSaving(true); setProblem("");
+    const error = await onPick(selected.id, {
+      next_action: needsPlan ? nextAction.trim() : null,
+      next_action_at: needsPlan ? localDateTimeIso(nextActionAt) : null,
+      lost_reason: selected.is_lost ? lostReason.trim() : null,
+    });
+    if (error) setProblem(error);
+    setSaving(false);
+  }
+  return (
+    <ModalShell title="Перевести на стадию" onClose={onClose} footer={<>
+      <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : "Сохранить стадию"}</button>
+    </>}>
       <div className="kd-muted" style={{ marginBottom: 12 }}>{lead.name || lead.phone || "Клиент"} — выбери стадию:</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {[...stages].sort((a, b) => a.sort - b.sort).map((s) => (
-          <button key={s.id} className={`kd-btn ${lead.stage_id === s.id ? "primary" : "ghost"}`} style={{ justifyContent: "flex-start" }} onClick={() => onPick(s.id)}>{s.name}{lead.stage_id === s.id ? " ✓" : ""}</button>
+          <button key={s.id} className={`kd-btn ${String(stageId) === String(s.id) ? "primary" : "ghost"}`} style={{ justifyContent: "flex-start" }} onClick={() => setStageId(s.id)}>{s.name}{String(stageId) === String(s.id) ? " ✓" : ""}</button>
         ))}
       </div>
+      {selected?.is_lost && <Field label="Почему клиент отказался"><textarea className="kd-textarea" value={lostReason} onChange={(e) => setLostReason(e.target.value)} placeholder="Без причины отказ не закрываем" /></Field>}
+      {needsPlan && <div className="kd-grid2" style={{ marginTop: 12 }}>
+        <Field label="Следующий шаг"><input value={nextAction} onChange={(e) => setNextAction(e.target.value)} /></Field>
+        <Field label="Когда сделать"><input type="datetime-local" min={localDateTimeInput(null)} value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} /></Field>
+      </div>}
+      {selected?.is_final && !selected?.is_lost && <div className="kd-hint" style={{ marginTop: 12 }}>Это финальная стадия — следующий контакт не нужен.</div>}
+      {problem && <div className="kd-err" style={{ marginTop: 10 }}>{problem}</div>}
     </ModalShell>
   );
 }
@@ -4263,4 +4364,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, LeadTouchModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };

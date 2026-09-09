@@ -521,6 +521,11 @@ body{
 .kd-assignwarn.night{background:var(--violet-tint);color:var(--violet);}
 .kd-assignload{background:var(--surface-sunk);border:1px solid var(--line);border-radius:999px;padding:2px 9px;font-weight:800;color:var(--muted);}
 .kd-touch{margin-top:6px;font-size:12.5px;font-weight:600;color:var(--muted);}
+.kd-lead-kpis{grid-template-columns:repeat(4,minmax(0,1fr));}
+.kd-leadnext{display:flex;align-items:flex-start;gap:9px;margin-top:9px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);color:var(--ink-soft);}
+.kd-leadnext>svg{flex:0 0 auto;margin-top:2px;}.kd-leadnext>span{min-width:0;}.kd-leadnext strong{display:block;font-size:13px;}.kd-leadnext small{display:block;margin-top:2px;color:var(--muted);font-size:11px;line-height:1.35;}
+.kd-leadnext.overdue,.kd-leadnext.missing{border-color:var(--rust);background:var(--rust-tint);color:var(--rust);}.kd-leadnext.overdue small,.kd-leadnext.missing small{color:var(--rust);}
+.kd-leadnext.today{border-color:var(--amber);background:var(--amber-tint);color:var(--amber);}.kd-leadnext.today small{color:var(--amber);}
 .kd-mktbar{height:8px;background:var(--surface-sunk);border:1px solid var(--line-soft);border-radius:999px;overflow:hidden;margin:8px 0;}
 .kd-mktbarfill{height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:999px;transition:width .3s ease;box-shadow:0 0 10px 0 var(--em-glow);}
 
@@ -759,6 +764,7 @@ body{
   .kd-todayhero h2{font-size:21px;}
   .kd-todayhero-actions{justify-content:flex-start;width:100%;}
   .kd-kpigrid{grid-template-columns:1fr 1fr;}
+  .kd-lead-kpis{grid-template-columns:1fr 1fr;}
   /* В две колонки 30px моноширинного не помещается — суммы вида «172 500 ₸»
      переносили знак валюты на отдельную строку и ломали высоту плиток. */
   .kd-kpigrid strong,.kd-kpicard>strong{font-size:22px;letter-spacing:-.6px;}
