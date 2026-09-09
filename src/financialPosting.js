@@ -18,6 +18,7 @@ export const ATOMIC_JOB_CREATION_MIGRATION = "2026-09-08_atomic_job_creation.sql
 export const ATOMIC_ORDER_VISITS_MIGRATION = "2026-09-08_atomic_order_visits.sql";
 export const LEAD_WORK_QUEUE_MIGRATION = "2026-09-09_lead_work_queue.sql";
 export const QUALITY_CONTROL_JOB_ID_FIX_MIGRATION = "2026-09-09_fix_quality_check_job_id.sql";
+export const LEAD_ACTIVITY_TIMELINE_MIGRATION = "2026-09-09_lead_activity_timeline.sql";
 
 export function createFinancialRequestId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();

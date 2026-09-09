@@ -15,14 +15,15 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_CREATION_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_ORDER_VISITS_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, LEAD_WORK_QUEUE_MIGRATION, QUALITY_CONTROL_JOB_ID_FIX_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_CREATION_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_ORDER_VISITS_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, LEAD_ACTIVITY_TIMELINE_MIGRATION, LEAD_WORK_QUEUE_MIGRATION, QUALITY_CONTROL_JOB_ID_FIX_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { yandexRouteUrl } from "./routePlanning";
 import { AnalyticsTab } from "./analytics";
 import { canonicalPestName, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceKey, canonicalSourceName, canonicalSourceOptions, sourceNamesMatch } from "./sourceNormalization";
-import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, LeadTouchModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { groupLeadActivities, leadActivitySummary } from "./leadActivities";
+import { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -268,6 +269,7 @@ function Dashboard({ session, profile }) {
   const [guaranteeReturns, setGuaranteeReturns] = useState([]);
   const [leads, setLeads] = useState([]);
   const [leadStages, setLeadStages] = useState([]);
+  const [leadActivities, setLeadActivities] = useState([]);
   const [leadStageFilter, setLeadStageFilter] = useState("all");
   const [leadQueueFilter, setLeadQueueFilter] = useState("all");
   const [leadSearch, setLeadSearch] = useState("");
@@ -535,6 +537,7 @@ function Dashboard({ session, profile }) {
     { key: "guarantee_returns", label: "Возвраты", run: () => supabase.from("guarantee_returns").select("*").order("return_date", { ascending: false }), set: setGuaranteeReturns },
     { key: "leads", label: "Клиенты", run: () => supabase.from("leads").select("*").order("updated_at", { ascending: false }), set: setLeads },
     { key: "lead_stages", label: "Этапы CRM", run: () => supabase.from("lead_stages").select("*").order("sort"), set: setLeadStages },
+    { key: "lead_activities", when: () => canEditJobs, label: "История CRM", run: () => fetchAllRows("lead_activities", { column: "occurred_at", ascending: false }), set: setLeadActivities },
     { key: "mkt_channels", label: "Рекламные каналы", run: () => supabase.from("mkt_channels").select("*").order("sort"), set: setMktChannels },
     { key: "mkt_topups", label: "Расходы рекламы", run: () => supabase.from("mkt_topups").select("*").order("topup_date", { ascending: false }), set: setMktTopups },
     { key: "tech_days_off", label: "Выходные", run: () => supabase.from("tech_days_off").select("*"), set: setDaysOff },
@@ -2038,20 +2041,29 @@ function Dashboard({ session, profile }) {
       return false;
     }
     await logAction("CRM", `Лид ${existing ? "изменён" : "создан"}: ${payload.name || payload.phone || "без имени"}`);
-    setModal(null); showToast("Сохранено"); load();
+    setModal(null); showToast("Сохранено"); load(["leads", "lead_activities"]);
     return true;
   }
-  async function touchLead(lead, nextAction, nextActionAt) {
-    const rpcName = "touch_lead_atomic";
-    const { error } = await supabase.rpc(rpcName, { p_lead_id: lead.id, p_next_action: nextAction, p_next_action_at: nextActionAt });
+  async function recordLeadActivity(lead, payload) {
+    const rpcName = "record_lead_activity_atomic";
+    const { error } = await supabase.rpc(rpcName, {
+      p_lead_id: lead.id,
+      p_kind: payload.kind,
+      p_outcome: payload.outcome,
+      p_comment: payload.comment || null,
+      p_occurred_at: payload.occurredAt,
+      p_next_action: payload.nextAction,
+      p_next_action_at: payload.nextActionAt,
+    });
     if (error) {
       const message = atomicReceiptRpcUnavailable(error, rpcName)
-        ? `Очередь продаж ещё не включена. Выполни supabase/${LEAD_WORK_QUEUE_MIGRATION} — касание не было изменено.`
+        ? `История общения ещё не включена. Выполни supabase/${LEAD_ACTIVITY_TIMELINE_MIGRATION} — запись не была сохранена.`
         : error.message;
       showToast("Ошибка: " + message); return message;
     }
-    await logAction("CRM", `Касание: ${lead.name || lead.phone || "?"} · дальше: ${nextAction}`);
-    setModal(null); showToast("Касание и следующий шаг сохранены"); load(); return null;
+    await logAction("CRM", `${payload.kind === "note" ? "Комментарий" : "Контакт"}: ${lead.name || lead.phone || "?"}${payload.nextAction ? ` · дальше: ${payload.nextAction}` : ""}`);
+    setModal(null); showToast(payload.kind === "note" ? "Комментарий добавлен в историю" : "Контакт и следующий шаг сохранены");
+    load(["leads", "lead_activities"]); return null;
   }
   async function setLeadStage(lead, stageId, workflow = {}) {
     const { error } = await supabase.from("leads").update({ stage_id: stageId, ...workflow, updated_at: new Date().toISOString() }).eq("id", lead.id);
@@ -2062,12 +2074,12 @@ function Dashboard({ session, profile }) {
     }
     const stName = leadStages.find((s) => s.id === stageId)?.name || "";
     await logAction("CRM", `Лид «${lead.name || lead.phone || "?"}» → ${stName}`);
-    setModal(null); showToast("Стадия и следующий шаг сохранены"); load(); return null;
+    setModal(null); showToast("Стадия и следующий шаг сохранены"); load(["leads", "lead_activities"]); return null;
   }
   async function removeLead(lead) {
     await supabase.from("leads").delete().eq("id", lead.id);
     await logAction("CRM", `Лид удалён: ${lead.name || lead.phone || "?"}`);
-    showToast("Удалено"); load();
+    showToast("Удалено"); load(["leads", "lead_activities"]);
   }
   async function convertLeadToJob(lead) {
     const rpcName = "convert_lead_to_job_atomic";
@@ -3023,6 +3035,12 @@ function Dashboard({ session, profile }) {
   const leadSla = calc.leadSlaStats(leads, { firstStageId: leadStages[0]?.id || null, closedStageIds: closedLeadStageIds });
   const leadOwners = allProfiles.filter((person) => person.is_active !== false && ["admin", "manager"].includes(person.role));
   const leadSourceOptions = canonicalSourceOptions([...sources, ...leads.map((lead) => ({ name: lead.source }))]);
+  const leadActivityMap = groupLeadActivities(leadActivities);
+  const leadTimeline = (leadId) => leadActivityMap.get(String(leadId)) || [];
+  const leadIsClosed = (lead) => {
+    const stage = leadStageById(lead?.stage_id);
+    return !!lead?.converted_job_id || !!stage?.is_final || !!stage?.is_lost;
+  };
   const filteredLeadList = calc.filterAndSortLeads(leads, {
     search: leadSearch, sort: leadSort, freshness: leadFreshness,
     ownerId: leadOwnerFilter, source: leadSourceFilter, clientType: leadClientTypeFilter,
@@ -3786,16 +3804,17 @@ function Dashboard({ session, profile }) {
                   ? leadStageFilter !== "all" || (!st.is_final && !st.is_lost)
                   : !st.is_final && !st.is_lost && calc.leadNextActionState(lead).kind === leadQueueFilter);
               if (leadStageFilter === "all" && stageLeads.length === 0) return null;
-              const sortedStages = [...leadStages].sort((a, b) => a.sort - b.sort);
-              const stIdx = sortedStages.findIndex((x) => x.id === st.id);
-              const nextStage = sortedStages.slice(stIdx + 1).find((x) => !x.is_lost);
               return (
                 <div key={st.id} className="kd-group">
                   <div className="kd-datehead"><span>{st.name}{st.is_lost ? " ✕" : ""}</span><span className="kd-datecount">{stageLeads.length}</span></div>
                   <div className="kd-list">
                     {stageLeads.length === 0 && <div className="kd-muted" style={{ padding: "2px 2px 8px" }}>Пусто</div>}
-                    {stageLeads.map((l) => (
-                      <div key={l.id} className="kd-card">
+                    {stageLeads.map((l) => {
+                      const timeline = leadTimeline(l.id);
+                      const latest = leadActivitySummary(timeline[0]);
+                      const lastContact = timeline.find((event) => ["call", "whatsapp", "message", "meeting"].includes(event.kind));
+                      const digits = String(l.phone || "").replace(/\D/g, "");
+                      return <div key={l.id} className="kd-card kd-leadcard">
                         <div className="kd-card-head">
                           <div className="kd-pest">{l.name || l.phone || "Без имени"}</div>
                           {(() => {
@@ -3821,31 +3840,37 @@ function Dashboard({ session, profile }) {
                         })()}
                         {st.is_lost && <div className="kd-notebox">Причина отказа: {l.lost_reason || "не указана"}</div>}
                         {(() => {
-                          const d = daysSince(l.updated_at);
+                          const lastAt = lastContact?.occurred_at || lastContact?.created_at || l.created_at;
+                          const d = daysSince(lastAt);
                           const stale = d >= 7;
                           return (
                             <div className="kd-touch" style={stale ? { color: "#B3261E" } : {}}>
                               <Calendar size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-                              Последнее касание: {isoToRu((l.updated_at || "").slice(0, 10)) || "—"}
+                              {lastContact ? `Последний контакт: ${fmtTs(lastAt)}` : "Контактов ещё не было"}
                               <span style={{ marginLeft: 6, fontWeight: 700 }}>· {d === 0 ? "сегодня" : d === 1 ? "вчера" : `${d} дн. назад`}</span>
-                              {stale && <span style={{ marginLeft: 6 }}>⚠ давно не связывались</span>}
+                              {stale && <span style={{ marginLeft: 6 }}>⚠ давно без контакта</span>}
                             </div>
                           );
                         })()}
+                        {latest && <button className="kd-crm-latest" onClick={() => setModal({ kind: "leadHistory", lead: l })}>
+                          <span><strong>{latest.title}</strong><small>{latest.comment || "Без комментария"}</small></span><ArrowRight size={14} />
+                        </button>}
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 2px" }}>
                           {l.kp_url && <a className="kd-btn ghost sm" href={l.kp_url} target="_blank" rel="noopener noreferrer"><FileText size={13} />КП клиента</a>}
                         </div>
-                        {l.note && <div className="kd-notebox">📝 {l.note}</div>}
+                        {l.note && <div className="kd-notebox">Важная заметка: {l.note}</div>}
                         <div className="kd-actions">
-                          {nextStage && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l, initialStageId: nextStage.id })}>{nextStage.name}<ArrowRight size={13} /></button>}
-                          {!st.is_final && !st.is_lost && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadTouch", lead: l })}>Зафиксировать касание</button>}
-                          <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l })}>Стадия</button>
+                          {!st.is_final && !st.is_lost && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "leadActivity", lead: l })}><MessageCircle size={13} />Записать контакт</button>}
+                          {digits && <a className="kd-btn ghost sm" href={`tel:+${digits}`}><Phone size={13} />Позвонить</a>}
+                          {digits && <a className="kd-btn wa sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={13} />WhatsApp</a>}
+                          <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadHistory", lead: l })}><History size={13} />История · {timeline.length}</button>
+                          <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l })}>Сменить стадию</button>
                           <button className="kd-btn ghost sm" onClick={() => askConfirm(`Создать заявку из клиента «${l.name || l.phone || "?"}»? Перенесём телефон, адрес и источник.`, () => convertLeadToJob(l), { danger: false, confirmLabel: "Да, создать" })}><Plus size={13} />Заявка</button>
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "lead", lead: l })}><Pencil size={13} /></button>
                           <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить клиента «${l.name || l.phone || "?"}» из воронки?`, () => removeLead(l))}><Trash2 size={13} /></button>
                         </div>
-                      </div>
-                    ))}
+                      </div>;
+                    })}
                   </div>
                 </div>
               );
@@ -6219,7 +6244,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
       {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} owners={leadOwners} defaultOwnerId={session.user.id} onClose={() => setModal(null)} onSave={saveLead} />}
-      {modal?.kind === "leadTouch" && <LeadTouchModal lead={modal.lead} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : actorName} onClose={() => setModal(null)} onSave={(nextAction, nextActionAt) => touchLead(modal.lead, nextAction, nextActionAt)} />}
+      {modal?.kind === "leadActivity" && <LeadActivityModal lead={modal.lead} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : actorName} defaultKind={modal.defaultKind || "call"} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onSave={(payload) => recordLeadActivity(modal.lead, payload)} />}
+      {modal?.kind === "leadHistory" && <LeadHistoryModal lead={modal.lead} stageName={leadStageById(modal.lead?.stage_id)?.name} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : ""} activities={leadTimeline(modal.lead?.id)} profileName={(id) => profileById(id)?.full_name || ""} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onAddContact={() => setModal({ kind: "leadActivity", lead: modal.lead })} onAddNote={() => setModal({ kind: "leadActivity", lead: modal.lead, defaultKind: "note" })} />}
       {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}
       {modal?.kind === "mktTopup" && <MktTopupModal channel={modal.channel} accounts={accounts} onClose={() => setModal(null)} onSave={(amount, date, accId, note, requestId) => addMktTopup(modal.channel.id, amount, date, accId, note, requestId)} />}
       {modal?.kind === "dayOff" && <DayOffModal techs={techs} defaultDate={modal.date || scheduleDate} daysOff={daysOff} personName={personName} onClose={() => setModal(null)} onAdd={addDayOff} onRemove={removeDayOff} />}

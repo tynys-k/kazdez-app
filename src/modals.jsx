@@ -10,6 +10,7 @@ import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "
 import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, addressPlain, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceName, canonicalSourceOptions } from "./sourceNormalization";
+import { LEAD_ACTIVITY_KINDS, LEAD_ACTIVITY_OUTCOMES, leadActivityKindLabel, leadActivityOutcomeLabel } from "./leadActivities";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -3638,36 +3639,95 @@ function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, onClose
         </div>
       )}
       <Field label="Ссылка на файл КП (Google Диск)"><input value={kpUrl} onChange={(e) => setKpUrl(e.target.value)} placeholder="https://drive.google.com/... (файл этого клиента)" /></Field>
-      <Field label="Заметка"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что обсудили, детали..." /></Field>
+      <Field label="Постоянная заметка в карточке"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Важная информация, которая всегда должна быть на виду" /></Field>
     </ModalShell>
   );
 }
 
-function LeadTouchModal({ lead, ownerName, onClose, onSave }) {
+function LeadActivityModal({ lead, ownerName, defaultKind = "call", closed = false, onClose, onSave }) {
+  const [kind, setKind] = useState(defaultKind);
+  const [outcome, setOutcome] = useState(defaultKind === "note" ? "note" : "connected");
+  const [comment, setComment] = useState("");
+  const [occurredAt, setOccurredAt] = useState(localDateTimeInput(null));
   const [nextAction, setNextAction] = useState(lead?.next_action || "Позвонить клиенту");
   const currentDue = lead?.next_action_at && new Date(lead.next_action_at).getTime() > Date.now() ? lead.next_action_at : null;
   const [nextActionAt, setNextActionAt] = useState(localDateTimeInput(currentDue, 24));
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
+  const noteOnly = kind === "note";
+  const contactTime = occurredAt ? new Date(occurredAt) : null;
   const due = nextActionAt ? new Date(nextActionAt) : null;
-  const ok = nextAction.trim() && due && Number.isFinite(due.getTime()) && due.getTime() > Date.now();
+  const commentOk = outcome === "no_answer" || !!comment.trim();
+  const planOk = noteOnly || closed || (nextAction.trim() && due && Number.isFinite(due.getTime()) && due.getTime() > Date.now());
+  const ok = commentOk && contactTime && Number.isFinite(contactTime.getTime()) && contactTime.getTime() <= Date.now() + 5 * 60000 && planOk;
+  function chooseKind(value) {
+    setKind(value);
+    setOutcome(value === "note" ? "note" : outcome === "note" ? "connected" : outcome);
+  }
   async function save() {
     if (!ok || saving) return;
     setSaving(true); setProblem("");
-    const error = await onSave(nextAction.trim(), localDateTimeIso(nextActionAt));
+    const error = await onSave({
+      kind,
+      outcome: noteOnly ? "note" : outcome,
+      comment: comment.trim(),
+      occurredAt: localDateTimeIso(occurredAt),
+      nextAction: noteOnly || closed ? null : nextAction.trim(),
+      nextActionAt: noteOnly || closed ? null : localDateTimeIso(nextActionAt),
+    });
     if (error) setProblem(error);
     setSaving(false);
   }
   return (
-    <ModalShell title="Касание с клиентом" onClose={onClose} footer={<>
+    <ModalShell title={noteOnly ? "Комментарий к клиенту" : "Записать контакт"} onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : "Зафиксировать касание"}</button>
+      <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : noteOnly ? "Добавить комментарий" : "Сохранить контакт"}</button>
     </>}>
       <div className="kd-hint" style={{ marginBottom: 12 }}><strong>{lead?.name || lead?.phone || "Клиент"}</strong>{ownerName ? ` · ответственный: ${ownerName}` : ""}</div>
-      <Field label="Что сделать дальше"><input value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder="Позвонить / отправить КП / уточнить решение" /></Field>
-      <Field label="Когда сделать"><input type="datetime-local" min={localDateTimeInput(null)} value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} /></Field>
-      <div className="kd-muted">Текущее касание будет зафиксировано сейчас, а клиент сразу попадёт в очередь на выбранное время.</div>
+      <Field label="Что произошло"><div className="kd-crm-kindgrid">{LEAD_ACTIVITY_KINDS.map((item) => <button type="button" key={item.id} className={`kd-crm-kind ${kind === item.id ? "on" : ""}`} onClick={() => chooseKind(item.id)}>{item.label}</button>)}</div></Field>
+      {!noteOnly && <Field label="Результат общения"><select value={outcome} onChange={(e) => setOutcome(e.target.value)}>{LEAD_ACTIVITY_OUTCOMES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></Field>}
+      <Field label="Когда"><input type="datetime-local" max={localDateTimeInput(new Date(Date.now() + 5 * 60000))} value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} /></Field>
+      <Field label={noteOnly ? "Комментарий" : "Что обсудили / что сказал клиент"}><textarea className="kd-textarea" value={comment} onChange={(e) => setComment(e.target.value)} placeholder={outcome === "no_answer" ? "Можно оставить пустым" : "Коротко запиши суть разговора и договорённости"} /></Field>
+      {!noteOnly && !closed && <div className="kd-crm-nextbox">
+        <div><strong>Обязательный следующий шаг</strong><span>После разговора клиент сразу вернётся в рабочую очередь.</span></div>
+        <div className="kd-grid2">
+          <Field label="Что сделать дальше"><input value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder="Позвонить / отправить КП / уточнить решение" /></Field>
+          <Field label="Когда сделать"><input type="datetime-local" min={localDateTimeInput(null)} value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} /></Field>
+        </div>
+      </div>}
+      {noteOnly && <div className="kd-muted">Комментарий попадёт в историю. Стадия и запланированное действие не изменятся.</div>}
       {problem && <div className="kd-err" style={{ marginTop: 10 }}>{problem}</div>}
+    </ModalShell>
+  );
+}
+
+function LeadHistoryModal({ lead, stageName, ownerName, activities = [], profileName, closed = false, onClose, onAddContact, onAddNote }) {
+  const digits = String(lead?.phone || "").replace(/\D/g, "");
+  return (
+    <ModalShell title="История общения" onClose={onClose} wide footer={<>
+      <button className="kd-btn ghost" onClick={onAddNote}>Добавить комментарий</button>
+      {!closed && <button className="kd-btn primary" onClick={onAddContact}>Записать контакт</button>}
+    </>}>
+      <div className="kd-crm-profile">
+        <div><strong>{lead?.name || lead?.phone || "Клиент"}</strong><span>{stageName || "Стадия не указана"}{ownerName ? ` · ${ownerName}` : " · без ответственного"}</span></div>
+        <div className="kd-actions">
+          {digits && <a className="kd-btn ghost sm" href={`tel:+${digits}`}><Phone size={14} />Позвонить</a>}
+          {digits && <a className="kd-btn wa sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={14} />WhatsApp</a>}
+        </div>
+      </div>
+      {(lead?.address || lead?.source) && <div className="kd-meta" style={{ marginBottom: 14 }}>{lead.source && <span>{lead.source}</span>}{lead.address && <span>{lead.address}</span>}</div>}
+      {!closed && <div className="kd-leadnext planned" style={{ marginBottom: 16 }}><span><strong>{lead?.next_action || "Следующий шаг не назначен"}</strong><small>{lead?.next_action_at ? fmtTs(lead.next_action_at) : "Нужно назначить действие и срок"}</small></span></div>}
+      <div className="kd-section">Хронология · {activities.length}</div>
+      {activities.length === 0 ? <div className="kd-empty" style={{ marginTop: 8 }}>История пока пустая. Запиши первый контакт или комментарий.</div> : <div className="kd-crm-timeline">{activities.map((activity) => (
+        <div className={`kd-crm-event ${activity.kind}`} key={activity.id}>
+          <div className="kd-crm-eventmark" />
+          <div className="kd-crm-eventbody">
+            <div className="kd-crm-eventhead"><strong>{leadActivityKindLabel(activity.kind)} · {leadActivityOutcomeLabel(activity.outcome)}</strong><time>{fmtTs(activity.occurred_at || activity.created_at)}</time></div>
+            {activity.comment && <p>{activity.comment}</p>}
+            <small>{profileName(activity.created_by) || (activity.kind === "system" ? "Система" : "Автор не указан")}</small>
+          </div>
+        </div>
+      ))}</div>}
     </ModalShell>
   );
 }
@@ -4364,4 +4424,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadModal, LeadStageSelectModal, LeadTouchModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { AddVisitModal, BranchModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
