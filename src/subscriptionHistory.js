@@ -13,9 +13,27 @@ export function subscriptionIntervalLabel(days) {
   return known[value] || (value > 0 ? `Каждые ${value} дн.` : "Период не указан");
 }
 
-export function contractJobs(contractId, jobs = []) {
+function phoneKey(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : "";
+}
+
+export function contractJobs(contractOrId, jobs = []) {
+  const contract = contractOrId && typeof contractOrId === "object" ? contractOrId : null;
+  const contractId = contract?.id ?? contractOrId;
+  const contractPhoneKey = phoneKey(contract?.phone);
+
   return jobs
-    .filter((job) => String(job?.service_contract_id || "") === String(contractId || ""))
+    .filter((job) => {
+      // New plan visits have a durable contract link. Historical jobs created
+      // before the contract existed do not, so attach those by the same client
+      // phone (normalised to the last 10 digits). A job explicitly linked to a
+      // different contract must never leak into this history.
+      if (job?.service_contract_id) {
+        return String(job.service_contract_id) === String(contractId || "");
+      }
+      return !!contractPhoneKey && phoneKey(job?.client_phone) === contractPhoneKey;
+    })
     .sort((a, b) => String(b.scheduled_date || b.created_at || "").localeCompare(String(a.scheduled_date || a.created_at || "")));
 }
 
@@ -27,7 +45,7 @@ export function contractVisitState(job, todayIso = new Date().toISOString().slic
 }
 
 export function contractHistorySummary(contract, jobs = [], todayIso = new Date().toISOString().slice(0, 10)) {
-  const rows = contractJobs(contract?.id, jobs);
+  const rows = contractJobs(contract, jobs);
   const done = rows.filter((job) => job.status === "done");
   const active = rows.filter((job) => job.status !== "done" && job.status !== "canceled");
   const canceled = rows.filter((job) => job.status === "canceled");

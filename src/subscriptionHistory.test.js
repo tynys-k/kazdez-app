@@ -17,6 +17,25 @@ describe("subscription history", () => {
     expect(rows.map((job) => job.id)).toEqual(["new", "old"]);
   });
 
+  it("attaches historical unlinked jobs by normalized client phone", () => {
+    const contract = { id: "c1", phone: "+7 747 565 8082" };
+    const rows = contractJobs(contract, [
+      { id: "historical", client_phone: "8 (747) 565-80-82", status: "done", scheduled_date: "2026-08-01" },
+      { id: "other-phone", client_phone: "+7 701 111 22 33", status: "done", scheduled_date: "2026-08-02" },
+      { id: "other-contract", service_contract_id: "c2", client_phone: "+7 747 565 8082", status: "done", scheduled_date: "2026-08-03" },
+    ]);
+    expect(rows.map((job) => job.id)).toEqual(["historical"]);
+  });
+
+  it("includes old phone-matched visits in subscriber totals and revenue", () => {
+    const contract = { id: "c1", phone: "+7 747 565 8082", active: true, next_service_date: "2026-10-01" };
+    const summary = contractHistorySummary(contract, [
+      { id: "old", client_phone: "87475658082", status: "done", scheduled_date: "2026-09-10", report_paid: 20000 },
+    ], "2026-09-12");
+    expect(summary).toMatchObject({ total: 1, done: 1, revenue: 20000 });
+    expect(summary.lastDone.id).toBe("old");
+  });
+
   it("distinguishes completed, canceled, overdue and created visits", () => {
     expect(contractVisitState({ status: "done" }, "2026-09-09").kind).toBe("done");
     expect(contractVisitState({ status: "canceled" }, "2026-09-09").kind).toBe("canceled");

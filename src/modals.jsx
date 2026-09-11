@@ -4316,7 +4316,7 @@ function ContractDetailsModal({ contract, jobs = [], managerName, techName, toda
       <div><span>Ответственный</span><strong>{managerName || "Не назначен"}</strong></div>
     </div>
     <div className="kd-client360-kpis kd-subscription-kpis">
-      <div><span>Всего заявок</span><strong>{summary.total}</strong><small>по этому договору</small></div>
+      <div><span>Всего заявок</span><strong>{summary.total}</strong><small>по договору и номеру телефона</small></div>
       <div><span>Выполнено</span><strong>{summary.done}</strong><small>{summary.lastDone ? `последняя ${isoToRu(summary.lastDone.scheduled_date)}` : "выездов ещё не было"}</small></div>
       <div><span>В работе</span><strong>{summary.active}</strong><small>{summary.overdue ? `просрочено ${summary.overdue}` : "без просрочек"}</small></div>
       <div><span>Получено</span><strong>{fmt(summary.revenue)} ₸</strong><small>по готовым заявкам</small></div>
@@ -4324,7 +4324,7 @@ function ContractDetailsModal({ contract, jobs = [], managerName, techName, toda
     <div className={`kd-subscription-next ${nextState.tone}`}><div><strong>{nextState.title}</strong><span>{nextState.text}</span></div>{contract.active !== false && summary.dueWithoutJob && <button className="kd-btn primary sm" onClick={onCreateJob}>Создать сейчас</button>}</div>
     {contract.note && <div className="kd-notebox" style={{ marginTop: 12 }}>Примечание: {contract.note}</div>}
     <div className="kd-section" style={{ marginTop: 18 }}>История обслуживаний · {summary.rows.length}</div>
-    {summary.rows.length === 0 ? <div className="kd-empty" style={{ marginTop: 8 }}>По договору ещё не создано ни одной заявки.</div> : <div className="kd-subscription-history">{summary.rows.map((job) => {
+    {summary.rows.length === 0 ? <div className="kd-empty" style={{ marginTop: 8 }}>По договору и номеру телефона заявок пока нет.</div> : <div className="kd-subscription-history">{summary.rows.map((job) => {
       const state = contractVisitState(job, todayIso);
       const amount = job.status === "done" ? Number(job.report_paid) || 0 : Number(job.quoted_price) || 0;
       return <div className={`kd-subscription-visit ${state.kind}`} key={job.id}>
