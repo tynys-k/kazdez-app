@@ -6,7 +6,7 @@ import SessionGate from "./SessionGate";
 import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2, BarChart3,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, Mail, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -24,7 +24,13 @@ import { canonicalPestName, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceKey, canonicalSourceName, canonicalSourceOptions, sourceNamesMatch } from "./sourceNormalization";
 import { groupLeadActivities, leadActivitySummary } from "./leadActivities";
 import { contractHistorySummary, subscriptionIntervalLabel } from "./subscriptionHistory";
+import { clientAddresses as collectClientAddresses, clientSummary, searchClients } from "./clientDirectory";
+import { ClientDetailsModal, ClientProfileModal } from "./clientModals";
 import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+
+const MarketingPage = React.lazy(() => import("./MarketingPage"));
+
+const CLIENT_DIRECTORY_MIGRATION = "2026-09-12_client_directory.sql";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -83,7 +89,9 @@ class AppErrorBoundary extends React.Component {
 
 function AppContent() {
   installGlobalErrorLogging();
-  const publicToken = new URLSearchParams(window.location.search).get("track");
+  const searchParams = new URLSearchParams(window.location.search);
+  const publicToken = searchParams.get("track");
+  const showLogin = searchParams.has("login");
   useEffect(() => {
     // Умолчание — тёмная: она и так у всех сейчас. Светлая включается сознательно
     // в Настройках, иначе после появления темы вся команда получила бы новый вид
@@ -91,7 +99,8 @@ function AppContent() {
     document.documentElement.setAttribute("data-theme", localStorage.getItem("kd-theme") || "dark");
   }, []);
   if (publicToken) return <PublicJobPage token={publicToken} />;
-  return <SessionGate login={<Login />}>{(session, profile) =>
+  const visitorPage = showLogin ? <Login /> : <React.Suspense fallback={<div className="kd-center">Загрузка…</div>}><MarketingPage /></React.Suspense>;
+  return <SessionGate login={visitorPage}>{(session, profile) =>
     <Dashboard key={`${session.user.id}:${profile.role}:${profile.branch_id || ""}:${JSON.stringify(profile.access_overrides)}`} session={session} profile={profile} />
   }</SessionGate>;
 }
@@ -306,6 +315,10 @@ function Dashboard({ session, profile }) {
   const [discounts, setDiscounts] = useState([]);
   const [objects, setObjects] = useState([]);
   const [clients, setClients] = useState([]);
+  const [clientContacts, setClientContacts] = useState([]);
+  const [clientAddresses, setClientAddresses] = useState([]);
+  const [clientAttachments, setClientAttachments] = useState([]);
+  const [clientSearch, setClientSearch] = useState("");
   const [alerts, setAlerts] = useState([]);
   const [paperwork, setPaperwork] = useState([]);
   const [chemSales, setChemSales] = useState([]);
@@ -584,6 +597,9 @@ function Dashboard({ session, profile }) {
     { key: "paperwork", when: () => canManageCash || canEditDocs, label: "Проведение документов", run: () => supabase.from("paperwork").select("*").order("created_at", { ascending: false }), set: setPaperwork },
     { key: "paperwork_jobs", when: () => canManageCash || canEditDocs, label: "Заявки в комплектах", run: () => supabase.from("paperwork_jobs").select("*"), set: setPaperworkJobs },
     { key: "clients", label: "Клиенты (карточки)", run: () => supabase.from("clients").select("*"), set: setClients },
+    { key: "client_contacts", when: () => canAccess("tab.clients"), label: "Контакты клиентов", run: () => supabase.from("client_contacts").select("*").order("created_at"), set: setClientContacts },
+    { key: "client_addresses", when: () => canAccess("tab.clients"), label: "Адреса клиентов", run: () => supabase.from("client_addresses").select("*").order("created_at"), set: setClientAddresses },
+    { key: "client_attachments", when: () => canAccess("tab.clients"), label: "Файлы клиентов", run: () => supabase.from("client_attachments").select("*").order("created_at", { ascending: false }), set: setClientAttachments },
     { key: "objects", label: "Объекты", run: () => supabase.from("objects").select("*").order("address"), set: setObjects },
     { key: "job_discounts", when: () => canEditJobs || canManageCash, label: "Скидки", run: () => supabase.from("job_discounts").select("*").order("created_at", { ascending: false }), set: setDiscounts },
   ];
@@ -1262,6 +1278,60 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return error.message; }
     await logAction("Чёрный список", `${client.name || client.phone}: ${patch.blocked ? `внесён — ${patch.blocked_reason}` : "убран"}`);
     setModal(null); showToast("Сохранено"); load(["clients"]); return null;
+  }
+
+  async function saveClientProfile(profileData, contactRows, addressRows, existing) {
+    const { data, error } = await supabase.rpc("save_client_profile_atomic", {
+      p_client_id: existing?.id || null,
+      p_profile: profileData,
+      p_contacts: contactRows,
+      p_addresses: addressRows,
+    });
+    if (error) {
+      showToast(atomicReceiptRpcUnavailable(error, "save_client_profile_atomic")
+        ? `Карточки клиентов ещё не включены. Примени supabase/${CLIENT_DIRECTORY_MIGRATION}`
+        : "Ошибка: " + error.message);
+      return false;
+    }
+    await logAction("Клиент", `${existing ? "Обновлён" : "Создан"}: ${profileData.name || profileData.phone}`);
+    setModal(null); showToast("Карточка клиента сохранена");
+    await load(["clients", "client_contacts", "client_addresses", "service_contracts", "jobs"]);
+    return data;
+  }
+
+  async function addClientDirectoryNote(client, value) {
+    const text = String(value || "").trim(); if (!text) return false;
+    const { data, error } = await supabase.from("client_events").insert({
+      client_id: client.id, client_phone: client.phone, event_type: "note", title: "Внутренняя заметка",
+      details: text, created_by: session.user.id,
+    }).select("*").single();
+    if (error) { showToast("Не удалось сохранить заметку: " + error.message); return false; }
+    setClientEvents((rows) => [data, ...rows]); showToast("Заметка добавлена"); return true;
+  }
+
+  async function uploadClientAttachment(client, file) {
+    const allowed = ["image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime", "application/pdf"];
+    if (!allowed.includes(file.type)) { showToast("Можно прикрепить JPG, PNG, WebP, MP4, MOV или PDF"); return; }
+    if (file.size > 25 * 1024 * 1024) { showToast("Файл больше 25 МБ"); return; }
+    const extension = (file.name.split(".").pop() || "bin").replace(/[^a-z0-9]/gi, "").toLowerCase();
+    const token = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const path = `${client.id}/${token}.${extension}`;
+    const uploaded = await supabase.storage.from("client-files").upload(path, file, { contentType: file.type, upsert: false });
+    if (uploaded.error) { showToast("Не удалось загрузить файл: " + uploaded.error.message); return; }
+    const { data, error } = await supabase.from("client_attachments").insert({ client_id: client.id, name: file.name, storage_path: path, mime_type: file.type, size_bytes: file.size, created_by: session.user.id }).select("*").single();
+    if (error) { await supabase.storage.from("client-files").remove([path]); showToast("Не удалось записать файл: " + error.message); return; }
+    setClientAttachments((rows) => [data, ...rows]); showToast("Файл прикреплён");
+  }
+
+  async function openClientAttachment(attachment) {
+    const { data, error } = await supabase.storage.from("client-files").createSignedUrl(attachment.storage_path, 3600);
+    if (error || !data?.signedUrl) { showToast("Не удалось открыть файл: " + (error?.message || "ссылка недоступна")); return; }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  }
+
+  function openClientCard(client) {
+    loadClientEvents();
+    setModal({ kind: "clientDetails", client });
   }
 
   async function saveObject(object, patch) {
@@ -3062,6 +3132,15 @@ function Dashboard({ session, profile }) {
     setLeadOwnerFilter(""); setLeadSourceFilter(""); setLeadClientTypeFilter("");
     setLeadStageFilter("all"); setLeadQueueFilter("all");
   };
+  const directoryClients = searchClients(
+    [...clients].sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || ""))),
+    clientSearch, { jobs, contacts: clientContacts, addresses: clientAddresses },
+  );
+  const directoryStats = clients.reduce((totals, client) => {
+    const row = clientSummary(client, jobs, contracts, followups);
+    totals.revenue += row.revenue; totals.withContracts += row.activeContracts > 0 ? 1 : 0;
+    return totals;
+  }, { revenue: 0, withContracts: 0 });
   const dashboardAlerts = [
     overdueJobs.length ? { id: "overdue-jobs", label: "Просроченные заявки", value: overdueJobs.length, tab: "jobs", tone: "danger" } : null,
     unassignedSoon.length ? { id: "unassigned", label: "Не назначены на сегодня/завтра", value: unassignedSoon.length, tab: "jobs", tone: "warning" } : null,
@@ -3111,6 +3190,7 @@ function Dashboard({ session, profile }) {
   };
   const globalResults = globalQ ? [
     ...jobs.filter((j) => includesGlobal(j.id, j.client_phone, j.contact_name, j.address, j.pest)).slice(0, 6).map((j) => ({ kind: "job", id: j.id, label: `${j.pest || "Заявка"} · ${j.client_phone || "без телефона"}`, meta: `${addressPlain(j.address)} · ${isoToRu(j.scheduled_date) || "без даты"}`, item: j })),
+    ...(canAccess("tab.clients") ? clients.filter((c) => includesGlobal(c.name, c.legal_name, c.bin_iin, c.phone, c.email)).slice(0, 4).map((c) => ({ kind: "client", id: c.id, label: c.name || c.phone || "Клиент", meta: `Карточка клиента · ${c.phone || c.bin_iin || ""}`, item: c })) : []),
     ...(isAdmin ? leads.filter((l) => includesGlobal(l.name, l.phone, l.address)).slice(0, 4).map((l) => ({ kind: "lead", id: l.id, label: l.name || l.phone || "Клиент", meta: `Клиент · ${l.phone || l.address || ""}`, item: l })) : []),
     ...(isAdmin ? tenders.filter((t) => includesGlobal(t.contract_no, t.customer, t.title, t.address)).slice(0, 3).map((t) => ({ kind: "tender", id: t.id, label: t.customer || t.title || "Тендер", meta: `Тендер · ${t.contract_no || t.address || ""}`, item: t })) : []),
     ...(isAdmin ? partners.filter((p) => includesGlobal(p.name)).slice(0, 3).map((p) => ({ kind: "partner", id: p.id, label: p.name, meta: "Партнёр", item: p })) : []),
@@ -3120,6 +3200,7 @@ function Dashboard({ session, profile }) {
   function openGlobalResult(result) {
     setGlobalSearch(""); setGlobalSearchOpen(false);
     if (result.kind === "job") { setTab(result.item.status === "done" ? "done" : result.item.status === "canceled" ? "canceled" : "jobs"); setModal(result.item.status === "done" ? { kind: "view", job: result.item } : { kind: "edit", job: result.item }); }
+    if (result.kind === "client") { setTab("clients"); openClientCard(result.item); }
     if (result.kind === "lead") setModal({ kind: "lead", lead: result.item });
     if (result.kind === "tender") setModal({ kind: "tender", tender: result.item });
     if (result.kind === "partner") setModal({ kind: "partnerJobs", partner: result.item });
@@ -3137,6 +3218,7 @@ function Dashboard({ session, profile }) {
     { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `Задачи${allOpenTasks ? " · " + allOpenTasks : ""}` },
     { id: "leads", icon: Contact, label: `Лиды${activeLeads ? " · " + activeLeads : ""}` },
+    { id: "clients", icon: Users, label: `Клиенты · ${clients.length}` },
     { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : ""}` },
     { id: "repeats", icon: RefreshCw, label: `Повторные выезды${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "retention", icon: ClipboardCheck, label: `Обзвон и качество${dueFollowups.length || qualityPending.length ? " · " + (dueFollowups.length + qualityPending.length) : ""}` },
@@ -3171,7 +3253,7 @@ function Dashboard({ session, profile }) {
   // между «Результатами» и «Учётом», и приходилось вспоминать, в каком из них что лежит.
   const navGroups = [
     { label: "Ежедневная работа", ids: ["today", "jobs", "schedule", "routes", "tasks"] },
-    { label: "Клиенты и возвраты", ids: ["leads", "retention", "subscriptions", "repeats"] },
+    { label: "Клиенты и возвраты", ids: ["leads", "clients", "retention", "subscriptions", "repeats"] },
     { label: "Деньги и аналитика", ids: ["finance", "analytics", "growth", "opex", "cash"] },
     { label: "Архив заявок", ids: ["done", "canceled"] },
     { label: "Команда и склад", ids: ["team", "payroll", "partners", "stock", "myequip"] },
@@ -3260,6 +3342,7 @@ function Dashboard({ session, profile }) {
               </div>}
             </div>
             {(tab === "jobs" || tab === "today") && canEditJobs && <button className="kd-btn primary" onClick={() => setModal({ kind: "new" })}><Plus size={15} />Новая заявка</button>}
+            {tab === "clients" && canEditJobs && <button className="kd-btn primary" onClick={() => setModal({ kind: "clientProfile" })}><Plus size={15} />Клиент</button>}
             {tab === "subscriptions" && canEditJobs && <button className="kd-btn primary" onClick={() => setModal({ kind: "contract" })}><Plus size={15} />Абонент</button>}
             {tab === "retention" && canEditJobs && <button className="kd-btn primary" onClick={() => setModal({ kind: "followup" })}><Plus size={15} />Касание</button>}
             {tab === "stock" && canAccess("action.stock_edit") && <button className="kd-btn primary" onClick={() => setModal({ kind: "addchem" })}><Plus size={15} />Препарат</button>}
@@ -4320,6 +4403,30 @@ function Dashboard({ session, profile }) {
             <section className="kd-card"><div className="kd-stage2head"><div><div className="kd-title">Автоматические допродажи</div><div className="kd-muted">Предложение определяется по виду услуги и объекту</div></div><Sparkles size={20} /></div>
               <div className="kd-upsellgrid">{upsellCandidates.map((j) => <div key={j.id}><div><strong>{j.client_phone} · {j.pest}</strong><span>Предложить: {upsellFor(j)}</span></div><div className="actions"><a className="kd-btn wa sm" href={upsellWhatsappUrl(j)} target="_blank" rel="noreferrer"><MessageCircle size={14} />Предложить</a><button className="kd-btn ghost sm" onClick={() => setModal({ kind: "followup", job: j, defaultKind: "upsell" })}>На потом</button></div></div>)}</div>
             </section>
+          </div>
+        )}
+
+        {!loading && tab === "clients" && (
+          <div className="kd-stage2">
+            <div className="kd-kpigrid">
+              <div className="kd-kpicard"><span>Всего клиентов</span><strong>{clients.length}</strong><small>единые карточки без дублей</small></div>
+              <div className="kd-kpicard"><span>С договорами</span><strong>{directoryStats.withContracts}</strong><small>активные абоненты</small></div>
+              <div className="kd-kpicard"><span>База принесла</span><strong>{fmt(directoryStats.revenue)} ₸</strong><small>по выполненным заявкам</small></div>
+              <div className="kd-kpicard"><span>Найдено</span><strong>{directoryClients.length}</strong><small>{clientSearch ? "по текущему поиску" : "доступно для работы"}</small></div>
+            </div>
+            <div className="kd-client-directory-head"><div><div className="kd-title">Клиентская база</div><div className="kd-muted">Контакты, объекты, обращения, заявки, договоры и файлы в одной карточке.</div></div><div className="kd-searchbar"><Search size={16} className="kd-search-icon"/><input className="kd-search" value={clientSearch} onChange={(e)=>setClientSearch(e.target.value)} placeholder="Имя, телефон, БИН, адрес…"/>{clientSearch && <button className="kd-x" onClick={()=>setClientSearch("")}><X size={15}/></button>}</div></div>
+            {directoryClients.length === 0 && <div className="kd-empty">{clients.length ? "По этому запросу клиентов нет." : "Клиентские карточки появятся из заявок или по кнопке «+ Клиент»."}</div>}
+            <div className="kd-client-directory-grid">{directoryClients.map((client) => {
+              const summary = clientSummary(client, jobs, contracts, followups);
+              const addresses = collectClientAddresses(client, clientAddresses, jobs);
+              const contactCount = clientContacts.filter((row)=>String(row.client_id)===String(client.id)).length + 1;
+              return <button className="kd-card kd-client-directory-card" key={client.id} onClick={()=>openClientCard(client)}>
+                <div className="kd-card-head"><div><div className="kd-pest">{client.name || client.phone || "Без имени"}</div><div className="kd-muted">{client.legal_name || (client.client_type === "company" ? "Организация" : "Физическое лицо")}</div></div><span className="kd-badge" style={{color:summary.activeContracts?"#0E7C66":"#6E7871",background:summary.activeContracts?"#E4F3EE":"#F0F0EE"}}>{summary.activeContracts ? "абонент" : "клиент"}</span></div>
+                <div className="kd-client-directory-contact"><Phone size={14}/><span>{client.phone || "Телефон не указан"}</span>{client.email && <><Mail size={14}/><span>{client.email}</span></>}</div>
+                <div className="kd-row"><span>Адреса и объекты</span><strong>{addresses.length}</strong></div><div className="kd-row"><span>Контактные лица</span><strong>{contactCount}</strong></div><div className="kd-row"><span>История заявок</span><strong>{summary.done} выполнено · {summary.jobs} всего</strong></div><div className="kd-row total"><span>LTV клиента</span><strong>{fmt(summary.revenue)} ₸</strong></div>
+                <div className="kd-client-directory-open">Открыть полную карточку <ArrowRight size={14}/></div>
+              </button>;
+            })}</div>
           </div>
         )}
 
@@ -6285,6 +6392,19 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "economics" && <JobEconomicsModal job={modal.job} economics={jobEconomics(modal.job)} onClose={() => setModal(null)} onSave={(payload) => saveJobEconomics(modal.job, payload)} />}
       {modal?.kind === "followup" && <FollowupModal followup={modal.followup} job={modal.job} lead={modal.lead} defaultKind={modal.defaultKind || "lost"} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveFollowup} />}
       {modal?.kind === "quality" && <QualityModal job={modal.job} check={qualityByJob(modal.job.id)} defaultReviewUrl={settings.review_url || ""} onClose={() => setModal(null)} onSave={(payload) => saveQualityCheck(modal.job, payload)} />}
+      {modal?.kind === "clientProfile" && <ClientProfileModal client={modal.client}
+        contacts={clientContacts.filter((row) => String(row.client_id) === String(modal.client?.id))}
+        addresses={clientAddresses.filter((row) => String(row.client_id) === String(modal.client?.id))}
+        onClose={() => setModal(null)} onSave={saveClientProfile} />}
+      {modal?.kind === "clientDetails" && <ClientDetailsModal client={modal.client} jobs={jobs}
+        contacts={clientContacts} addresses={clientAddresses} contracts={contracts} followups={followups}
+        events={clientEvents} leads={leads} leadActivities={leadActivities} attachments={clientAttachments} jobProofs={jobProofs}
+        canEdit={canEditJobs} onClose={() => setModal(null)}
+        onEdit={() => setModal({ kind: "clientProfile", client: modal.client })}
+        onAddNote={addClientDirectoryNote} onUpload={uploadClientAttachment} onOpenAttachment={openClientAttachment}
+        onOpenJob={(job) => setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job })}
+        onOpenContract={(contract) => setModal({ kind: "contractDetails", contract })}
+        onOpenProof={(job) => job && openJobProof(job)} />}
       {modal?.kind === "contractDetails" && <ContractDetailsModal contract={modal.contract} jobs={jobs} managerName={profileById(modal.contract?.manager_id)?.full_name || ""} techName={(id) => techById(id)?.full_name || profileById(id)?.full_name || ""} todayIso={todayIso} onClose={() => setModal(null)} onEdit={() => setModal({ kind: "contract", contract: modal.contract })} onCreateJob={() => createContractJob(modal.contract)} onOpenJob={(job) => setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job })} />}
       {modal?.kind === "contract" && <ContractModal contract={modal.contract} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveContract} />}
       {confirmState && (

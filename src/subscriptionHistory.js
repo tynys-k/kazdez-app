@@ -3,6 +3,7 @@ const DAY_MS = 86400000;
 export function subscriptionIntervalLabel(days) {
   const value = Number(days) || 0;
   const known = {
+    7: "Еженедельно",
     14: "Два раза в месяц",
     30: "Ежемесячно",
     60: "Раз в 2 месяца",

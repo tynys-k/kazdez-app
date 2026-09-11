@@ -18,6 +18,7 @@ const person = { id: "admin-test", full_name: "Тестовый админист
 let container, root, failures, tables;
 beforeEach(() => {
   vi.resetAllMocks(); localStorage.clear(); failures = new Set();
+  window.history.replaceState({}, "", "/?login");
   person.role = "admin";
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   const today = new Date().toISOString().slice(0, 10);

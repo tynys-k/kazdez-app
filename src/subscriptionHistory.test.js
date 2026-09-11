@@ -3,6 +3,7 @@ import { contractHistorySummary, contractJobs, contractVisitState, subscriptionI
 
 describe("subscription history", () => {
   it("names common periods in plain language", () => {
+    expect(subscriptionIntervalLabel(7)).toBe("Еженедельно");
     expect(subscriptionIntervalLabel(30)).toBe("Ежемесячно");
     expect(subscriptionIntervalLabel(90)).toBe("Ежеквартально");
     expect(subscriptionIntervalLabel(45)).toBe("Каждые 45 дн.");
