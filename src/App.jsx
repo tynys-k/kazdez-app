@@ -26,6 +26,7 @@ import { groupLeadActivities, leadActivitySummary } from "./leadActivities";
 import { contractHistorySummary, subscriptionIntervalLabel } from "./subscriptionHistory";
 import { clientAddresses as collectClientAddresses, clientSummary, searchClients } from "./clientDirectory";
 import { ClientDetailsModal, ClientProfileModal } from "./clientModals";
+import StockRegister from "./StockRegister";
 import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 const MarketingPage = React.lazy(() => import("./MarketingPage"));
@@ -3204,7 +3205,7 @@ function Dashboard({ session, profile }) {
     if (result.kind === "lead") setModal({ kind: "lead", lead: result.item });
     if (result.kind === "tender") setModal({ kind: "tender", tender: result.item });
     if (result.kind === "partner") setModal({ kind: "partnerJobs", partner: result.item });
-    if (result.kind === "chemical") setTab("stock");
+    if (result.kind === "chemical") { setStockChemFilter(result.item.id); setTab("stock"); }
     if (result.kind === "profile") setTab("team");
   }
   // Счётчики: там, где число требует действия (просрочки, ожидание подтверждения),
@@ -5513,7 +5514,37 @@ function Dashboard({ session, profile }) {
           </>
         )}
 
-        {!loading && tab === "stock" && (
+        {!loading && tab === "stock" && <StockRegister
+          inventory={inventory}
+          techs={techs}
+          techLedger={techLedger}
+          purchases={chemPurchases}
+          handouts={handouts}
+          adjustments={inventoryAdjustments}
+          jobs={jobs}
+          sales={chemSales}
+          equipment={equipment}
+          equipIssuedQty={equipIssuedQty}
+          totalStockValue={totalStockValue}
+          totalEquipValue={totalEquipValue}
+          selectedId={stockChemFilter}
+          onSelect={(id) => setStockChemFilter(String(stockChemFilter) === String(id) ? "" : id)}
+          canEditStock={canAccess("action.stock_edit")}
+          canManageTeam={canAccess("action.team_manage")}
+          onStockIn={(chem) => setModal({ kind: "stockin", chem })}
+          onHandout={(tech) => setModal({ kind: "handout", tech })}
+          onMovement={(tech) => setModal({ kind: "inventoryMovement", tech })}
+          onRemoveChem={(chem) => askConfirm(`Удалить препарат «${chem.name}»?`, () => removeChem(chem))}
+          onAddEquipment={() => setModal({ kind: "equip" })}
+          onEditEquipment={(item) => setModal({ kind: "equip", item })}
+          onRemoveEquipment={(item) => askConfirm(`Удалить «${item.name}»?`, () => removeEquipment(item))}
+          techEquipment={techEquipment}
+          onIssueEquipment={(tech) => setModal({ kind: "issueEquip", tech })}
+          onTransferEquipment={(handout) => setModal({ kind: "transferEquip", handout })}
+          onEquipStatus={setEquipStatus}
+        />}
+
+        {!loading && tab === "__legacy_stock" && (
           <div className="kd-list">
             <div className="kd-card">
               <div className="kd-section">Активы</div>
@@ -5646,7 +5677,7 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "team" && (
           <div className="kd-list">
-            <div className="kd-card kd-team-picker">
+            {false && <div className="kd-card kd-team-picker">
               <div><div className="kd-section" style={{ margin: 0 }}>Сотрудник</div><div className="kd-muted">Выбери мастера — останутся только его препараты, выплаты и оборудование.</div></div>
               <select value={teamTechFilter} onChange={(e) => setTeamTechFilter(e.target.value)}>
                 <option value="">Все сотрудники и настройки</option>
@@ -5656,7 +5687,7 @@ function Dashboard({ session, profile }) {
                 {techs.map((t) => <button type="button" className={teamTechFilter === t.id ? "on" : ""} key={t.id} onClick={() => setTeamTechFilter(t.id)}><span className="kd-tech-avatar">{(t.full_name || "?").slice(0, 1)}</span>{t.full_name || "Без имени"}</button>)}
                 {teamTechFilter && <button type="button" onClick={() => setTeamTechFilter("")}>Показать всех</button>}
               </div>
-            </div>
+            </div>}
             {!teamTechFilter && canAccess("action.team_manage") && <div className="kd-card kd-access-card">
               <div className="kd-tabbar" style={{ marginBottom: 12 }}>
                 <div><div className="kd-section" style={{ margin: 0 }}>Сотрудники и права доступа</div><div className="kd-muted">Добавление, блокировка, роли и персональные разрешения</div></div>
@@ -5673,6 +5704,7 @@ function Dashboard({ session, profile }) {
                     <span className="kd-role-badge" style={{ color: roleInfo.color, borderColor: `${roleInfo.color}55`, background: `${roleInfo.color}12` }}>{roleInfo.label}</span>
                     <span className={`kd-access-status ${p.is_active === false ? "off" : "on"}`}>{p.is_active === false ? "Отключён" : "Активен"}</span>
                     <div className="kd-actions">
+                      {canAccess("action.team_manage") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "techedit", tech: p })}><Pencil size={13} />Данные</button>}
                       {p.role !== "admin" && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "userAccess", user: { ...p, email: authUser.email || "" } })}><ShieldCheck size={13} />Права</button>}
                       {!isSelf && p.role !== "admin" && <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить учётную запись «${p.full_name || authUser.email}» навсегда? История действий в журнале сохранится.`, () => deleteAdminUser({ ...p, email: authUser.email }), { confirmLabel: "Удалить навсегда" })}><Trash2 size={13} /></button>}
                     </div>
@@ -5831,7 +5863,7 @@ function Dashboard({ session, profile }) {
                 );
               })}
             </div>}
-            {!teamTechFilter && <div className="kd-card">
+            {false && !teamTechFilter && <div className="kd-card">
               <div className="kd-section" style={{ marginTop: 0 }}>Отчёты за период</div>
               <DateFilterBar filter={teamRepFilter} onChange={setTeamRepFilter} hide={["tomorrow"]} />
               {(() => {
@@ -5857,8 +5889,8 @@ function Dashboard({ session, profile }) {
                 );
               })()}
             </div>}
-            <div className="kd-section">{teamTechFilter ? "Препараты, выплаты и оборудование сотрудника" : "Остатки, выплаты и имущество дезинфекторов"}</div>
-            {techs.filter((t) => !teamTechFilter || t.id === teamTechFilter).map((t) => {
+            {false && <div className="kd-section">{teamTechFilter ? "Препараты, выплаты и оборудование сотрудника" : "Остатки, выплаты и имущество дезинфекторов"}</div>}
+            {[].filter((t) => !teamTechFilter || t.id === teamTechFilter).map((t) => {
               const cnt = jobs.filter((j) => j.assigned_to === t.id).length;
               const ledger = techLedger(t.id);
               return (
