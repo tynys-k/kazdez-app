@@ -4,6 +4,7 @@ import { objectPayload, objectVolume } from "./objectModel";
 import { clientStatuses } from "./clientStatusModel";
 import { payrollCarryover } from "./payrollCarryoverModel";
 import { warehouseBalance, warehouseRevisionDelta } from "./warehouseModel";
+import { findContractClients } from "./ContractsRegister";
 
 describe("task membership and deadlines", () => {
   const task = { created_by: "author", assignee_id: "worker", assignee_ids: ["helper"], observer_ids: ["observer"], commenter_ids: ["observer"] };
@@ -20,6 +21,21 @@ describe("task membership and deadlines", () => {
     expect(taskOverdue(t, new Date("2026-09-14T09:59:00"))).toBe(false);
     expect(taskOverdue(t, new Date("2026-09-14T10:01:00"))).toBe(true);
     expect(taskOverdue({ ...t, status: "done" }, new Date("2026-09-15"))).toBe(false);
+  });
+});
+describe("contract client search", () => {
+  const clients = [
+    { id: "1", name: "Виталий", phone: "+7 707 362 2255", bin_iin: "900101300111" },
+    { id: "2", name: "Айжан", legal_name: "ТОО Каз Сервис", phone: "+7 701 555 1212", bin_iin: "120340009876" },
+  ];
+  it("finds by name, organization, phone digits and BIN/IIN", () => {
+    expect(findContractClients(clients, "виталий").map((client) => client.id)).toEqual(["1"]);
+    expect(findContractClients(clients, "каз сервис").map((client) => client.id)).toEqual(["2"]);
+    expect(findContractClients(clients, "701555").map((client) => client.id)).toEqual(["2"]);
+    expect(findContractClients(clients, "900101300111").map((client) => client.id)).toEqual(["1"]);
+  });
+  it("limits an empty result list so the modal never renders hundreds of clients", () => {
+    expect(findContractClients(Array.from({ length: 50 }, (_, id) => ({ id })), "")).toHaveLength(20);
   });
 });
 describe("object measurements", () => {

@@ -9,6 +9,32 @@ export function validDriveUrl(value) {
   if (!value) return true;
   try { const url = new URL(value); return url.protocol === "https:" && ["drive.google.com", "docs.google.com"].includes(url.hostname) && !url.username && !url.password; } catch { return false; }
 }
+function searchKey(value) {
+  return String(value || "").toLocaleLowerCase("ru").replace(/ё/g, "е").replace(/[^a-zа-я0-9]+/gi, " ").trim();
+}
+export function findContractClients(clients, query, limit = 20) {
+  const words = searchKey(query).split(" ").filter((word) => word && !/^\d+$/.test(word));
+  const digits = String(query || "").replace(/\D/g, "");
+  return clients.filter((client) => {
+    if (!words.length && !digits) return true;
+    const haystack = searchKey([client.name, client.legal_name, client.phone, client.bin_iin, client.email].filter(Boolean).join(" "));
+    const clientDigits = [client.name, client.legal_name, client.phone, client.bin_iin, client.email].filter(Boolean).join(" ").replace(/\D/g, "");
+    return words.every((word) => haystack.includes(word)) && (!digits || clientDigits.includes(digits));
+  }).slice(0, limit);
+}
+function ClientSearch({ clients, value, onChange }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = clients.find((client) => client.id === value);
+  const results = findContractClients(clients, query);
+  const label = (client) => client.legal_name || client.name || "Клиент без имени";
+  function choose(client) { onChange(client); setQuery(""); setOpen(false); }
+  return <div className="wf-client-search">
+    {selected && <div className="wf-client-selected"><span><strong>{label(selected)}</strong><small>{selected.phone || "Телефон не указан"}{selected.bin_iin ? ` · БИН/ИИН ${selected.bin_iin}` : ""}</small></span><button type="button" className="kd-btn ghost sm" onClick={() => { onChange(null); setOpen(true); }}>Изменить</button></div>}
+    {!selected && <><input type="search" role="combobox" aria-label="Найти клиента" aria-autocomplete="list" aria-expanded={open} aria-controls="contract-client-results" value={query} autoFocus onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onKeyDown={(event) => { if (event.key === "Enter" && results[0]) { event.preventDefault(); choose(results[0]); } if (event.key === "Escape") setOpen(false); }} placeholder="Введите имя, телефон, организацию или БИН/ИИН" />
+      {open && <div className="wf-client-results" id="contract-client-results" role="listbox" aria-label="Найденные клиенты">{results.map((client) => <button type="button" role="option" aria-selected="false" key={client.id} onClick={() => choose(client)}><strong>{label(client)}</strong><span>{client.phone || "Телефон не указан"}{client.bin_iin ? ` · БИН/ИИН ${client.bin_iin}` : ""}</span></button>)}{!results.length && <p role="status">Клиент не найден. Проверьте имя или цифры телефона.</p>}{results.length === 20 && <small>Показаны первые 20 совпадений — уточните запрос.</small>}</div>}</>}
+  </div>;
+}
 export function ContractSummary({ contract, onOpen }) {
   return <section className="wf-section"><h4>Договор</h4>{contract ? <><strong>№ {contract.number} от {isoToRu(contract.signed_on)}</strong><p>{contract.organization} · {CONTRACT_STATES[contract.status]}{contract.expires_on ? ` · до ${isoToRu(contract.expires_on)}` : ""}</p><button className="kd-btn ghost sm" onClick={() => onOpen(contract)}>Открыть договор и файлы</button></> : <p className="kd-muted">Юридический договор ещё не привязан. Выберите его при изменении абонента.</p>}</section>;
 }
@@ -54,7 +80,7 @@ function ContractEditor({ contract, clients, onClose, onSaved }) {
     } catch (e) { setError("Договор не сохранён: " + e.message); } finally { setBusy(false); }
   }
   return <ModalShell title={contract.id ? "Изменить договор" : "Новый договор"} wide onClose={onClose} footer={<><button className="kd-btn ghost" disabled={busy} onClick={onClose}>Отмена</button><button className="kd-btn primary" disabled={busy} onClick={save}>Сохранить</button></>}>
-    {error && <p role="alert" className="kd-err">{error}</p>}<Field label="Клиент / контрагент"><select value={form.client_id} onChange={(e) => { const client = clients.find((c) => c.id === e.target.value); setForm({ ...form, client_id: e.target.value, organization: client?.legal_name || client?.name || "" }); }}><option value="">Выберите клиента</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.legal_name || c.name || c.phone} · {c.phone}</option>)}</select></Field>
+    {error && <p role="alert" className="kd-err">{error}</p>}<Field label="Клиент / контрагент"><ClientSearch clients={clients} value={form.client_id} onChange={(client) => setForm({ ...form, client_id: client?.id || "", organization: client ? (client.legal_name || client.name || "") : "" })} /></Field>
     <div className="kd-grid2"><Field label="Номер договора"><input value={form.number} onChange={set("number")} maxLength={200} /></Field><Field label="Дата договора"><input type="date" value={form.signed_on} onChange={set("signed_on")} /></Field><Field label="Дата окончания"><input type="date" value={form.expires_on} onChange={set("expires_on")} /></Field><Field label="Сумма, ₸"><input type="number" min="0" step="0.01" value={form.amount} onChange={set("amount")} /></Field></div>
     <Field label="Название организации в договоре"><input value={form.organization} onChange={set("organization")} /></Field><Field label="Предмет договора"><input value={form.title} onChange={set("title")} /></Field><Field label="Ссылка на Google Диск"><input type="url" value={form.drive_url} onChange={set("drive_url")} /></Field><Field label="Состояние"><select value={form.status} onChange={set("status")}>{Object.entries(CONTRACT_STATES).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></Field><Field label="Примечание"><textarea className="kd-textarea" value={form.note} onChange={set("note")} /></Field><p className="kd-muted">Файлы и обсуждение доступны после сохранения договора.</p>
   </ModalShell>;
