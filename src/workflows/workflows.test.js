@@ -4,7 +4,7 @@ import { objectPayload, objectVolume } from "./objectModel";
 import { clientStatuses } from "./clientStatusModel";
 import { payrollCarryover } from "./payrollCarryoverModel";
 import { warehouseBalance, warehouseRevisionDelta } from "./warehouseModel";
-import { findContractClients } from "./ContractsRegister";
+import { findContractClients } from "./contractClientSearch";
 
 describe("task membership and deadlines", () => {
   const task = { created_by: "author", assignee_id: "worker", assignee_ids: ["helper"], observer_ids: ["observer"], commenter_ids: ["observer"] };

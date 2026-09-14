@@ -3,24 +3,12 @@ import { ModalShell, Field } from "../modals";
 import { fmt, fmtTs, isoToRu } from "../shared";
 import { supabase } from "../supabaseClient";
 import EntityThread from "./EntityThread";
+import { findContractClients } from "./contractClientSearch";
 import "./workflows.css";
 export const CONTRACT_STATES = { draft: "Черновик", active: "Действует", closed: "Закрыт" };
 export function validDriveUrl(value) {
   if (!value) return true;
   try { const url = new URL(value); return url.protocol === "https:" && ["drive.google.com", "docs.google.com"].includes(url.hostname) && !url.username && !url.password; } catch { return false; }
-}
-function searchKey(value) {
-  return String(value || "").toLocaleLowerCase("ru").replace(/ё/g, "е").replace(/[^a-zа-я0-9]+/gi, " ").trim();
-}
-export function findContractClients(clients, query, limit = 20) {
-  const words = searchKey(query).split(" ").filter((word) => word && !/^\d+$/.test(word));
-  const digits = String(query || "").replace(/\D/g, "");
-  return clients.filter((client) => {
-    if (!words.length && !digits) return true;
-    const haystack = searchKey([client.name, client.legal_name, client.phone, client.bin_iin, client.email].filter(Boolean).join(" "));
-    const clientDigits = [client.name, client.legal_name, client.phone, client.bin_iin, client.email].filter(Boolean).join(" ").replace(/\D/g, "");
-    return words.every((word) => haystack.includes(word)) && (!digits || clientDigits.includes(digits));
-  }).slice(0, limit);
 }
 function ClientSearch({ clients, value, onChange }) {
   const [query, setQuery] = useState("");
