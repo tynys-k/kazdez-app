@@ -33,6 +33,7 @@ import TenderDeliveries from "./workflows/TenderDeliveries";
 import { TenderRegister, TenderCollaboration, PartnerTenderLinks } from "./workflows/Tenders";
 import ContractsRegister from "./workflows/ContractsRegister";
 import PayrollCarryoverModal, { PayrollCarryoverHistory } from "./workflows/PayrollCarryover";
+import ExecutivePulse from "./workflows/ExecutivePulse";
 import { payrollCarryover } from "./workflows/payrollCarryoverModel";
 import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus";
 import { taskParticipant } from "./workflows/taskModel";
@@ -3206,6 +3207,98 @@ function Dashboard({ session, profile }) {
     `Требуют внимания: ${dashboardAlerts.length}`,
     proofMissingToday ? `Без полного подтверждения: ${proofMissingToday}` : "Все выполненные работы подтверждены",
   ].join("\n");
+  // Управленческий пульс всегда сравнивает одинаковые календарные периоды.
+  // Он не зависит от фильтра в финансовом отчёте: иначе смена фильтра в другой
+  // вкладке незаметно меняла бы цифры на главной.
+  const pulseNow = new Date();
+  const pulseMonthStart = new Date(pulseNow.getFullYear(), pulseNow.getMonth(), 1);
+  const pulseNextMonth = new Date(pulseNow.getFullYear(), pulseNow.getMonth() + 1, 1);
+  const pulsePreviousMonth = new Date(pulseNow.getFullYear(), pulseNow.getMonth() - 1, 1);
+  const pulseIso = (date) => isoOf(date);
+  const pulseJobsIn = (start, end) => doneJobs.filter((job) => {
+    const date = job.scheduled_date || job.reported_at || "";
+    return date >= pulseIso(start) && date < pulseIso(end);
+  });
+  const pulseValue = (rows, getter) => rows.reduce((sum, row) => sum + (Number(getter(row)) || 0), 0);
+  const pulseDelta = (current, previous) => previous ? Math.round((current - previous) / Math.abs(previous) * 100) : null;
+  const pulseMonthJobs = pulseJobsIn(pulseMonthStart, pulseNextMonth);
+  const pulsePreviousJobs = pulseJobsIn(pulsePreviousMonth, pulseMonthStart);
+  const pulseRevenue = pulseValue(pulseMonthJobs, (job) => job.report_paid);
+  const pulsePreviousRevenue = pulseValue(pulsePreviousJobs, (job) => job.report_paid);
+  const pulseProfit = pulseValue(pulseMonthJobs, fullProfitOf);
+  const pulsePreviousProfit = pulseValue(pulsePreviousJobs, fullProfitOf);
+  const pulseMarketingSpend = mktTopups
+    .filter((topup) => topup.topup_date >= pulseIso(pulseMonthStart) && topup.topup_date < pulseIso(pulseNextMonth))
+    .reduce((sum, topup) => sum + (Number(topup.amount) || 0), 0);
+  const pulseTrend = Array.from({ length: 6 }, (_, index) => {
+    const offset = 5 - index;
+    const start = new Date(pulseNow.getFullYear(), pulseNow.getMonth() - offset, 1);
+    const end = new Date(pulseNow.getFullYear(), pulseNow.getMonth() - offset + 1, 1);
+    const rows = pulseJobsIn(start, end);
+    return {
+      key: pulseIso(start).slice(0, 7),
+      label: new Intl.DateTimeFormat("ru-RU", { month: "short" }).format(start).replace(".", ""),
+      revenue: pulseValue(rows, (job) => job.report_paid),
+      profit: pulseValue(rows, fullProfitOf),
+    };
+  });
+  const companyPulse = {
+    dateLabel: new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" }).format(pulseNow),
+    criticalCount: dashboardAlerts.filter((alert) => alert.tone === "danger").length,
+    month: {
+      revenue: pulseRevenue,
+      profit: pulseProfit,
+      done: pulseMonthJobs.length,
+      revenueDelta: pulseDelta(pulseRevenue, pulsePreviousRevenue),
+      profitDelta: pulseDelta(pulseProfit, pulsePreviousProfit),
+      doneDelta: pulseDelta(pulseMonthJobs.length, pulsePreviousJobs.length),
+    },
+    finance: {
+      cash: totalOnAccounts + totalInHands,
+      accounts: totalOnAccounts,
+      inHands: totalInHands,
+      receivables: totalReceivables,
+      overdueTransfers: overdueTransfers.length,
+      payrollOwed: Math.max(0, payrollTotals.owed),
+      payrollPeople: payrollOwedCount,
+    },
+    growth: {
+      activeLeads,
+      lateLeads: leadSla.lateReaction,
+      reactionHours: leadSla.reactionHours,
+      marketingSpend: pulseMarketingSpend,
+    },
+    today: {
+      total: todayJobs.length,
+      done: todayDone.length,
+      active: todayActive.length,
+      inField: enRouteNow + onSiteNow,
+      overdue: overdueJobs.length,
+      unassigned: unassignedSoon.length,
+      revenue: todayRevenue,
+      plan: todayPlan,
+      jobs: todayJobs.slice(0, 3).map((job) => ({
+        id: job.id,
+        time: job.scheduled_time,
+        title: job.pest || "Заявка",
+        address: addressPlain(job.address) || "Адрес не указан",
+      })),
+    },
+    people: {
+      active: allProfiles.filter((profile) => profile.is_active !== false).length,
+      docsExpired,
+      docsSoon,
+      trainingDue: trainingAlerts.length,
+    },
+    system: {
+      errors24h: clientErrors.filter((error) => error.created_at && daysSince(error.created_at) <= 1).length,
+      warnings: dataWarnings.length,
+      offlineQueued,
+      online,
+      freshness: lastLoadedAt ? lastLoadedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "ещё не обновлено",
+    },
+    trend: pulseTrend,
+  };
   const globalQ = globalSearch.trim().toLowerCase();
   const globalDigits = globalQ.replace(/\D/g, "");
   const includesGlobal = (...parts) => {
@@ -3461,7 +3554,7 @@ function Dashboard({ session, profile }) {
           <div className="kd-topleft">
             <button className="kd-burger" onClick={() => setSideOpen((v) => !v)} aria-label="Меню"><ClipboardList size={18} /></button>
             {/* Заголовок — чистое имя раздела без счётчика: цифра уже стоит в меню, дублировать её в h1 незачем. */}
-            <h1 className="kd-pagetitle">{tab === "today" ? (isAdmin ? "Сегодня" : "Мой день") : TAB_LABELS[tab] || (tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
+            <h1 className="kd-pagetitle">{tab === "today" ? (isAdmin ? "Пульс компании" : "Мой день") : TAB_LABELS[tab] || (tabs.find((t) => t.id === tab) || {}).label || ""}</h1>
           </div>
           <div className="kd-globalsearch" onBlur={() => setTimeout(() => setGlobalSearchOpen(false), 120)}>
             <Search size={16} />
@@ -3524,7 +3617,17 @@ function Dashboard({ session, profile }) {
         {loading && <div className="kd-empty">Загрузка…</div>}
         {!loading && dataWarnings.length > 0 && <details className="kd-systemwarning" open><summary><AlertTriangle size={17} />Данные неполные или устарели · {dataWarnings.length}</summary><div><span>Не удалось обновить часть данных. Последние загруженные значения сохранены, но текущие суммы и статусы требуют проверки.</span>{isAdmin && dataWarnings.some((warning) => warning.toLowerCase().includes("schema cache")) && <span><strong>Схема Supabase отстаёт от приложения: примените ожидающие SQL-миграции и обновите кеш схемы.</strong></span>}{isAdmin && dataWarnings.map((warning) => <span key={warning}>{warning}</span>)}<button className="kd-btn ghost sm" onClick={() => load()}>Повторить загрузку</button></div></details>}
 
-        {!loading && tab === "today" && (
+        {!loading && tab === "today" && isAdmin && (
+          <ExecutivePulse
+            data={companyPulse}
+            alerts={dashboardAlerts}
+            channels={sourceRatings}
+            onNavigate={setTab}
+            onCopy={() => copyText(ownerSummaryText, () => showToast("Сводка скопирована"))}
+          />
+        )}
+
+        {!loading && tab === "today" && !isAdmin && (
           <div className="kd-today">
             {canEditJobs && openAlerts.length > 0 && (
               <section className="kd-card kd-alerts">
