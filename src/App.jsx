@@ -380,6 +380,7 @@ function Dashboard({ session, profile }) {
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [doneSortDir, setDoneSortDir] = useState("desc");
   const [doneBrandFilter, setDoneBrandFilter] = useState("all");
+  const [expandedActiveId, setExpandedActiveId] = useState("");
   const [expandedDoneId, setExpandedDoneId] = useState("");
   const [techFilter, setTechFilter] = useState("");
   const [stockChemFilter, setStockChemFilter] = useState("");
@@ -3672,7 +3673,7 @@ function Dashboard({ session, profile }) {
                   <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} compact={expandedActiveId !== j.id} onExpand={() => setExpandedActiveId(j.id)} onCollapse={() => setExpandedActiveId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                         onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                         onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                         onCopyPublicLink={() => copyPublicJobLink(j)}

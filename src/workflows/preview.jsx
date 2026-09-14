@@ -7,6 +7,7 @@ import TaskBoard from "./TaskBoard";
 import ContractsRegister from "./ContractsRegister";
 import StockRegister from "../StockRegister";
 import JobObjectFields from "./JobObjectFields";
+import { JobCard } from "../modals";
 import "../styles.css";
 import "./workflows.css";
 const people = [{ id: "demo-admin", full_name: "Администратор" }, { id: "demo-worker", full_name: "Аян" }, { id: "demo-observer", full_name: "Менеджер" }];
@@ -20,15 +21,20 @@ const warehouses = [{ id: "demo-legacy", name: "Не распределено", 
 const moves = [{ id: "demo-move", item_kind: "chemical", item_id: chemical.id, kind: "receipt", to_warehouse_id: "demo-b", amount: 4000, created_at: "2026-09-14T08:00:00+05:00", note: "Тестовый приход" }];
 const suppliers = [{ id: "demo-s1", name: "Поставщик А", contact_name: "Контакт поставщика" }, { id: "demo-s2", name: "Поставщик Б" }];
 const offers = [17000, 22000].map((price, i) => ({ id: `offer-${i}`, supplier_id: suppliers[i].id, item_kind: "chemical", item_id: chemical.id, price, quoted_on: "2026-09-14", available: true }));
+const previewJobs = [
+  { id: "demo-job-1", pest: "Блохи", type: "Первичная", brand: "Sanitex", status: "new", work_stage: "assigned", scheduled_date: "2026-09-14", scheduled_time: "12:00", address: "9 мкр., д. 27, кв. 5", client_phone: "+7 777 125 8013", assigned_to: people[1].id, price_options: [{ amount: 17000 }], area: 44, note: "Блохи с подвала приходят, КСК не делает" },
+  { id: "demo-job-2", pest: "Постельные клопы", type: "Первичная", brand: "KazDez", status: "new", work_stage: "assigned", scheduled_date: "2026-09-14", scheduled_time: "13:30", address: "ул. Абая, д. 18, кв. 42", client_phone: "+7 701 555 1212", assigned_to: people[1].id, price_options: [{ amount: 25000 }] },
+];
 const noop = () => {};
 function ResponsivePreview() {
   const [width, setWidth] = useState(320);
   return <main><nav className="wf-toolbar">{[320, 768, 1024, 1440].map((size) => <button className="kd-btn ghost" key={size} onClick={() => setWidth(size)}>{size} px</button>)}</nav><iframe title="Проверка адаптивности" src="/workflow-preview.html" width={width} height="850" style={{ border: "1px solid var(--line)", display: "block", margin: "16px auto" }} /></main>;
 }
 function Preview() {
-  const [page, setPage] = useState("Задачи"), [tasks, setTasks] = useState(initialTasks), [selected, setSelected] = useState(null), [form, setForm] = useState({ object_kind: "commercial", object_details: { measurement: "fumigation", volume_method: "dimensions", length_m: 5, width_m: 4, height_m: 3 } });
-  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Склад", "Договоры", "Тип объекта"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
+  const [page, setPage] = useState("Задачи"), [tasks, setTasks] = useState(initialTasks), [selected, setSelected] = useState(null), [expandedJob, setExpandedJob] = useState(""), [form, setForm] = useState({ object_kind: "commercial", object_details: { measurement: "fumigation", volume_method: "dimensions", length_m: 5, width_m: 4, height_m: 3 } });
+  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Заявки", "Склад", "Договоры", "Тип объекта"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
     {page === "Задачи" && <TaskBoard tasks={tasks} people={people} userId={people[0].id} canManage onCreate={noop} onEdit={noop} onRemove={noop} onStatus={async (task, status) => { setTasks(tasks.map((t) => t.id === task.id ? { ...t, status } : t)); return true; }} />}
+    {page === "Заявки" && <section><h2>Заявки</h2><p className="kd-muted">Нажмите на строку, чтобы увидеть детали и действия.</p><div className="kd-list">{previewJobs.map((job) => <JobCard key={job.id} job={job} compact={expandedJob !== job.id} onExpand={() => setExpandedJob(job.id)} onCollapse={() => setExpandedJob("")} isAdmin assignedName="Аян" onHistory={noop} onObject={noop} onProof={noop} onCopyPublicLink={noop} onReport={noop} onCancel={noop} onAssign={noop} onEdit={noop} onDelete={noop} />)}</div></section>}
     {page === "Склад" && <StockRegister warehouses={warehouses} warehouseMoves={moves} suppliers={suppliers} supplierOffers={offers} inventory={[chemical]} techs={people} techLedger={(id) => id === people[1].id ? [{ chem: chemical, received: 1000, consumed: 0, balance: 1000 }] : []} purchases={[]} handouts={[]} adjustments={[]} jobs={[]} sales={[]} equipment={[]} equipIssuedQty={() => 0} totalStockValue={102000} totalEquipValue={0} selectedId={chemical.id} onSelect={noop} canEditStock canManageTeam onStockIn={noop} onMovement={noop} onRemoveChem={noop} onAddEquipment={noop} onEditEquipment={noop} onRemoveEquipment={noop} techEquipment={() => []} onTransferEquipment={noop} onEquipStatus={noop} />}
     {page === "Договоры" && <ContractsRegister contracts={[{ id: "demo-contract", client_id: "demo-client", number: "Д-2026/15", signed_on: "2026-09-14", organization: "ТОО Тестовая организация", title: "Абонентское обслуживание", status: "active", amount: 180000 }]} clients={[{ id: "demo-client", name: "Тестовый клиент", phone: "+7 700 000 0000" }]} people={people} canEdit selectedId={selected} onSelect={setSelected} onReload={noop} onOpenClient={noop} />}
     {page === "Тип объекта" && <section className="kd-card"><h2>Параметры объекта</h2><JobObjectFields form={form} onChange={setForm} /></section>}

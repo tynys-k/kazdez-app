@@ -27,9 +27,16 @@ describe("compact operational UI", () => {
 
   it("renders completed jobs compact until explicitly expanded", () => {
     expect(app).toMatch(/compact=\{expandedDoneId !== j\.id\}/);
-    expect(modals).toContain('className="kd-done-row"');
+    expect(modals).toContain("kd-done-row kd-job-row");
     expect(modals).toContain("Адрес не указан");
     expect(modals).toContain("job.client_phone");
+  });
+
+  it("renders active jobs as quiet summary rows until explicitly expanded", () => {
+    expect(app).toContain('const [expandedActiveId, setExpandedActiveId] = useState("")');
+    expect(app).toMatch(/compact=\{expandedActiveId !== j\.id\}/);
+    expect(modals).toContain("kd-job-row-main");
+    expect(css).toContain(".kd-list:has(>.kd-job-row){gap:8px;}");
   });
 
   it("adds brand, employee, date and text filters to completed jobs", () => {
