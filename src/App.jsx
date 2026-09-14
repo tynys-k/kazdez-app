@@ -34,6 +34,7 @@ import { TenderRegister, TenderCollaboration, PartnerTenderLinks } from "./workf
 import ContractsRegister from "./workflows/ContractsRegister";
 import PayrollCarryoverModal, { PayrollCarryoverHistory } from "./workflows/PayrollCarryover";
 import ExecutivePulse from "./workflows/ExecutivePulse";
+import ReportPeriodBar from "./workflows/ReportPeriodBar";
 import { payrollCarryover } from "./workflows/payrollCarryoverModel";
 import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus";
 import { taskParticipant } from "./workflows/taskModel";
@@ -390,6 +391,7 @@ function Dashboard({ session, profile }) {
   const [pMode, setPMode] = useState("all");
   const [brandFilter, setBrandFilter] = useState("all");
   const [pOff, setPOff] = useState(0);
+  const [growthPeriod, setGrowthPeriod] = useState({ preset: "month", offset: 0 });
   const [daySort, setDaySort] = useState("order");     // order | revenue | count
   const [dormantMonths, setDormantMonths] = useState(12);
   const [techSort, setTechSort] = useState("revenue"); // revenue | count | avg | markup
@@ -3049,11 +3051,6 @@ function Dashboard({ session, profile }) {
     const marketing = marketingFor(job);
     return { job, econ: calc.jobFullEconomics(job, { chemicals, purchases: chemPurchases, guaranteeCost: guaranteeCostOf(job), qrFeeRate, labor, overhead, marketing, helpers: calc.helpersTotal(job.id, jobHelpers) }) };
   });
-  const totalJobProfit = completedEconomics.reduce((s, r) => s + r.econ.profit, 0);
-  const totalFullProfit = completedEconomics.reduce((s, r) => s + r.econ.fullProfit, 0);
-  const totalLabor = completedEconomics.reduce((s, r) => s + r.econ.labor, 0);
-  const totalOverhead = completedEconomics.reduce((s, r) => s + r.econ.overhead, 0);
-  const totalMarketing = completedEconomics.reduce((s, r) => s + r.econ.marketing, 0);
   // Одна функция полной прибыли на все отчёты: если каналы и филиалы будут
   // считать её по-разному, расхождение найдут не сразу и не поверят обоим.
   const fullProfitOf = (j) => {
@@ -3091,14 +3088,10 @@ function Dashboard({ session, profile }) {
     .filter((r) => r.doneVisits > 1)
     .sort((a, b) => b.visits - a.visits || a.profit - b.profit)
     .slice(0, 10);
-  const trueLossJobs = completedEconomics.filter((r) => r.econ.fullProfit < 0);
   // Длительность выездов. Отметки этапов писались давно, но их никто не смотрел.
   const durations = calc.durationStats(doneJobs);
   const fmtMin = (m) => (m === null ? "—" : m >= 60 ? `${Math.floor(m / 60)} ч ${m % 60} мин` : `${m} мин`);
-  const totalJobRevenue = completedEconomics.reduce((s, r) => s + r.econ.revenue, 0);
-  const averageJobMargin = totalJobRevenue > 0 ? Math.round(totalJobProfit / totalJobRevenue * 100) : 0;
   const lossJobs = completedEconomics.filter((r) => r.econ.profit < 0);
-  const lostRevenue = canceledJobs.reduce((s, j) => s + Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0)), 0);
   const openFollowups = followups.filter((f) => f.status !== "done");
   const dueFollowups = openFollowups.filter((f) => f.due_date && f.due_date <= todayIso);
   const qualityByJob = (jobId) => qualityChecks.find((q) => String(q.job_id) === String(jobId));
@@ -3128,6 +3121,58 @@ function Dashboard({ session, profile }) {
     if (j.status === "done") { row.done++; row.revenue += Number(j.report_paid) || 0; row.profit += jobEconomics(j).profit; }
   });
   const managerRatings = Object.values(managerRatingMap).map((r) => ({ ...r, conversion: r.total ? Math.round(r.done / r.total * 100) : 0, avgCheck: r.done ? Math.round(r.revenue / r.done) : 0 })).sort((a, b) => b.profit - a.profit);
+  // Вся вкладка прибыли использует один и тот же срез. Раньше верхние KPI
+  // считались за всё время, а рейтинги — за месяц, поэтому цифры нельзя было
+  // честно сопоставлять между собой.
+  const growthJobDate = (job) => String(job.scheduled_date || job.reported_at || job.canceled_at || "").slice(0, 10);
+  const growthPeriodJobs = jobs.filter((job) => dateInFilter(growthJobDate(job), growthPeriod));
+  const growthDoneJobs = growthPeriodJobs.filter((job) => job.status === "done");
+  const growthCanceledJobs = growthPeriodJobs.filter((job) => job.status === "canceled");
+  const growthCompletedEconomics = completedEconomics.filter(({ job }) => dateInFilter(growthJobDate(job), growthPeriod));
+  const growthTotalJobProfit = growthCompletedEconomics.reduce((sum, row) => sum + row.econ.profit, 0);
+  const growthTotalFullProfit = growthCompletedEconomics.reduce((sum, row) => sum + row.econ.fullProfit, 0);
+  const growthTotalLabor = growthCompletedEconomics.reduce((sum, row) => sum + row.econ.labor, 0);
+  const growthTotalOverhead = growthCompletedEconomics.reduce((sum, row) => sum + row.econ.overhead, 0);
+  const growthTotalMarketing = growthCompletedEconomics.reduce((sum, row) => sum + row.econ.marketing, 0);
+  const growthJobRevenue = growthCompletedEconomics.reduce((sum, row) => sum + row.econ.revenue, 0);
+  const growthAverageMargin = growthJobRevenue > 0 ? Math.round(growthTotalJobProfit / growthJobRevenue * 100) : 0;
+  const growthLossJobs = growthCompletedEconomics.filter((row) => row.econ.profit < 0);
+  const growthTrueLossJobs = growthCompletedEconomics.filter((row) => row.econ.fullProfit < 0);
+  const growthLostRevenue = growthCanceledJobs.reduce((sum, job) => sum + Math.max(0, ...(job.price_options || []).map((price) => Number(price.amount) || 0)), 0);
+  const growthDurations = calc.durationStats(growthDoneJobs);
+  const growthSourceMap = {};
+  growthPeriodJobs.forEach((job) => {
+    const label = canonicalSourceName(job.source) || "Не указан"; const key = canonicalSourceKey(label);
+    if (!growthSourceMap[key]) growthSourceMap[key] = { key, label, total: 0, done: 0, canceled: 0, revenue: 0, profit: 0, spent: 0 };
+    const row = growthSourceMap[key]; row.total += 1;
+    if (job.status === "canceled") row.canceled += 1;
+    if (job.status === "done") { row.done += 1; row.revenue += Number(job.report_paid) || 0; row.profit += jobEconomics(job).profit; }
+  });
+  mktChannels.forEach((channel) => {
+    const key = canonicalSourceKey(channel.source_key); if (!key || !growthSourceMap[key]) return;
+    growthSourceMap[key].spent += mktTopups
+      .filter((topup) => topup.channel_id === channel.id && dateInFilter(topup.topup_date, growthPeriod))
+      .reduce((sum, topup) => sum + (Number(topup.amount) || 0), 0);
+  });
+  const growthSourceRatings = Object.values(growthSourceMap).map((row) => ({
+    ...row,
+    conversion: row.total ? Math.round(row.done / row.total * 100) : 0,
+    avgCheck: row.done ? Math.round(row.revenue / row.done) : 0,
+    roi: row.spent > 0 ? row.revenue / row.spent : null,
+  })).sort((a, b) => b.profit - a.profit);
+  const growthManagerMap = {};
+  growthPeriodJobs.forEach((job) => {
+    const id = job.created_by || "unknown"; const label = profileById(id)?.full_name || "Не указан";
+    if (!growthManagerMap[id]) growthManagerMap[id] = { id, label, total: 0, done: 0, canceled: 0, revenue: 0, profit: 0 };
+    const row = growthManagerMap[id]; row.total += 1;
+    if (job.status === "canceled") row.canceled += 1;
+    if (job.status === "done") { row.done += 1; row.revenue += Number(job.report_paid) || 0; row.profit += jobEconomics(job).profit; }
+  });
+  const growthManagerRatings = Object.values(growthManagerMap).map((row) => ({
+    ...row,
+    conversion: row.total ? Math.round(row.done / row.total * 100) : 0,
+    avgCheck: row.done ? Math.round(row.revenue / row.done) : 0,
+  })).sort((a, b) => b.profit - a.profit);
   // Сколько лидов ждут ответа. Первая стадия воронки = «ещё никто не взял».
   const leadSla = calc.leadSlaStats(leads, { firstStageId: leadStages[0]?.id || null, closedStageIds: closedLeadStageIds });
   const leadOwners = allProfiles.filter((person) => person.is_active !== false && ["admin", "manager"].includes(person.role));
@@ -4403,24 +4448,25 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "growth" && (
           <div className="kd-stage2">
+            <ReportPeriodBar filter={growthPeriod} onChange={setGrowthPeriod} />
             <div className="kd-kpigrid">
-              <div className="kd-kpicard"><span>Прибыль по заявкам</span><strong className={totalJobProfit >= 0 ? "pos" : "neg"}>{fmt(totalJobProfit)} ₸</strong><small>без общих операционных расходов</small></div>
-              <div className="kd-kpicard"><span>Средняя маржа</span><strong>{averageJobMargin}%</strong><small>{completedEconomics.length} выполненных заявок</small></div>
-              <div className="kd-kpicard"><span>Убыточные заявки</span><strong className={lossJobs.length ? "neg" : "pos"}>{lossJobs.length}</strong><small>нужно проверить расходы и цену</small></div>
-              <div className="kd-kpicard"><span>Потерянная выручка</span><strong className="neg">{fmt(lostRevenue)} ₸</strong><small>{canceledJobs.length} отменённых заявок</small></div>
+              <div className="kd-kpicard"><span>Прибыль по заявкам</span><strong className={growthTotalJobProfit >= 0 ? "pos" : "neg"}>{fmt(growthTotalJobProfit)} ₸</strong><small>без общих операционных расходов</small></div>
+              <div className="kd-kpicard"><span>Средняя маржа</span><strong>{growthAverageMargin}%</strong><small>{growthCompletedEconomics.length} выполненных заявок</small></div>
+              <div className="kd-kpicard"><span>Убыточные заявки</span><strong className={growthLossJobs.length ? "neg" : "pos"}>{growthLossJobs.length}</strong><small>нужно проверить расходы и цену</small></div>
+              <div className="kd-kpicard"><span>Потерянная выручка</span><strong className="neg">{fmt(growthLostRevenue)} ₸</strong><small>{growthCanceledJobs.length} отменённых заявок</small></div>
             </div>
 
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section" style={{ marginTop: 0 }}>С учётом труда и постоянных расходов</div>
               <div className="kd-muted" style={{ marginBottom: 10 }}>Прибыль выше — прямая: выручка минус препараты, комиссия, доли партнёров и бонусы. Она не знает про оклады и аренду, поэтому всегда выглядит бодрее, чем есть на самом деле.</div>
-              <div className="kd-row"><span>Прямая прибыль по заявкам</span><strong>{fmt(totalJobProfit)} ₸</strong></div>
-              <div className="kd-row"><span>Оклады, разнесённые на заявки</span><strong style={{ color: "var(--rust)" }}>− {fmt(totalLabor)} ₸</strong></div>
-              <div className="kd-row"><span>Постоянные расходы (аренда, реклама, связь)</span><strong style={{ color: "var(--rust)" }}>− {fmt(totalOverhead)} ₸</strong></div>
-              <div className="kd-row"><span>Реклама, разнесённая на заявки</span><strong style={{ color: "var(--rust)" }}>− {fmt(totalMarketing)} ₸</strong></div>
-              <div className="kd-row total"><span>Реальная прибыль</span><strong style={{ color: totalFullProfit >= 0 ? "var(--primary-d)" : "var(--rust)" }}>{fmt(totalFullProfit)} ₸</strong></div>
-              {trueLossJobs.length > lossJobs.length && (
+              <div className="kd-row"><span>Прямая прибыль по заявкам</span><strong>{fmt(growthTotalJobProfit)} ₸</strong></div>
+              <div className="kd-row"><span>Оклады, разнесённые на заявки</span><strong style={{ color: "var(--rust)" }}>− {fmt(growthTotalLabor)} ₸</strong></div>
+              <div className="kd-row"><span>Постоянные расходы (аренда, реклама, связь)</span><strong style={{ color: "var(--rust)" }}>− {fmt(growthTotalOverhead)} ₸</strong></div>
+              <div className="kd-row"><span>Реклама, разнесённая на заявки</span><strong style={{ color: "var(--rust)" }}>− {fmt(growthTotalMarketing)} ₸</strong></div>
+              <div className="kd-row total"><span>Реальная прибыль</span><strong style={{ color: growthTotalFullProfit >= 0 ? "var(--primary-d)" : "var(--rust)" }}>{fmt(growthTotalFullProfit)} ₸</strong></div>
+              {growthTrueLossJobs.length > growthLossJobs.length && (
                 <div className="kd-flag warn" style={{ marginTop: 10 }}>
-                  Убыточных заявок на самом деле {trueLossJobs.length}, а не {lossJobs.length}: остальные не окупают труд и постоянные расходы
+                  Убыточных заявок на самом деле {growthTrueLossJobs.length}, а не {growthLossJobs.length}: остальные не окупают труд и постоянные расходы
                 </div>
               )}
               <div className="kd-muted" style={{ marginTop: 10 }}>Оклад делится на выполненные заявки того же дезинфектора за месяц. Постоянные расходы — поровну на все заявки месяца: аренда не растёт от того, что заявка дороже. Оклад задаётся в карточке сотрудника, расходы — в «Счетах и расходах».</div>
@@ -4428,18 +4474,18 @@ function Dashboard({ session, profile }) {
 
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section" style={{ marginTop: 0 }}>Сколько занимает работа</div>
-              {durations.measured === 0 ? (
+              {growthDurations.measured === 0 ? (
                 <div className="kd-muted">Пока не по чему считать: нужны отметки «В путь» и «На объекте» в заявке. Дезинфекторы жмут их в поле — статистика наберётся сама.</div>
               ) : (<>
                 <div className="kd-kpigrid" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
-                  <div className="kd-kpicard"><span>В пути</span><strong>{fmtMin(durations.avgTravel)}</strong><small>в среднем до объекта</small></div>
-                  <div className="kd-kpicard"><span>На объекте</span><strong>{fmtMin(durations.avgOnSite)}</strong><small>сама обработка</small></div>
-                  <div className="kd-kpicard"><span>Полный выезд</span><strong>{fmtMin(durations.avgTotal)}</strong><small>от выхода до отчёта</small></div>
+                  <div className="kd-kpicard"><span>В пути</span><strong>{fmtMin(growthDurations.avgTravel)}</strong><small>в среднем до объекта</small></div>
+                  <div className="kd-kpicard"><span>На объекте</span><strong>{fmtMin(growthDurations.avgOnSite)}</strong><small>сама обработка</small></div>
+                  <div className="kd-kpicard"><span>Полный выезд</span><strong>{fmtMin(growthDurations.avgTotal)}</strong><small>от выхода до отчёта</small></div>
                 </div>
-                {durations.byPest.length > 0 && (
+                {growthDurations.byPest.length > 0 && (
                   <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr .8fr 1fr 1fr", marginTop: 14 }}><span>Вид</span><span>Замеров</span><span>На объекте</span><span>Полный выезд</span></div>
                 )}
-                {durations.byPest.map((p) => (
+                {growthDurations.byPest.map((p) => (
                   <div className="kd-ledgerrow" key={p.pest} style={{ gridTemplateColumns: "1.6fr .8fr 1fr 1fr" }}>
                     <span className="kd-ledgername">{p.pest}</span>
                     <span>{p.jobs}</span>
@@ -4447,34 +4493,34 @@ function Dashboard({ session, profile }) {
                     <strong>{fmtMin(p.avgTotal)}</strong>
                   </div>
                 ))}
-                <div className="kd-muted" style={{ marginTop: 10 }}>Посчитано по {durations.measured} из {durations.doneJobs} выполненных заявок — только там, где есть отметки этапов. Промежутки длиннее 12 часов отброшены: обычно это забытая кнопка, а не реальный выезд.</div>
+                <div className="kd-muted" style={{ marginTop: 10 }}>Посчитано по {growthDurations.measured} из {growthDurations.doneJobs} выполненных заявок выбранного периода — только там, где есть отметки этапов. Промежутки длиннее 12 часов отброшены: обычно это забытая кнопка, а не реальный выезд.</div>
               </>)}
             </div>
 
             <div className="kd-stage2grid">
               <section className="kd-card">
                 <div className="kd-stage2head"><div><div className="kd-title">Юнит-экономика заявок</div><div className="kd-muted">Выручка минус все прямые расходы</div></div><TrendingUp size={20} /></div>
-                {completedEconomics.length === 0 && <div className="kd-empty">Выполненных заявок пока нет.</div>}
+                {growthCompletedEconomics.length === 0 && <div className="kd-empty">В выбранном периоде выполненных заявок нет.</div>}
                 <div className="kd-metrictable">
-                  {completedEconomics.sort((a, b) => a.econ.profit - b.econ.profit).slice(0, 30).map(({ job, econ }) => <button key={job.id} onClick={() => setModal({ kind: "economics", job, economics: econ })}>
+                  {[...growthCompletedEconomics].sort((a, b) => a.econ.profit - b.econ.profit).slice(0, 30).map(({ job, econ }) => <button key={job.id} onClick={() => setModal({ kind: "economics", job, economics: econ })}>
                     <span><strong>{job.pest}</strong><small>{isoToRu(job.scheduled_date)} · {job.client_phone}</small></span>
                     <span className="right"><strong className={econ.profit >= 0 ? "pos" : "neg"}>{fmt(econ.profit)} ₸</strong><small>маржа {econ.margin}%</small></span><ArrowRight size={15} />
                   </button>)}
                 </div>
               </section>
               <section className="kd-card">
-                <div className="kd-stage2head"><div><div className="kd-title">Рейтинг источников</div><div className="kd-muted">Текущий месяц · сортировка по прибыли</div></div><Star size={20} /></div>
-                {sourceRatings.length === 0 && <div className="kd-empty">Нет заявок за текущий месяц.</div>}
+                <div className="kd-stage2head"><div><div className="kd-title">Рейтинг источников</div><div className="kd-muted">Выбранный период · сортировка по прибыли</div></div><Star size={20} /></div>
+                {growthSourceRatings.length === 0 && <div className="kd-empty">В выбранном периоде заявок нет.</div>}
                 <div className="kd-ranktable"><div className="head"><span># / Источник</span><span>Конверсия</span><span>Чек</span><span>ROI</span><span>Прибыль</span></div>
-                  {sourceRatings.map((r, i) => <div key={r.key}><span><b>{i + 1}</b> {r.label}<small>{r.total} обращ.</small></span><strong>{r.conversion}%</strong><strong>{fmt(r.avgCheck)} ₸</strong><strong>{r.roi == null ? "—" : r.roi.toFixed(1) + "×"}</strong><strong className={r.profit >= 0 ? "pos" : "neg"}>{fmt(r.profit)} ₸</strong></div>)}
+                  {growthSourceRatings.map((r, i) => <div key={r.key}><span><b>{i + 1}</b> {r.label}<small>{r.total} обращ.</small></span><strong>{r.conversion}%</strong><strong>{fmt(r.avgCheck)} ₸</strong><strong>{r.roi == null ? "—" : r.roi.toFixed(1) + "×"}</strong><strong className={r.profit >= 0 ? "pos" : "neg"}>{fmt(r.profit)} ₸</strong></div>)}
                 </div>
               </section>
             </div>
             <section className="kd-card">
               <div className="kd-stage2head"><div><div className="kd-title">Рейтинг менеджеров</div><div className="kd-muted">Кто создаёт заявки, сколько закрывает и с какой прибылью</div></div><Users size={20} /></div>
-              {managerRatings.length === 0 && <div className="kd-empty">Нет данных за текущий месяц.</div>}
+              {growthManagerRatings.length === 0 && <div className="kd-empty">В выбранном периоде данных нет.</div>}
               <div className="kd-ranktable"><div className="head"><span># / Менеджер</span><span>Заявки</span><span>Конверсия</span><span>Средний чек</span><span>Прибыль</span></div>
-                {managerRatings.map((r, i) => <div key={r.id}><span><b>{i + 1}</b> {r.label}<small>{r.canceled} отмен</small></span><strong>{r.total}</strong><strong>{r.conversion}%</strong><strong>{fmt(r.avgCheck)} ₸</strong><strong className={r.profit >= 0 ? "pos" : "neg"}>{fmt(r.profit)} ₸</strong></div>)}
+                {growthManagerRatings.map((r, i) => <div key={r.id}><span><b>{i + 1}</b> {r.label}<small>{r.canceled} отмен</small></span><strong>{r.total}</strong><strong>{r.conversion}%</strong><strong>{fmt(r.avgCheck)} ₸</strong><strong className={r.profit >= 0 ? "pos" : "neg"}>{fmt(r.profit)} ₸</strong></div>)}
               </div>
             </section>
           </div>

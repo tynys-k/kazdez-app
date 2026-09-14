@@ -455,17 +455,19 @@ function parseIso(iso) {
 }
 const isoOf = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
 // Возвращает {from, to} (ISO-строки включительно) для пресета, или null (=всё время)
-function datePresetRange(preset) {
+function datePresetRange(preset, offset = 0) {
   const now = new Date(); now.setHours(0, 0, 0, 0);
   const iso = (d) => isoOf(d);
   const shift = (base, days) => { const d = new Date(base); d.setDate(d.getDate() + days); return d; };
   switch (preset) {
-    case "today": return { from: iso(now), to: iso(now) };
+    case "today": { const d = shift(now, offset); return { from: iso(d), to: iso(d) }; }
     case "tomorrow": { const d = shift(now, 1); return { from: iso(d), to: iso(d) }; }
     case "yesterday": { const d = shift(now, -1); return { from: iso(d), to: iso(d) }; }
-    case "week": { const day = (now.getDay() + 6) % 7; const mon = shift(now, -day); const sun = shift(mon, 6); return { from: iso(mon), to: iso(sun) }; }
-    case "month": { const f = new Date(now.getFullYear(), now.getMonth(), 1); const t = new Date(now.getFullYear(), now.getMonth() + 1, 0); return { from: iso(f), to: iso(t) }; }
-    case "quarter": { const q = Math.floor(now.getMonth() / 3); const f = new Date(now.getFullYear(), q * 3, 1); const t = new Date(now.getFullYear(), q * 3 + 3, 0); return { from: iso(f), to: iso(t) }; }
+    case "week": { const day = (now.getDay() + 6) % 7; const mon = shift(now, -day + offset * 7); const sun = shift(mon, 6); return { from: iso(mon), to: iso(sun) }; }
+    case "month": { const f = new Date(now.getFullYear(), now.getMonth() + offset, 1); const t = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0); return { from: iso(f), to: iso(t) }; }
+    case "quarter": { const q = Math.floor(now.getMonth() / 3); const f = new Date(now.getFullYear(), q * 3 + offset * 3, 1); const t = new Date(now.getFullYear(), q * 3 + offset * 3 + 3, 0); return { from: iso(f), to: iso(t) }; }
+    case "half": { const half = now.getMonth() < 6 ? 0 : 6; const f = new Date(now.getFullYear(), half + offset * 6, 1); const t = new Date(now.getFullYear(), half + offset * 6 + 6, 0); return { from: iso(f), to: iso(t) }; }
+    case "year": { const f = new Date(now.getFullYear() + offset, 0, 1); const t = new Date(now.getFullYear() + offset, 12, 0); return { from: iso(f), to: iso(t) }; }
     default: return null;
   }
 }
@@ -475,7 +477,7 @@ function dateInFilter(dateIso, filter) {
   if (!dateIso) return false;
   let from, to;
   if (filter.preset === "custom") { from = filter.from || null; to = filter.to || filter.from || null; }
-  else { const r = datePresetRange(filter.preset); if (!r) return true; from = r.from; to = r.to; }
+  else { const r = datePresetRange(filter.preset, Number(filter.offset) || 0); if (!r) return true; from = r.from; to = r.to; }
   if (from && dateIso < from) return false;
   if (to && dateIso > to) return false;
   return true;
