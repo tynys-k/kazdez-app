@@ -1,5 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { addressKey, clientMemoFor, describeChange, monthLabel, phoneKey, samePhone, waLink, winbackMsg } from "./shared";
+import { addressKey, clientMemoFor, dateInFilter, datePresetRange, describeChange, monthLabel, phoneKey, samePhone, waLink, winbackMsg } from "./shared";
+
+describe("периоды управленческих отчётов", () => {
+  it("строит квартал, полугодие и год с переходом в прошлые периоды", () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const previousYear = datePresetRange("year", -1);
+    expect(previousYear.from).toBe(`${year - 1}-01-01`);
+    expect(previousYear.to).toBe(`${year - 1}-12-31`);
+
+    const half = datePresetRange("half", 0);
+    expect(half.from.endsWith("-01-01") || half.from.endsWith("-07-01")).toBe(true);
+    expect(dateInFilter(half.from, { preset: "half", offset: 0 })).toBe(true);
+    expect(dateInFilter(previousYear.from, { preset: "year", offset: 0 })).toBe(false);
+  });
+
+  it("применяет произвольный диапазон включительно", () => {
+    const filter = { preset: "custom", from: "2026-04-10", to: "2026-04-20" };
+    expect(dateInFilter("2026-04-10", filter)).toBe(true);
+    expect(dateInFilter("2026-04-20", filter)).toBe(true);
+    expect(dateInFilter("2026-04-21", filter)).toBe(false);
+  });
+});
 
 describe("phoneKey", () => {
   it("склеивает записи одного номера в разных формах", () => {
