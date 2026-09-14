@@ -27,6 +27,16 @@ import { contractHistorySummary, subscriptionIntervalLabel } from "./subscriptio
 import { clientAddresses as collectClientAddresses, clientSummary, searchClients } from "./clientDirectory";
 import { ClientDetailsModal, ClientProfileModal } from "./clientModals";
 import StockRegister from "./StockRegister";
+import { warehouseRevisionDelta } from "./workflows/warehouseModel";
+import TaskBoard from "./workflows/TaskBoard";
+import TenderDeliveries from "./workflows/TenderDeliveries";
+import { TenderRegister, TenderCollaboration, PartnerTenderLinks } from "./workflows/Tenders";
+import ContractsRegister from "./workflows/ContractsRegister";
+import PayrollCarryoverModal, { PayrollCarryoverHistory } from "./workflows/PayrollCarryover";
+import { payrollCarryover } from "./workflows/payrollCarryoverModel";
+import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus";
+import { taskParticipant } from "./workflows/taskModel";
+import { qualityHistoryForPhone, qualityPendingJobs } from "./workflows/QualityHistory";
 import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 const MarketingPage = React.lazy(() => import("./MarketingPage"));
@@ -272,9 +282,22 @@ function Dashboard({ session, profile }) {
   const [opex, setOpex] = useState([]);
   const [deposits, setDeposits] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
+  const [warehouseMoves, setWarehouseMoves] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierOffers, setSupplierOffers] = useState([]);
+  const [payrollCarryovers, setPayrollCarryovers] = useState([]);
+  const [qualityEvents, setQualityEvents] = useState([]);
+  const [legalContracts, setLegalContracts] = useState([]);
+  const [selectedLegalId, setSelectedLegalId] = useState(null);
+  function openLegalContract(contract) { setModal(null); setSelectedLegalId(contract.id); setTab("contracts"); }
   const [accounts, setAccounts] = useState([]);
   const [moves, setMoves] = useState([]);
   const [tenders, setTenders] = useState([]);
+  const [selectedTenderId, setSelectedTenderId] = useState(null);
+  const [tenderPayments, setTenderPayments] = useState([]);
+  const [tenderDeliveries, setTenderDeliveries] = useState([]);
+  function openTender(tender) { setModal(null); setSelectedTenderId(tender.id); setTab("tenders"); }
   const [tenderGuarantees, setTenderGuarantees] = useState([]);
   const [tenderServices, setTenderServices] = useState([]);
   const [guaranteeReturns, setGuaranteeReturns] = useState([]);
@@ -386,7 +409,7 @@ function Dashboard({ session, profile }) {
   const [syncingOffline, setSyncingOffline] = useState(false);
   const isAdmin = profile?.role === "admin";
   const permissions = effectivePermissions(profile);
-  const canAccess = (key) => isAdmin || permissions.has(key);
+  const canAccess = (key) => isAdmin || (key === "tab.contracts" ? ["tab.clients", "tab.subscriptions", "tab.docs"].some((p) => permissions.has(p)) : permissions.has(key));
   const canManageTasks = canAccess("action.tasks_manage");
   const canEditJobs = canAccess("action.jobs_edit");
   const isFieldTech = profile?.role === "tech";
@@ -531,21 +554,27 @@ function Dashboard({ session, profile }) {
     { key: "report_chemicals", label: "Препараты в отчётах", run: () => fetchAllRows("report_chemicals") },
     { key: "chemicals", label: "Склад", run: () => supabase.from("chemicals").select("*") },
     { key: "profiles", label: "Сотрудники", run: () => supabase.rpc("list_profiles_safe") },
-    { key: "handouts", label: "Выдача препаратов", run: () => supabase.from("handouts").select("*"), set: setHandouts },
+    { key: "stock_warehouses", when: () => canAccess("tab.stock"), label: "Склады", run: () => fetchAllRows("stock_warehouses"), set: setWarehouses },
+    { key: "warehouse_moves", when: () => canAccess("tab.stock"), label: "Движения складов", run: () => fetchAllRows("warehouse_moves", { column: "created_at", ascending: false }), set: setWarehouseMoves },
+    { key: "suppliers", when: () => canAccess("tab.stock"), label: "Поставщики", run: () => fetchAllRows("suppliers"), set: setSuppliers },
+    { key: "supplier_offers", when: () => canAccess("tab.stock"), label: "Цены поставщиков", run: () => fetchAllRows("supplier_offers", { column: "quoted_on", ascending: false }), set: setSupplierOffers },
+    { key: "handouts", label: "Выдача препаратов", run: () => fetchAllRows("handouts"), set: setHandouts },
     { key: "partners", label: "Партнёры", run: () => supabase.from("partners").select("*"), set: setPartners },
     { key: "doc_services", label: "Документы", run: () => supabase.from("doc_services").select("*").order("created_at", { ascending: false }), set: setDocs },
     { key: "tech_expenses", label: "Расходы сотрудников", run: () => supabase.from("tech_expenses").select("*").order("created_at", { ascending: false }), set: setExpenses },
     { key: "equipment", label: "Оборудование", run: () => supabase.from("equipment").select("*"), set: setEquipment },
-    { key: "equipment_handouts", label: "Выдача оборудования", run: () => supabase.from("equipment_handouts").select("*"), set: setEquipHandouts },
+    { key: "equipment_handouts", label: "Выдача оборудования", run: () => fetchAllRows("equipment_handouts"), set: setEquipHandouts },
     { key: "client_sources", label: "Источники", run: () => supabase.from("client_sources").select("*").order("name"), set: setSources },
     { key: "pest_types", label: "Виды работ", run: () => supabase.from("pest_types").select("*").order("name"), set: setPestTypes },
     { key: "app_settings", label: "Настройки", run: () => supabase.from("app_settings").select("*").not("key", "in", `(${COMPANY_IMAGE_KEYS.join(",")})`) },
     { key: "expense_categories", label: "Категории расходов", run: () => supabase.from("expense_categories").select("*").order("name"), set: setExpCats },
     { key: "opex", label: "Операционные расходы", run: () => supabase.from("opex").select("*").order("spent_date", { ascending: false }), set: setOpex },
     { key: "cash_deposits", label: "Сдача наличных", run: () => supabase.from("cash_deposits").select("*").order("requested_at", { ascending: false }), set: setDeposits },
-    { key: "tasks", label: "Задачи", run: () => supabase.from("tasks").select("*").order("created_at", { ascending: false }), set: setTasks },
+    { key: "tasks", label: "Задачи", run: () => fetchAllRows("tasks", { column: "created_at", ascending: false }), set: setTasks },
     { key: "accounts", label: "Счета", run: () => supabase.from("accounts").select("*").order("sort"), set: setAccounts },
     { key: "money_moves", label: "Движение денег", run: () => fetchAllRows("money_moves", { column: "move_date", ascending: false }), set: setMoves },
+    { key: "tender_deliveries", when: () => canAccess("tab.tenders") || canAccess("tab.stock"), label: "Препараты в тендерах", run: () => fetchAllRows("tender_deliveries", { column: "created_at", ascending: false }), set: setTenderDeliveries },
+    { key: "tender_payments", when: () => canAccess("tab.tenders") || canAccess("tab.partners"), label: "Платежи тендеров", run: () => fetchAllRows("tender_payments", { column: "created_at", ascending: false }), set: setTenderPayments },
     { key: "tenders", label: "Тендеры", run: () => supabase.from("tenders").select("*").order("created_at", { ascending: false }), set: setTenders },
     { key: "tender_guarantees", label: "Обеспечения", run: () => supabase.from("tender_guarantees").select("*"), set: setTenderGuarantees },
     { key: "tender_services", label: "Работы по тендерам", run: () => supabase.from("tender_services").select("*").order("seq"), set: setTenderServices },
@@ -557,15 +586,18 @@ function Dashboard({ session, profile }) {
     { key: "mkt_topups", label: "Расходы рекламы", run: () => supabase.from("mkt_topups").select("*").order("topup_date", { ascending: false }), set: setMktTopups },
     { key: "tech_days_off", label: "Выходные", run: () => supabase.from("tech_days_off").select("*"), set: setDaysOff },
     { key: "client_followups", label: "Касания", run: () => supabase.from("client_followups").select("*").order("due_date", { ascending: true }), set: setFollowups },
-    { key: "quality_checks", label: "Контроль качества", run: () => supabase.from("quality_checks").select("*").order("contacted_at", { ascending: false }), set: setQualityChecks },
-    { key: "service_contracts", label: "Абоненты", run: () => supabase.from("service_contracts").select("*").order("next_service_date", { ascending: true }), set: setContracts },
+    { key: "quality_checks", label: "Контроль качества", run: () => fetchAllRows("quality_checks", { column: "contacted_at", ascending: false }), set: setQualityChecks },
+    { key: "quality_check_events", when: () => canAccess("tab.retention") || canAccess("tab.clients"), label: "История контроля", run: () => fetchAllRows("quality_check_events", { column: "contacted_at", ascending: false }), set: setQualityEvents },
+    { key: "payroll_carryovers", when: () => canAccess("tab.payroll"), label: "Переносы переплат", run: () => fetchAllRows("payroll_carryovers", { column: "created_at", ascending: false }), set: setPayrollCarryovers },
+    { key: "legal_contracts", when: () => canAccess("tab.clients") || canAccess("tab.subscriptions") || canAccess("tab.docs"), label: "Договоры", run: () => fetchAllRows("legal_contracts", { column: "signed_on", ascending: false }), set: setLegalContracts },
+    { key: "service_contracts", label: "Абоненты", run: () => fetchAllRows("service_contracts", { column: "next_service_date", ascending: true }), set: setContracts },
     { key: "client_public_feedback", label: "Оценки клиентов", run: () => supabase.from("client_public_feedback").select("*").order("created_at", { ascending: false }), set: setPublicFeedback },
     { key: "job_proofs", label: "Подтверждения работ", run: () => supabase.from("job_proofs").select("*").order("updated_at", { ascending: false }), set: setJobProofs },
     { key: "cash_adjustments", label: "Ревизии кассы", run: () => supabase.from("cash_adjustments").select("*").order("created_at", { ascending: false }), set: setCashAdjustments },
-    { key: "inventory_adjustments", label: "Ревизии препаратов", run: () => supabase.from("inventory_adjustments").select("*").order("created_at", { ascending: false }), set: setInventoryAdjustments },
+    { key: "inventory_adjustments", label: "Ревизии препаратов", run: () => fetchAllRows("inventory_adjustments", { column: "created_at", ascending: false }), set: setInventoryAdjustments },
     { key: "job_helpers", label: "Помощники на заявках", run: () => supabase.from("job_helpers").select("*"), set: setJobHelpers },
     { key: "price_list", when: () => canEditJobs || canManageCash, label: "Прайс", run: () => supabase.from("price_list").select("*").order("pest").order("area_from"), set: setPriceList },
-    { key: "chemical_purchases", when: () => canManageCash || canAccess("action.stock_edit"), label: "Закуп препаратов", run: () => supabase.from("chemical_purchases").select("*").order("purchase_date", { ascending: false }), set: setChemPurchases },
+    { key: "chemical_purchases", when: () => canManageCash || canAccess("action.stock_edit"), label: "Закуп препаратов", run: () => fetchAllRows("chemical_purchases", { column: "purchase_date", ascending: false }), set: setChemPurchases },
     { key: "tech_documents", label: "Допуски сотрудников", run: () => supabase.from("tech_documents").select("*").order("expires_on", { ascending: true }), set: setTechDocs },
     { key: "training_records", label: "Обучение", run: () => supabase.from("training_records").select("*").order("passed_on", { ascending: false }), set: setTraining },
     { key: "safety_acknowledgements", label: "Инструктаж", run: () => supabase.from("safety_acknowledgements").select("*").order("acknowledged_at", { ascending: false }), set: setSafetyAcks },
@@ -594,10 +626,10 @@ function Dashboard({ session, profile }) {
     { key: "repeat_causes", label: "Разбор повторных выездов", run: () => supabase.from("repeat_causes").select("*"), set: setRepeatCauses },
     { key: "job_debts", label: "Долги клиентов", run: () => supabase.from("job_debts").select("*").order("due_on"), set: setDebts },
     { key: "job_equipment", label: "Оборудование на заявках", run: () => supabase.from("job_equipment").select("*"), set: setJobEquipment },
-    { key: "chemical_sales", when: () => canManageCash || canAccess("action.stock_edit"), label: "Продажа препаратов", run: () => supabase.from("chemical_sales").select("*").order("sold_on", { ascending: false }), set: setChemSales },
+    { key: "chemical_sales", when: () => canManageCash || canAccess("action.stock_edit"), label: "Продажа препаратов", run: () => fetchAllRows("chemical_sales", { column: "sold_on", ascending: false }), set: setChemSales },
     { key: "paperwork", when: () => canManageCash || canEditDocs, label: "Проведение документов", run: () => supabase.from("paperwork").select("*").order("created_at", { ascending: false }), set: setPaperwork },
     { key: "paperwork_jobs", when: () => canManageCash || canEditDocs, label: "Заявки в комплектах", run: () => supabase.from("paperwork_jobs").select("*"), set: setPaperworkJobs },
-    { key: "clients", label: "Клиенты (карточки)", run: () => supabase.from("clients").select("*"), set: setClients },
+    { key: "clients", label: "Клиенты (карточки)", run: () => fetchAllRows("clients"), set: setClients },
     { key: "client_contacts", when: () => canAccess("tab.clients"), label: "Контакты клиентов", run: () => supabase.from("client_contacts").select("*").order("created_at"), set: setClientContacts },
     { key: "client_addresses", when: () => canAccess("tab.clients"), label: "Адреса клиентов", run: () => supabase.from("client_addresses").select("*").order("created_at"), set: setClientAddresses },
     { key: "client_attachments", when: () => canAccess("tab.clients"), label: "Файлы клиентов", run: () => supabase.from("client_attachments").select("*").order("created_at", { ascending: false }), set: setClientAttachments },
@@ -609,6 +641,8 @@ function Dashboard({ session, profile }) {
   // обновляются: иначе у них пропал бы список препаратов.
   function withDependencies(keys) {
     const set = new Set(keys);
+    if (set.has("quality_checks")) set.add("quality_check_events");
+    if (set.has("chemicals") || set.has("handouts") || set.has("equipment_handouts")) { set.add("warehouse_moves"); set.add("stock_warehouses"); }
     if (set.has("jobs")) set.add("report_chemicals");
     if (set.has("report_chemicals")) set.add("jobs");
     return [...set];
@@ -1025,29 +1059,13 @@ function Dashboard({ session, profile }) {
   // Передача пишется двумя связанными строками (out + in) с общим transfer_group.
   async function saveInventoryMovement(tech, payload) {
     if (blockedByClosedPeriod(payload.event_date)) return false;
-    const current = Number(payload.current_balance) || 0;
-    const quantity = Number(payload.amount) || 0;
-    const common = {
-      chemical_id: String(payload.chemical_id), event_date: payload.event_date,
-      reason: payload.reason, note: payload.note || null, created_by: session.user.id,
-    };
-    let rows;
-    if (payload.kind === "transfer") {
-      const targetBefore = techLedger(payload.to_tech_id).find((r) => String(r.chem.id) === String(payload.chemical_id))?.balance || 0;
-      const transferGroup = crypto.randomUUID();
-      rows = [
-        { ...common, tech_id: String(tech.id), kind: "transfer_out", amount_delta: -quantity, balance_before: current, balance_after: current - quantity, counterparty_tech_id: String(payload.to_tech_id), transfer_group: transferGroup },
-        { ...common, tech_id: String(payload.to_tech_id), kind: "transfer_in", amount_delta: quantity, balance_before: targetBefore, balance_after: targetBefore + quantity, counterparty_tech_id: String(tech.id), transfer_group: transferGroup },
-      ];
-    } else {
-      const delta = payload.kind === "revision" ? quantity - current : payload.kind === "correction_in" ? quantity : -quantity;
-      rows = [{ ...common, tech_id: String(tech.id), kind: payload.kind, amount_delta: delta, balance_before: current, balance_after: current + delta }];
-    }
-    const { error } = await supabase.from("inventory_adjustments").insert(rows);
+    const { error } = await supabase.rpc("post_employee_stock_operation", {
+      p_request_id: payload.request_id, p_tech: tech.id, p_chemical: payload.chemical_id,
+      p_kind: payload.kind, p_amount: Number(payload.amount), p_target: payload.to_tech_id || null,
+      p_event_date: payload.event_date, p_reason: payload.reason, p_note: payload.note || null,
+      p_expected: Number(payload.current_balance) || 0,
+    });
     if (error) { showToast("Ошибка: " + error.message); return false; }
-    const chem = chemById(payload.chemical_id);
-    const after = rows[0].balance_after;
-    await logAction("Остатки препаратов", `${tech.full_name || "?"} · ${chem?.name || "?"}: ${fmtAmount(current, chem?.unit_kind)} → ${fmtAmount(after, chem?.unit_kind)} · ${payload.reason}`);
     setModal(null); showToast("Движение сохранено"); reloadStock(); return true;
   }
   // Запись ревизии / «забрали в офис» / ручной корректировки. Суммы приходят уже
@@ -1643,7 +1661,7 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Препарат добавлен"); reloadStock(); return null;
   }
   async function stockIn(chem, addMl, newPrice, extra = {}) {
-    const rpcName = "post_chemical_purchase_atomic";
+    const rpcName = extra.warehouse_id ? "post_located_purchase" : "post_chemical_purchase_atomic";
     const purchaseDate = extra.purchase_date || new Date().toISOString().slice(0, 10);
     const price = newPrice != null ? newPrice : (Number(chem.price_per_liter) || null);
     const { error } = await supabase.rpc(rpcName, {
@@ -1651,6 +1669,7 @@ function Dashboard({ session, profile }) {
       p_price_per_liter: price, p_purchase_date: purchaseDate,
       p_supplier: extra.supplier || null, p_batch_no: extra.batch_no || null,
       p_expires_on: extra.expires_on || null,
+      ...(extra.warehouse_id ? { p_warehouse_id: extra.warehouse_id } : {}),
     });
     if (error) {
       const message = atomicReceiptRpcUnavailable(error, rpcName)
@@ -1989,12 +2008,13 @@ function Dashboard({ session, profile }) {
   }
   async function setTaskStatus(task, status) {
     const { error } = await supabase.from("tasks").update({ status, done_at: status === "done" ? new Date().toISOString() : null }).eq("id", task.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
+    if (error) { showToast("Ошибка: " + error.message); return false; }
     await logAction("Задачи", `${(TASK_STATUS[status] || {}).label || status}: ${task.title}`);
-    showToast("Обновлено"); load();
+    showToast("Обновлено"); await load(); return true;
   }
   async function removeTask(task) {
-    await supabase.from("tasks").delete().eq("id", task.id);
+    const { error } = await supabase.from("tasks").delete().eq("id", task.id);
+    if (error) { showToast("Не удалось удалить задачу: " + error.message); return; }
     await logAction("Задачи", `Удалена: ${task.title}`);
     showToast("Удалено"); load();
   }
@@ -2016,7 +2036,8 @@ function Dashboard({ session, profile }) {
     setModal(null); showToast("Сохранено"); load();
   }
   async function removeTender(t) {
-    await supabase.from("tenders").delete().eq("id", t.id);
+    const { error } = await supabase.from("tenders").delete().eq("id", t.id);
+    if (error) { showToast("Ошибка удаления тендера: " + error.message); return; }
     await logAction("Тендеры", `Удалён: ${t.contract_no || t.title || "тендер"}`);
     setModal(null); showToast("Удалено"); load();
   }
@@ -2452,7 +2473,7 @@ function Dashboard({ session, profile }) {
       ], chemicals.map((c) => {
         const u = chemUnit(c.unit_kind);
         const used = jobs.reduce((s, j) => s + (j.chemicals || []).filter((x) => (x.chemical_id ? x.chemical_id === c.id : norm(x.name) === norm(c.name))).reduce((a, x) => a + lineAmount(x), 0), 0);
-        const remaining = (Number(c.purchased_ml) || 0) - used;
+        const remaining = (Number(c.purchased_ml) || 0) - used - chemSales.filter((sale) => String(sale.chemical_id) === String(c.id)).reduce((sum, sale) => sum + Number(sale.amount || 0), 0) + warehouseRevisionDelta(warehouseMoves, c.id);
         return { name: c.name, unit: u.big + "/" + u.small, bought: fmtAmount(c.purchased_ml, c.unit_kind), used: fmtAmount(used, c.unit_kind), left: fmtAmount(remaining, c.unit_kind), price: c.price_per_liter, stockValue: Math.round(remaining * pricePerBase(c)) };
       }));
 
@@ -2714,7 +2735,8 @@ function Dashboard({ session, profile }) {
     const unposted = expenses.filter((e) => e.tech_id === t.id
       && !moves.some((m) => m.source === "payroll" && m.ref_id === e.id));
     const accrued = salary + bonus + travel;
-    return { tech: t, salary, salaryCalc, bonus, helperBonus, travel, accrued, paid, owed: accrued - paid, payments, unposted, jobsCount: jobsOf.length };
+    const carryover = payrollCarryover(payrollCarryovers, t.id, monthKey);
+    return { tech: t, salary, salaryCalc, bonus, helperBonus, travel, accrued, paid, carryover, owed: accrued - paid + carryover.net, payments, unposted, jobsCount: jobsOf.length };
   });
   const payrollTotals = payrollRows.reduce((a, r) => ({
     accrued: a.accrued + r.accrued, paid: a.paid + r.paid, owed: a.owed + r.owed,
@@ -2869,7 +2891,8 @@ function Dashboard({ session, profile }) {
     // Проданное партнёрам со склада тоже покидает склад, хотя ни в одной
     // заявке не появляется.
     const soldOff = calc.soldFromStock(c.id, chemSales);
-    const remaining = (Number(c.purchased_ml) || 0) - used - soldOff;
+    const employeeSales = chemSales.filter((s) => String(s.chemical_id) === String(c.id) && s.from_tech_id).reduce((sum, s) => sum + Number(s.amount || 0), 0);
+    const remaining = (Number(c.purchased_ml) || 0) - used - soldOff - employeeSales + warehouseRevisionDelta(warehouseMoves, c.id);
     // Прогноз считается по расходу за последние три месяца, а не за всю
     // историю: иначе препарат, полгода пролежавший без дела, выглядит
     // расходуемым по капле ровно перед сезоном.
@@ -2962,7 +2985,7 @@ function Dashboard({ session, profile }) {
   });
   const doneGroups = groupByDate(doneSorted);
   const canceledFiltered = canceledJobs.filter((j) => dateInFilter(j.scheduled_date, canceledDateFilter));
-  const myOpenTasks = tasks.filter((t) => t.assignee_id === session.user.id && t.status !== "done").length;
+  const myOpenTasks = tasks.filter((t) => taskParticipant(t, session.user.id) && t.status !== "done").length;
   const allOpenTasks = tasks.filter((t) => t.status !== "done").length;
   const todayIsoT = new Date().toISOString().slice(0, 10);
   const tenderOverdue = tenderServices.filter((s) => !s.done && s.due_date && s.due_date < todayIsoT).length;
@@ -2972,7 +2995,7 @@ function Dashboard({ session, profile }) {
   const activeLeads = leads.filter((l) => { const st = leadStageById(l.stage_id); return !l.converted_job_id && !(st && (st.is_lost || st.is_final)); }).length;
   const servicesOf = (tid) => tenderServices.filter((s) => s.tender_id === tid).sort((a, b) => a.seq - b.seq);
   const guaranteesOf = (tid) => tenderGuarantees.filter((g) => g.tender_id === tid);
-  const visibleTasks = canManageTasks ? tasks : tasks.filter((t) => t.assignee_id === session.user.id);
+  const visibleTasks = canManageTasks ? tasks : tasks.filter((t) => taskParticipant(t, session.user.id));
   const todayIso = new Date().toISOString().slice(0, 10);
   const filteredTasks = visibleTasks.filter((t) => {
     if (taskAssignee && t.assignee_id !== taskAssignee) return false;
@@ -3076,8 +3099,8 @@ function Dashboard({ session, profile }) {
   const lostRevenue = canceledJobs.reduce((s, j) => s + Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0)), 0);
   const openFollowups = followups.filter((f) => f.status !== "done");
   const dueFollowups = openFollowups.filter((f) => f.due_date && f.due_date <= todayIso);
-  const qualityByJob = (jobId) => qualityChecks.find((q) => q.job_id === jobId);
-  const qualityPending = doneJobs.filter((j) => !qualityByJob(j.id) && daysSince(j.reported_at || j.scheduled_date) >= 1);
+  const qualityByJob = (jobId) => qualityChecks.find((q) => String(q.job_id) === String(jobId));
+  const qualityPending = qualityPendingJobs(doneJobs, qualityChecks);
   const qualityProblems = qualityChecks.filter((q) => q.status === "problem" || q.result === "complaint");
   const overdueTransfers = doneJobs.filter((j) => Number(j.report_transfer) > 0 && !j.transfer_paid && daysSince(j.reported_at || j.scheduled_date) >= 3);
   const recentLowFeedback = publicFeedback.filter((f) => Number(f.rating) <= 3 && daysSince(f.created_at) <= 14);
@@ -3139,7 +3162,7 @@ function Dashboard({ session, profile }) {
   );
   const directoryStats = clients.reduce((totals, client) => {
     const row = clientSummary(client, jobs, contracts, followups);
-    totals.revenue += row.revenue; totals.withContracts += row.activeContracts > 0 ? 1 : 0;
+    totals.revenue += row.revenue; totals.withContracts += legalContracts.some((c) => c.client_id === client.id && c.status === "active") ? 1 : 0;
     return totals;
   }, { revenue: 0, withContracts: 0 });
   const dashboardAlerts = [
@@ -3223,6 +3246,7 @@ function Dashboard({ session, profile }) {
     { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : ""}` },
     { id: "repeats", icon: RefreshCw, label: `Повторные выезды${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "retention", icon: ClipboardCheck, label: `Обзвон и качество${dueFollowups.length || qualityPending.length ? " · " + (dueFollowups.length + qualityPending.length) : ""}` },
+    { id: "contracts", icon: FileText, label: "Договоры" },
     { id: "subscriptions", icon: Repeat2, label: `Абоненты${dueContracts.length ? " · " + dueContracts.length : ""}` },
     { id: "routes", icon: Route, label: "Маршруты" },
     { id: "growth", icon: TrendingUp, label: `Прибыль по заявкам${lossJobs.length ? " · ⚠ " + lossJobs.length : ""}` },
@@ -3254,7 +3278,7 @@ function Dashboard({ session, profile }) {
   // между «Результатами» и «Учётом», и приходилось вспоминать, в каком из них что лежит.
   const navGroups = [
     { label: "Ежедневная работа", ids: ["today", "jobs", "schedule", "routes", "tasks"] },
-    { label: "Клиенты и возвраты", ids: ["leads", "clients", "retention", "subscriptions", "repeats"] },
+    { label: "Клиенты и возвраты", ids: ["leads", "clients", "contracts", "retention", "subscriptions", "repeats"] },
     { label: "Деньги и аналитика", ids: ["finance", "analytics", "growth", "opex", "cash"] },
     { label: "Архив заявок", ids: ["done", "canceled"] },
     { label: "Команда и склад", ids: ["team", "payroll", "partners", "stock", "myequip"] },
@@ -3262,6 +3286,140 @@ function Dashboard({ session, profile }) {
   const moreNavGroup = { label: "Ещё разделы", ids: ["tenders", "docs", "materials", "knowledge", "journal", "trash"] };
   const mobileTabIds = (isAdmin ? ["today", "jobs", "leads", "routes"] : ["today", "jobs", "tasks", "cash", "tenders", "finance"]).filter((id) => tabs.some((item) => item.id === id)).slice(0, 4);
   const mobileTabs = mobileTabIds.map((id) => tabs.find((item) => item.id === id)).filter(Boolean);
+  const additionalAnalytics = <section className="wf-workspace"><h2>Планы и показатели клиентов</h2>
+            <div className="kd-periodbar">
+              <div className="kd-seg">
+                {[{ id: "all", label: "Всё время" }, { id: "week", label: "Неделя" }, { id: "month", label: "Месяц" }].map((p) => (
+                  <button key={p.id} className={`kd-segbtn ${pMode === p.id ? "on" : ""}`} onClick={() => { setPMode(p.id); setPOff(0); }}>{p.label}</button>
+                ))}
+              </div>
+              {pMode !== "all" && (
+                <div className="kd-pernav">
+                  <button className="kd-arrow" onClick={() => setPOff(pOff - 1)}><ChevronLeft size={18} /></button>
+                  <span className="kd-perlabel">{range.label}</span>
+                  <button className="kd-arrow" disabled={pOff >= 0} onClick={() => setPOff(pOff + 1)}><ChevronRight size={18} /></button>
+                </div>
+              )}
+              <div className="kd-seg">
+                {[{ id: "all", label: "Все заявки" }, { id: "ours", label: "Наши" }, { id: "partner", label: "Партнёрские" }].map((p) => (
+                  <button key={p.id} className={`kd-segbtn ${brandFilter === p.id ? "on" : ""}`} onClick={() => setBrandFilter(p.id)}>{p.label}</button>
+                ))}
+              </div>
+            </div>
+            {pMode === "month" && (
+              <div className="kd-card" style={{ marginBottom: 14 }}>
+                <div className="kd-tabbar" style={{ marginBottom: 10 }}>
+                  <div>
+                    <div className="kd-section" style={{ margin: 0 }}>План на {range.label}</div>
+                    <div className="kd-muted">
+                      {planTarget
+                        ? `Прошло ${planRows[0].progress.daysPassed} из ${planRows[0].progress.daysInMonth} дней. Смотреть надо на темп, а не на процент: 60% к 20 числу — провал, к 8 числу — опережение.`
+                        : "Цель на месяц не задана. Пока её нет, все цифры отвечают только на «сколько получилось»."}
+                    </div>
+                  </div>
+                  {canManageCash && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "plan", monthKey: planMonthKey, label: range.label, target: planTarget })}>{planTarget ? "Изменить план" : "Задать план"}</button>}
+                </div>
+                {planTarget && planRows.map((r) => {
+                  const p = r.progress;
+                  const ahead = p.gap >= 0;
+                  return (
+                    <div className="kd-planrow" key={r.key}>
+                      <span>{r.label}</span>
+                      <span className="kd-planbar" title={`Отметка — сколько должно быть на сегодня: ${r.money ? fmt(p.expected) + " ₸" : p.expected}`}>
+                        <i style={{ width: `${Math.min(100, p.pct == null ? 0 : p.pct)}%`, background: ahead ? "var(--primary)" : "var(--amber)" }} />
+                        <b style={{ left: `${Math.min(100, Math.round(p.daysPassed / p.daysInMonth * 100))}%` }} />
+                      </span>
+                      <strong>{r.money ? `${fmt(p.actual)} ₸` : p.actual}</strong>
+                      <span className="kd-muted">из {r.money ? `${fmt(p.target)} ₸` : p.target}</span>
+                      <span className={ahead ? "kd-delta-up" : "kd-delta-down"}>
+                        {p.pct == null ? "план не задан" : `${p.pct}% · ${ahead ? "+" : ""}${r.money ? fmt(p.gap) : p.gap} к темпу`}
+                      </span>
+                    </div>
+                  );
+                })}
+                {planTarget && planRows[0].progress.daysLeft > 0 && planRows[0].progress.perDayNeeded > 0 && (
+                  <div className="kd-muted" style={{ marginTop: 8 }}>
+                    Чтобы закрыть план по выручке, осталось делать {fmt(planRows[0].progress.perDayNeeded)} ₸ в день — {planRows[0].progress.daysLeft} дней.
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Оценки клиентов · {range.label}</div>
+              {feedbackRating.total === 0 && <div className="kd-muted">За период клиенты не оставляли оценок.</div>}
+              {feedbackRating.total > 0 && (
+                <>
+                  <div className="kd-row">
+                    <span>Средняя оценка</span>
+                    <span className="kd-twoval"><em>{feedbackRating.total} оценок{feedbackRating.low ? ` · низких ${feedbackRating.low}` : ""}</em>
+                      <strong style={{ color: feedbackRating.avg >= 4.5 ? "var(--primary)" : feedbackRating.avg >= 4 ? "var(--amber)" : "var(--rust)" }}>{feedbackRating.avg}</strong>
+                    </span>
+                  </div>
+                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr 1fr 1fr" }}><span>Сотрудник</span><span>Оценок</span><span>Средняя</span></div>
+                  {feedbackRating.byTech.map((r) => (
+                    <div className="kd-ledgerrow" key={String(r.techId)} style={{ gridTemplateColumns: "1.6fr 1fr 1fr" }}>
+                      <span className="kd-ledgername">{techById(r.techId)?.full_name || personName(r.techId) || "не назначен"}</span>
+                      <span className="kd-muted">{r.count}{r.low ? ` · низких ${r.low}` : ""}</span>
+                      <strong style={{ color: r.avg >= 4.5 ? "var(--primary)" : r.avg >= 4 ? "var(--amber)" : "var(--rust)" }}>{r.avg}</strong>
+                    </div>
+                  ))}
+                  <div className="kd-section" style={{ marginTop: 12 }}>По видам работ</div>
+                  {feedbackRating.byPest.map((r) => (
+                    <div className="kd-row" key={r.pest}><span>{r.pest}</span>
+                      <span className="kd-twoval"><em>{r.count} оценок</em><strong>{r.avg}</strong></span>
+                    </div>
+                  ))}
+                  <div className="kd-muted" style={{ marginTop: 8 }}>
+                    Средняя по двум-трём отзывам ничего не значит — поэтому рядом всегда стоит их количество.
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Сезонность · два года по месяцам</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>
+                Сравнение с предыдущим месяцем здесь ничего не говорит: разница между июлем и августом — это сезон, а не работа компании. Поэтому справа стоит тот же месяц год назад.
+              </div>
+              <div className="kd-seasonlist">
+                {season.map((r) => (
+                  <div className="kd-seasonrow" key={r.month}>
+                    <span className="kd-muted">{monthLabel(r.month)}</span>
+                    <span className="kd-seasonbar"><i style={{ width: `${Math.round(r.revenue / seasonMax * 100)}%` }} /></span>
+                    <strong>{r.revenue ? fmt(r.revenue) : "—"}</strong>
+                    <span className="kd-muted">{r.done || ""}</span>
+                    <span className={r.yoy == null ? "kd-muted" : r.yoy >= 0 ? "kd-delta-up" : "kd-delta-down"}>
+                      {r.yoy == null ? (r.revenue ? "год назад данных нет" : "") : `${r.yoy > 0 ? "+" : ""}${r.yoy}% к ${monthLabel(r.prevYear.month)}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="kd-card" style={{ marginTop: 14 }}>
+              <div className="kd-section">Абоненты против разовых · {range.label}</div>
+              {subsVsOne.subscription.done === 0 && subsVsOne.oneOff.done === 0 && <div className="kd-muted">За период выполненных заявок нет.</div>}
+              {(subsVsOne.subscription.done > 0 || subsVsOne.oneOff.done > 0) && (
+                <>
+                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 1fr 1fr" }}>
+                    <span> </span><span>Заявок</span><span>Выручка</span><span>Чек</span><span>С клиента</span>
+                  </div>
+                  {[subsVsOne.subscription, subsVsOne.oneOff].map((r) => (
+                    <div className="kd-ledgerrow" key={r.label} style={{ gridTemplateColumns: "1.2fr 1fr 1fr 1fr 1fr" }}>
+                      <span className="kd-ledgername">{r.label}<em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{r.clients} клиентов · {r.jobsPerClient} заявки на клиента</em></span>
+                      <span>{r.done}</span>
+                      <span>{fmt(r.revenue)} ₸</span>
+                      <span>{fmt(r.avg)} ₸</span>
+                      <strong>{fmt(r.perClient)} ₸</strong>
+                    </div>
+                  ))}
+                  <div className="kd-muted" style={{ marginTop: 8 }}>
+                    Смотреть надо на последнюю колонку, а не на чек. У абонента чек ниже, но он приходит сам, не стоит рекламы и даёт несколько заявок в год.
+                  </div>
+                </>
+              )}
+            </div>
+  </section>;
 
   return (
     <div className={`kd-app ${sideOpen ? "side-open" : ""}`}>
@@ -3974,7 +4132,8 @@ function Dashboard({ session, profile }) {
             </div>
             {tenderOverdue > 0 && <div className="kd-hint" style={{ background: "#FBE7E5", borderColor: "#F1C4BF", color: "#B3261E" }}>⚠ Есть просроченные обработки ({tenderOverdue}). Просрочка грозит штрафом и блокировкой участия — проверь график ниже.</div>}
             {tenders.length === 0 && <div className="kd-empty">Тендеров пока нет. Добавь первый через «Новый тендер».</div>}
-            {tenders.map((t) => {
+            <TenderRegister tenders={tenders} partners={partners} people={allProfiles} selectedId={selectedTenderId} onSelect={setSelectedTenderId} />
+            {tenders.filter((t) => t.id === selectedTenderId).map((t) => {
               const st = TENDER_STATUS[t.status] || TENDER_STATUS.participating;
               const ourAmount = Math.round((Number(t.amount) || 0) * (Number(t.our_share_pct) || 0) / 100);
               const svcs = servicesOf(t.id);
@@ -3986,6 +4145,7 @@ function Dashboard({ session, profile }) {
               const frozen = gtees.filter((g) => g.paid).reduce((s, g) => s + Math.max(0, (Number(g.amount) || 0) - returnedSum(g.id)), 0);
               return (
                 <div key={t.id} className="kd-card">
+                  <button className="kd-btn ghost sm" onClick={() => setSelectedTenderId(null)}>Закрыть карточку тендера</button>
                   <div className="kd-card-head">
                     <div className="kd-pest">{t.contract_no ? `№ ${t.contract_no}` : (t.title || "Тендер")}</div>
                     <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
@@ -4004,6 +4164,8 @@ function Dashboard({ session, profile }) {
                     {frozen > 0 && <div><span className="kd-muted">Заморожено в залогах</span><strong style={{ color: "#B4650B" }}>{fmt(frozen)} ₸</strong></div>}
                   </div>
 
+                  <TenderDeliveries tender={t} deliveries={tenderDeliveries} chemicals={chemicals} warehouses={warehouses} canEdit={canAccess("action.stock_edit")} onReload={() => load(["tender_deliveries", "warehouse_moves", "chemicals"])} />
+                  <TenderCollaboration tender={t} people={allProfiles} payments={tenderPayments} moves={moves} guarantees={gtees} services={svcs} canEdit={canEditTenders} canManageMoney={canManageCash} onReload={() => load(["tender_payments", "money_moves"])} />
                   {/* Обеспечения */}
                   <div className="kd-tsub">
                     <div className="kd-tsubhead"><ShieldCheck size={14} /> Обеспечения (залоги)</div>
@@ -4081,54 +4243,7 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
-        {!loading && tab === "tasks" && (
-          <div className="kd-list">
-            {canManageTasks && (
-              <div className="kd-tabbar" style={{ marginBottom: 4 }}>
-                <div className="kd-title" style={{ fontSize: 18 }}>Задачи</div>
-                <button className="kd-btn primary" onClick={() => setModal({ kind: "task" })}><Plus size={15} />Новая задача</button>
-              </div>
-            )}
-            <div className="kd-seg" style={{ width: "100%", overflowX: "auto" }}>
-              {[{ id: "open", label: "Активные" }, { id: "today", label: "Сегодня" }, { id: "overdue", label: "Просрочено" }, { id: "done", label: "Сделаны" }, { id: "all", label: "Все" }].map((f) => (
-                <button key={f.id} className={`kd-segbtn ${taskFilter === f.id ? "on" : ""}`} onClick={() => setTaskFilter(f.id)}>{f.label}</button>
-              ))}
-            </div>
-            {canManageTasks && assignableProfiles.length > 0 && (
-              <select className="kd-techselect" value={taskAssignee} onChange={(e) => setTaskAssignee(e.target.value)} style={{ width: "100%" }}>
-                <option value="">Все исполнители</option>
-                {assignableProfiles.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.id.slice(0, 6)}</option>)}
-              </select>
-            )}
-            {filteredTasks.length === 0 && <div className="kd-empty">{taskFilter === "done" ? "Выполненных задач нет." : "Задач нет. Всё чисто 👌"}</div>}
-            {filteredTasks.map((t) => {
-              const st = TASK_STATUS[t.status] || TASK_STATUS.new;
-              const overdue = t.status !== "done" && t.due_date && t.due_date < todayIso;
-              const canEdit = canManageTasks || t.created_by === session.user.id;
-              return (
-                <div key={t.id} className={`kd-card ${t.status === "done" ? "done" : ""} ${overdue ? "low" : ""}`}>
-                  <div className="kd-card-head">
-                    <div className="kd-pest">{t.priority === "urgent" && <span style={{ color: "#B3261E" }}>🔴 </span>}{t.title}</div>
-                    <span className="kd-badge" style={{ color: st.color, background: st.bg }}>{st.label}</span>
-                  </div>
-                  <div className="kd-meta">
-                    <span className="kd-brandtag">{TASK_TYPES[t.type] || t.type}</span>
-                    {t.assignee_id && <span>👤 {personName(t.assignee_id)}</span>}
-                    {t.due_date && <span className="kd-datetimetag" style={overdue ? { color: "#B3261E", background: "#FBE7E5" } : {}}><Calendar size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{isoToRu(t.due_date)}{overdue ? " · просрочено" : ""}</span>}
-                  </div>
-                  {t.description && <div className="kd-notebox">{t.description}</div>}
-                  <div className="kd-actions">
-                    {t.status !== "done" && <button className="kd-btn primary sm" onClick={() => setTaskStatus(t, "done")}>Сделано</button>}
-                    {t.status === "new" && <button className="kd-btn ghost sm" onClick={() => setTaskStatus(t, "in_progress")}>В работу</button>}
-                    {t.status === "done" && <button className="kd-btn ghost sm" onClick={() => setTaskStatus(t, "new")}>Вернуть</button>}
-                    {canEdit && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "task", task: t })}><Pencil size={13} />Изменить</button>}
-                    {canEdit && <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить задачу «${t.title}»?`, () => removeTask(t))}><Trash2 size={13} /></button>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {!loading && tab === "tasks" && <TaskBoard tasks={visibleTasks} people={assignableProfiles} userId={session.user.id} canManage={canManageTasks} onCreate={() => setModal({ kind: "task" })} onEdit={(task) => setModal({ kind: "task", task })} onStatus={setTaskStatus} onRemove={(task) => askConfirm(`Удалить задачу «${task.title}»?`, () => removeTask(task))} />}
 
         {!loading && tab === "canceled" && (
           <div className="kd-list">
@@ -4262,13 +4377,13 @@ function Dashboard({ session, profile }) {
         )}
 
         {!loading && tab === "analytics" && (
-          <AnalyticsTab
+          <><AnalyticsTab
             jobs={jobs}
             channels={mktChannels}
             topups={mktTopups}
             settings={settings}
             onOpenMarketing={() => { setOpexView("marketing"); setTab("opex"); }}
-          />
+          />{additionalAnalytics}</>
         )}
 
         {!loading && tab === "retention" && (
@@ -4276,7 +4391,7 @@ function Dashboard({ session, profile }) {
             <div className="kd-kpigrid">
               <div className="kd-kpicard"><span>Касания на сегодня</span><strong className={dueFollowups.length ? "neg" : "pos"}>{dueFollowups.length}</strong><small>{openFollowups.length} всего открыто</small></div>
               <div className="kd-kpicard"><span>Контроль качества</span><strong>{qualityPending.length}</strong><small>ожидают звонка</small></div>
-              <div className="kd-kpicard"><span>Средняя оценка</span><strong>{qualityChecks.filter((q) => q.rating).length ? (qualityChecks.reduce((s, q) => s + (Number(q.rating) || 0), 0) / qualityChecks.filter((q) => q.rating).length).toFixed(1) : "—"}</strong><small>по ответившим клиентам</small></div>
+              <div className="kd-kpicard"><span>Средняя оценка</span><strong>{qualityChecks.filter((q) => q.result !== "no_answer" && q.rating).length ? (qualityChecks.filter((q) => q.result !== "no_answer").reduce((s, q) => s + (Number(q.rating) || 0), 0) / qualityChecks.filter((q) => q.result !== "no_answer" && q.rating).length).toFixed(1) : "—"}</strong><small>по ответившим клиентам</small></div>
               <div className="kd-kpicard"><span>Допродажи</span><strong>{upsellCandidates.length}</strong><small>актуальных возможностей</small></div>
             </div>
 
@@ -4398,7 +4513,7 @@ function Dashboard({ session, profile }) {
             </div>
 
             {qualityChecks.length > 0 && <section className="kd-card"><div className="kd-stage2head"><div><div className="kd-title">Результаты контроля и отзывы</div><div className="kd-muted">Оценки, проблемы и готовые запросы отзывов</div></div><Star size={20} /></div>
-              <div className="kd-followlist">{qualityChecks.slice(0, 20).map((q) => { const job = jobs.find((j) => j.id === q.job_id); if (!job) return null; const phone = String(job.client_phone || "").replace(/\D/g, ""); const reviewText = `Здравствуйте! Спасибо, что выбрали KazDez. Будем благодарны, если вы оставите отзыв о нашей работе: ${q.review_url || ""}`; return <div key={q.id}><div><strong>{job.client_phone} · оценка {q.rating || "—"}/5</strong><span>{({ positive: "всё хорошо", repeat: "нужен повтор", complaint: "претензия", no_answer: "не ответил" })[q.result] || q.result}</span>{q.note && <small>{q.note}</small>}</div><div className="actions"><button className="kd-btn ghost sm" onClick={() => setModal({ kind: "quality", job })}>Изменить</button>{q.review_requested && q.review_url && phone && <a className="kd-btn wa sm" href={`https://wa.me/${phone}?text=${encodeURIComponent(reviewText)}`} target="_blank" rel="noreferrer"><Star size={14} />Запросить отзыв</a>}</div></div>; })}</div>
+              <div className="kd-followlist">{qualityChecks.slice(0, 20).map((q) => { const job = jobs.find((j) => String(j.id) === String(q.job_id)); if (!job) return null; const phone = String(job.client_phone || "").replace(/\D/g, ""); const reviewText = `Здравствуйте! Спасибо, что выбрали KazDez. Будем благодарны, если вы оставите отзыв о нашей работе: ${q.review_url || ""}`; return <div key={q.id}><div><strong>{job.client_phone} · оценка {q.rating || "—"}/5</strong><span>{({ positive: "всё хорошо", repeat: "нужен повтор", complaint: "претензия", no_answer: "не ответил" })[q.result] || q.result}</span><small>Опрос {fmtTs(q.contacted_at)} · {personName(q.checked_by)} · {job.type} {isoToRu(job.scheduled_date)}</small>{q.note && <small>{q.note}</small>}</div><div className="actions"><button className="kd-btn ghost sm" onClick={() => setModal({ kind: "quality", job })}>Изменить</button>{q.review_requested && q.review_url && phone && <a className="kd-btn wa sm" href={`https://wa.me/${phone}?text=${encodeURIComponent(reviewText)}`} target="_blank" rel="noreferrer"><Star size={14} />Запросить отзыв</a>}</div></div>; })}</div>
             </section>}
 
             <section className="kd-card"><div className="kd-stage2head"><div><div className="kd-title">Автоматические допродажи</div><div className="kd-muted">Предложение определяется по виду услуги и объекту</div></div><Sparkles size={20} /></div>
@@ -4411,10 +4526,11 @@ function Dashboard({ session, profile }) {
           <div className="kd-stage2">
             <div className="kd-kpigrid">
               <div className="kd-kpicard"><span>Всего клиентов</span><strong>{clients.length}</strong><small>единые карточки без дублей</small></div>
-              <div className="kd-kpicard"><span>С договорами</span><strong>{directoryStats.withContracts}</strong><small>активные абоненты</small></div>
+              <div className="kd-kpicard"><span>С договорами</span><strong>{directoryStats.withContracts}</strong><small>действующие юридические договоры</small></div>
               <div className="kd-kpicard"><span>База принесла</span><strong>{fmt(directoryStats.revenue)} ₸</strong><small>по выполненным заявкам</small></div>
               <div className="kd-kpicard"><span>Найдено</span><strong>{directoryClients.length}</strong><small>{clientSearch ? "по текущему поиску" : "доступно для работы"}</small></div>
             </div>
+            {isAdmin && <RegularClientRule value={settings.regular_client_threshold} onSave={(value) => saveAppSetting("regular_client_threshold", value)} />}
             <div className="kd-client-directory-head"><div><div className="kd-title">Клиентская база</div><div className="kd-muted">Контакты, объекты, обращения, заявки, договоры и файлы в одной карточке.</div></div><div className="kd-searchbar"><Search size={16} className="kd-search-icon"/><input className="kd-search" value={clientSearch} onChange={(e)=>setClientSearch(e.target.value)} placeholder="Имя, телефон, БИН, адрес…"/>{clientSearch && <button className="kd-x" onClick={()=>setClientSearch("")}><X size={15}/></button>}</div></div>
             {directoryClients.length === 0 && <div className="kd-empty">{clients.length ? "По этому запросу клиентов нет." : "Клиентские карточки появятся из заявок или по кнопке «+ Клиент»."}</div>}
             <div className="kd-client-directory-grid">{directoryClients.map((client) => {
@@ -4423,6 +4539,7 @@ function Dashboard({ session, profile }) {
               const contactCount = clientContacts.filter((row)=>String(row.client_id)===String(client.id)).length + 1;
               return <button className="kd-card kd-client-directory-card" key={client.id} onClick={()=>openClientCard(client)}>
                 <div className="kd-card-head"><div><div className="kd-pest">{client.name || client.phone || "Без имени"}</div><div className="kd-muted">{client.legal_name || (client.client_type === "company" ? "Организация" : "Физическое лицо")}</div></div><span className="kd-badge" style={{color:summary.activeContracts?"#0E7C66":"#6E7871",background:summary.activeContracts?"#E4F3EE":"#F0F0EE"}}>{summary.activeContracts ? "абонент" : "клиент"}</span></div>
+                <ClientStatusBadges client={client} jobs={jobs} threshold={settings.regular_client_threshold} />
                 <div className="kd-client-directory-contact"><Phone size={14}/><span>{client.phone || "Телефон не указан"}</span>{client.email && <><Mail size={14}/><span>{client.email}</span></>}</div>
                 <div className="kd-row"><span>Адреса и объекты</span><strong>{addresses.length}</strong></div><div className="kd-row"><span>Контактные лица</span><strong>{contactCount}</strong></div><div className="kd-row"><span>История заявок</span><strong>{summary.done} выполнено · {summary.jobs} всего</strong></div><div className="kd-row total"><span>LTV клиента</span><strong>{fmt(summary.revenue)} ₸</strong></div>
                 <div className="kd-client-directory-open">Открыть полную карточку <ArrowRight size={14}/></div>
@@ -4431,6 +4548,7 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
+        {!loading && tab === "contracts" && <ContractsRegister contracts={legalContracts} clients={clients} contacts={clientContacts} subscriptions={contracts} people={assignableProfiles} canEdit={canEditJobs || canEditDocs} selectedId={selectedLegalId} onSelect={setSelectedLegalId} onReload={() => load(["legal_contracts"])} onOpenClient={openClientCard} />}
         {!loading && tab === "subscriptions" && (
           <div className="kd-stage2">
             <div className="kd-kpigrid">
@@ -4516,44 +4634,7 @@ function Dashboard({ session, profile }) {
                 ))}
               </div>
             </div>
-            {pMode === "month" && (
-              <div className="kd-card" style={{ marginBottom: 14 }}>
-                <div className="kd-tabbar" style={{ marginBottom: 10 }}>
-                  <div>
-                    <div className="kd-section" style={{ margin: 0 }}>План на {range.label}</div>
-                    <div className="kd-muted">
-                      {planTarget
-                        ? `Прошло ${planRows[0].progress.daysPassed} из ${planRows[0].progress.daysInMonth} дней. Смотреть надо на темп, а не на процент: 60% к 20 числу — провал, к 8 числу — опережение.`
-                        : "Цель на месяц не задана. Пока её нет, все цифры отвечают только на «сколько получилось»."}
-                    </div>
-                  </div>
-                  {canManageCash && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "plan", monthKey: planMonthKey, label: range.label, target: planTarget })}>{planTarget ? "Изменить план" : "Задать план"}</button>}
-                </div>
-                {planTarget && planRows.map((r) => {
-                  const p = r.progress;
-                  const ahead = p.gap >= 0;
-                  return (
-                    <div className="kd-planrow" key={r.key}>
-                      <span>{r.label}</span>
-                      <span className="kd-planbar" title={`Отметка — сколько должно быть на сегодня: ${r.money ? fmt(p.expected) + " ₸" : p.expected}`}>
-                        <i style={{ width: `${Math.min(100, p.pct == null ? 0 : p.pct)}%`, background: ahead ? "var(--primary)" : "var(--amber)" }} />
-                        <b style={{ left: `${Math.min(100, Math.round(p.daysPassed / p.daysInMonth * 100))}%` }} />
-                      </span>
-                      <strong>{r.money ? `${fmt(p.actual)} ₸` : p.actual}</strong>
-                      <span className="kd-muted">из {r.money ? `${fmt(p.target)} ₸` : p.target}</span>
-                      <span className={ahead ? "kd-delta-up" : "kd-delta-down"}>
-                        {p.pct == null ? "план не задан" : `${p.pct}% · ${ahead ? "+" : ""}${r.money ? fmt(p.gap) : p.gap} к темпу`}
-                      </span>
-                    </div>
-                  );
-                })}
-                {planTarget && planRows[0].progress.daysLeft > 0 && planRows[0].progress.perDayNeeded > 0 && (
-                  <div className="kd-muted" style={{ marginTop: 8 }}>
-                    Чтобы закрыть план по выручке, осталось делать {fmt(planRows[0].progress.perDayNeeded)} ₸ в день — {planRows[0].progress.daysLeft} дней.
-                  </div>
-                )}
-              </div>
-            )}
+            {canAccess("tab.analytics") && <button className="kd-btn ghost sm" onClick={() => setTab("analytics")}>План, сезонность и показатели клиентов → Аналитика</button>}
 
             <div className="kd-twocol">
               <div className="kd-card">
@@ -4744,81 +4825,6 @@ function Dashboard({ session, profile }) {
               ))}
             </div>
 
-            <div className="kd-card" style={{ marginTop: 14 }}>
-              <div className="kd-section">Оценки клиентов · {range.label}</div>
-              {feedbackRating.total === 0 && <div className="kd-muted">За период клиенты не оставляли оценок.</div>}
-              {feedbackRating.total > 0 && (
-                <>
-                  <div className="kd-row">
-                    <span>Средняя оценка</span>
-                    <span className="kd-twoval"><em>{feedbackRating.total} оценок{feedbackRating.low ? ` · низких ${feedbackRating.low}` : ""}</em>
-                      <strong style={{ color: feedbackRating.avg >= 4.5 ? "var(--primary)" : feedbackRating.avg >= 4 ? "var(--amber)" : "var(--rust)" }}>{feedbackRating.avg}</strong>
-                    </span>
-                  </div>
-                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.6fr 1fr 1fr" }}><span>Сотрудник</span><span>Оценок</span><span>Средняя</span></div>
-                  {feedbackRating.byTech.map((r) => (
-                    <div className="kd-ledgerrow" key={String(r.techId)} style={{ gridTemplateColumns: "1.6fr 1fr 1fr" }}>
-                      <span className="kd-ledgername">{techById(r.techId)?.full_name || personName(r.techId) || "не назначен"}</span>
-                      <span className="kd-muted">{r.count}{r.low ? ` · низких ${r.low}` : ""}</span>
-                      <strong style={{ color: r.avg >= 4.5 ? "var(--primary)" : r.avg >= 4 ? "var(--amber)" : "var(--rust)" }}>{r.avg}</strong>
-                    </div>
-                  ))}
-                  <div className="kd-section" style={{ marginTop: 12 }}>По видам работ</div>
-                  {feedbackRating.byPest.map((r) => (
-                    <div className="kd-row" key={r.pest}><span>{r.pest}</span>
-                      <span className="kd-twoval"><em>{r.count} оценок</em><strong>{r.avg}</strong></span>
-                    </div>
-                  ))}
-                  <div className="kd-muted" style={{ marginTop: 8 }}>
-                    Средняя по двум-трём отзывам ничего не значит — поэтому рядом всегда стоит их количество.
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="kd-card" style={{ marginTop: 14 }}>
-              <div className="kd-section">Сезонность · два года по месяцам</div>
-              <div className="kd-muted" style={{ marginBottom: 10 }}>
-                Сравнение с предыдущим месяцем здесь ничего не говорит: разница между июлем и августом — это сезон, а не работа компании. Поэтому справа стоит тот же месяц год назад.
-              </div>
-              <div className="kd-seasonlist">
-                {season.map((r) => (
-                  <div className="kd-seasonrow" key={r.month}>
-                    <span className="kd-muted">{monthLabel(r.month)}</span>
-                    <span className="kd-seasonbar"><i style={{ width: `${Math.round(r.revenue / seasonMax * 100)}%` }} /></span>
-                    <strong>{r.revenue ? fmt(r.revenue) : "—"}</strong>
-                    <span className="kd-muted">{r.done || ""}</span>
-                    <span className={r.yoy == null ? "kd-muted" : r.yoy >= 0 ? "kd-delta-up" : "kd-delta-down"}>
-                      {r.yoy == null ? (r.revenue ? "год назад данных нет" : "") : `${r.yoy > 0 ? "+" : ""}${r.yoy}% к ${monthLabel(r.prevYear.month)}`}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="kd-card" style={{ marginTop: 14 }}>
-              <div className="kd-section">Абоненты против разовых · {range.label}</div>
-              {subsVsOne.subscription.done === 0 && subsVsOne.oneOff.done === 0 && <div className="kd-muted">За период выполненных заявок нет.</div>}
-              {(subsVsOne.subscription.done > 0 || subsVsOne.oneOff.done > 0) && (
-                <>
-                  <div className="kd-ledgerhead" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 1fr 1fr" }}>
-                    <span> </span><span>Заявок</span><span>Выручка</span><span>Чек</span><span>С клиента</span>
-                  </div>
-                  {[subsVsOne.subscription, subsVsOne.oneOff].map((r) => (
-                    <div className="kd-ledgerrow" key={r.label} style={{ gridTemplateColumns: "1.2fr 1fr 1fr 1fr 1fr" }}>
-                      <span className="kd-ledgername">{r.label}<em className="kd-muted" style={{ display: "block", fontStyle: "normal", fontSize: 10.5 }}>{r.clients} клиентов · {r.jobsPerClient} заявки на клиента</em></span>
-                      <span>{r.done}</span>
-                      <span>{fmt(r.revenue)} ₸</span>
-                      <span>{fmt(r.avg)} ₸</span>
-                      <strong>{fmt(r.perClient)} ₸</strong>
-                    </div>
-                  ))}
-                  <div className="kd-muted" style={{ marginTop: 8 }}>
-                    Смотреть надо на последнюю колонку, а не на чек. У абонента чек ниже, но он приходит сам, не стоит рекламы и даёт несколько заявок в год.
-                  </div>
-                </>
-              )}
-            </div>
 
             {/* До переноса у заявок нет заказа, и отчёт показал бы «один визит на
                заказ» — то есть тихо соврал бы, что повторных выездов не бывает.
@@ -5209,6 +5215,7 @@ function Dashboard({ session, profile }) {
             {!payrollSalaryCounts && (
               <div className="kd-hint" style={{ marginTop: 12 }}>Оклады показываются только в режиме «Месяц» — это месячная величина, делить её на недели некорректно. Здесь видны бонусы и дорожные за выбранный период.</div>
             )}
+            <PayrollCarryoverHistory rows={payrollCarryovers} people={allProfiles} canEdit={canManageCash} onAdd={() => setModal({ kind: "payrollCarryover" })} />
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Начисления и выплаты · {range.label}</div>
               {techs.length === 0 && <div className="kd-muted">Сотрудников пока нет.</div>}
@@ -5230,7 +5237,7 @@ function Dashboard({ session, profile }) {
                     <span data-l="Дорожные">{fmt(r.travel)}</span>
                     <span data-l="Начислено">{fmt(r.accrued)}</span>
                     <span className="kd-muted" data-l="Выплачено">{fmt(r.paid)}</span>
-                    <strong data-l="К выплате" style={{ color: r.owed > 0 ? "var(--amber)" : "var(--muted)" }}>{fmt(r.owed)} ₸</strong>
+                    <strong data-l="К выплате" style={{ color: r.owed > 0 ? "var(--amber)" : "var(--muted)" }}>{fmt(r.owed)} ₸{r.carryover.incoming > 0 && <small className="kd-muted"> · −{fmt(r.carryover.incoming)} переплата прошлых месяцев</small>}{r.carryover.outgoing > 0 && <small className="kd-muted"> · {fmt(r.carryover.outgoing)} перенесено вперёд</small>}</strong>
                     <span>{canManageCash && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "payrollPay", tech: r.tech, owed: r.owed })}>Выплатить</button>}</span>
                   </div>
                   {r.unposted.length > 0 && (
@@ -5515,6 +5522,7 @@ function Dashboard({ session, profile }) {
         )}
 
         {!loading && tab === "stock" && <StockRegister
+          warehouses={warehouses} warehouseMoves={warehouseMoves} suppliers={suppliers} supplierOffers={supplierOffers} onReloadSupply={() => load(["suppliers", "supplier_offers", "stock_warehouses", "warehouse_moves", "chemicals", "handouts", "equipment_handouts"])}
           inventory={inventory}
           techs={techs}
           techLedger={techLedger}
@@ -5530,10 +5538,10 @@ function Dashboard({ session, profile }) {
           selectedId={stockChemFilter}
           onSelect={(id) => setStockChemFilter(String(stockChemFilter) === String(id) ? "" : id)}
           canEditStock={canAccess("action.stock_edit")}
-          canManageTeam={canAccess("action.team_manage")}
+          canManageTeam={canAccess("action.stock_edit")}
           onStockIn={(chem) => setModal({ kind: "stockin", chem })}
           onHandout={(tech) => setModal({ kind: "handout", tech })}
-          onMovement={(tech) => setModal({ kind: "inventoryMovement", tech })}
+          onMovement={(tech, chemical) => setModal({ kind: "inventoryMovement", tech, chemical })}
           onRemoveChem={(chem) => askConfirm(`Удалить препарат «${chem.name}»?`, () => removeChem(chem))}
           onAddEquipment={() => setModal({ kind: "equip" })}
           onEditEquipment={(item) => setModal({ kind: "equip", item })}
@@ -6297,11 +6305,11 @@ function Dashboard({ session, profile }) {
         onClose={() => setModal(null)}
         onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : canEditJobs ? { kind: "edit", job: j } : { kind: "details", job: j })} />}
       {modal?.kind === "addchem" && <AddChemModal onClose={() => setModal(null)} onSave={addChem} />}
-      {modal?.kind === "stockin" && <StockInModal chem={modal.chem} purchases={chemPurchases.filter((p) => String(p.chemical_id) === String(modal.chem.id))} onClose={() => setModal(null)} onSave={stockIn} />}
+      {modal?.kind === "stockin" && <StockInModal warehouses={warehouses} chem={modal.chem} purchases={chemPurchases.filter((p) => String(p.chemical_id) === String(modal.chem.id))} onClose={() => setModal(null)} onSave={stockIn} />}
       {modal?.kind === "handout" && <HandoutModal tech={modal.tech} chemicals={chemicals} onClose={() => setModal(null)} onSave={addHandout} />}
       {modal?.kind === "techedit" && <TechEditModal tech={modal.tech} onClose={() => setModal(null)} onSave={(payload) => editTechProfile(modal.tech, payload)} />}
       {modal?.kind === "cashRevision" && <CashRevisionModal tech={modal.tech} currentBalance={techCashOnHand(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveCashRevision(modal.tech, payload)} />}
-      {modal?.kind === "inventoryMovement" && <InventoryMovementModal tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
+      {modal?.kind === "inventoryMovement" && <InventoryMovementModal initialChemicalId={modal.chemical?.id || ""} tech={modal.tech} techs={techs} chemicals={chemicals} ledger={techLedger(modal.tech.id)} onClose={() => setModal(null)} onSave={(payload) => saveInventoryMovement(modal.tech, payload)} />}
       {modal?.kind === "repeatCause" && <RepeatCauseModal job={modal.job}
         origin={jobs.find((j) => String(j.id) === String(modal.job.repeat_of))}
         cause={repeatCauses.find((c) => String(c.job_id) === String(modal.job.id))}
@@ -6334,6 +6342,7 @@ function Dashboard({ session, profile }) {
         onClose={() => setModal({ kind: "object", objectId: modal.object.id })}
         onSave={saveControlPoint} onRemove={removeControlPoint} />}
       {modal?.kind === "branch" && <BranchModal branch={modal.branch} onClose={() => setModal(null)} onSave={saveBranch} />}
+      {modal?.kind === "payrollCarryover" && <PayrollCarryoverModal people={allProfiles} payments={expenses} onClose={() => setModal(null)} onSaved={async () => { await load(["payroll_carryovers"]); setModal(null); showToast("Переплата перенесена"); }} />}
       {modal?.kind === "blockClient" && <BlockClientModal client={modal.client} onClose={() => setModal(null)} onSave={saveClientBlock} />}
       {modal?.kind === "object" && (() => {
         const obj = objects.find((o) => String(o.id) === String(modal.objectId));
@@ -6400,7 +6409,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
-      {modal?.kind === "tender" && <TenderModal tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
+      {modal?.kind === "tender" && <TenderModal people={allProfiles} tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
       {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} owners={leadOwners} defaultOwnerId={session.user.id} onClose={() => setModal(null)} onSave={saveLead} />}
       {modal?.kind === "leadActivity" && <LeadActivityModal lead={modal.lead} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : actorName} defaultKind={modal.defaultKind || "call"} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onSave={(payload) => recordLeadActivity(modal.lead, payload)} />}
       {modal?.kind === "leadHistory" && <LeadHistoryModal lead={modal.lead} stageName={leadStageById(modal.lead?.stage_id)?.name} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : ""} activities={leadTimeline(modal.lead?.id)} profileName={(id) => profileById(id)?.full_name || ""} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onAddContact={() => setModal({ kind: "leadActivity", lead: modal.lead })} onAddNote={() => setModal({ kind: "leadActivity", lead: modal.lead, defaultKind: "note" })} />}
@@ -6418,17 +6427,17 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "returnGuarantee" && <ReturnGuaranteeModal g={modal.g} remaining={modal.remaining} accounts={accounts} onClose={() => setModal(null)} onConfirm={(amount, date, accId, note, requestId) => addGuaranteeReturn(modal.g, amount, date, accId, note, requestId)} />}
       {modal?.kind === "rejectDeposit" && <RejectDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} onClose={() => setModal(null)} onSave={(adminNote) => decideDeposit(modal.dep, "rejected", adminNote)} />}
       {modal?.kind === "partner" && <PartnerModal partner={modal.partner} onClose={() => setModal(null)} onSave={savePartner} />}
-      {modal?.kind === "partnerJobs" && <PartnerJobsModal partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
+      {modal?.kind === "partnerJobs" && <PartnerJobsModal projects={<PartnerTenderLinks partnerId={modal.partner.id} tenders={tenders} payments={tenderPayments} onOpen={openTender} />} partner={modal.partner} jobs={jobs.filter((j) => j.partner_id === modal.partner.id)} shareOf={partnerShareAmt} onClose={() => setModal(null)}
         onOpenClient={(phone) => { setSearch(phone); setTab("done"); setModal(null); }} />}
       {modal?.kind === "doc" && <DocModal doc={modal.doc} partners={partners} onClose={() => setModal(null)} onSave={saveDoc} />}
       {modal?.kind === "economics" && <JobEconomicsModal job={modal.job} economics={jobEconomics(modal.job)} onClose={() => setModal(null)} onSave={(payload) => saveJobEconomics(modal.job, payload)} />}
       {modal?.kind === "followup" && <FollowupModal followup={modal.followup} job={modal.job} lead={modal.lead} defaultKind={modal.defaultKind || "lost"} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveFollowup} />}
-      {modal?.kind === "quality" && <QualityModal job={modal.job} check={qualityByJob(modal.job.id)} defaultReviewUrl={settings.review_url || ""} onClose={() => setModal(null)} onSave={(payload) => saveQualityCheck(modal.job, payload)} />}
+      {modal?.kind === "quality" && <QualityModal job={modal.job} check={qualityByJob(modal.job.id)} history={qualityHistoryForPhone(modal.job.client_phone, jobs, qualityEvents.length ? qualityEvents : qualityChecks)} jobs={jobs} people={assignableProfiles} defaultReviewUrl={settings.review_url || ""} onClose={() => setModal(null)} onSave={(payload) => saveQualityCheck(modal.job, payload)} />}
       {modal?.kind === "clientProfile" && <ClientProfileModal client={modal.client}
         contacts={clientContacts.filter((row) => String(row.client_id) === String(modal.client?.id))}
         addresses={clientAddresses.filter((row) => String(row.client_id) === String(modal.client?.id))}
         onClose={() => setModal(null)} onSave={saveClientProfile} />}
-      {modal?.kind === "clientDetails" && <ClientDetailsModal client={modal.client} jobs={jobs}
+      {modal?.kind === "clientDetails" && <ClientDetailsModal regularClientThreshold={settings.regular_client_threshold} onBlock={(client) => setModal({ kind: "blockClient", client })} onOpenLegalContract={openLegalContract} qualityChecks={qualityEvents.length ? qualityEvents : qualityChecks} people={assignableProfiles} legalContracts={legalContracts} client={modal.client} jobs={jobs}
         contacts={clientContacts} addresses={clientAddresses} contracts={contracts} followups={followups}
         events={clientEvents} leads={leads} leadActivities={leadActivities} attachments={clientAttachments} jobProofs={jobProofs}
         canEdit={canEditJobs} onClose={() => setModal(null)}
@@ -6437,8 +6446,8 @@ function Dashboard({ session, profile }) {
         onOpenJob={(job) => setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job })}
         onOpenContract={(contract) => setModal({ kind: "contractDetails", contract })}
         onOpenProof={(job) => job && openJobProof(job)} />}
-      {modal?.kind === "contractDetails" && <ContractDetailsModal contract={modal.contract} jobs={jobs} managerName={profileById(modal.contract?.manager_id)?.full_name || ""} techName={(id) => techById(id)?.full_name || profileById(id)?.full_name || ""} todayIso={todayIso} onClose={() => setModal(null)} onEdit={() => setModal({ kind: "contract", contract: modal.contract })} onCreateJob={() => createContractJob(modal.contract)} onOpenJob={(job) => setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job })} />}
-      {modal?.kind === "contract" && <ContractModal contract={modal.contract} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveContract} />}
+      {modal?.kind === "contractDetails" && <ContractDetailsModal legalContract={legalContracts.find((c) => c.id === modal.contract.legal_contract_id)} contacts={clientContacts.filter((c) => c.client_id === modal.contract.client_id)} client={clients.find((c) => c.id === modal.contract.client_id)} onOpenClient={openClientCard} onOpenLegalContract={openLegalContract} contract={modal.contract} jobs={jobs} managerName={profileById(modal.contract?.manager_id)?.full_name || ""} techName={(id) => techById(id)?.full_name || profileById(id)?.full_name || ""} todayIso={todayIso} onClose={() => setModal(null)} onEdit={() => setModal({ kind: "contract", contract: modal.contract })} onCreateJob={() => createContractJob(modal.contract)} onOpenJob={(job) => setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job })} />}
+      {modal?.kind === "contract" && <ContractModal clients={clients} legalContracts={legalContracts} contract={modal.contract} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveContract} />}
       {confirmState && (
         <ConfirmModal message={confirmState.message} danger={confirmState.danger} confirmLabel={confirmState.confirmLabel}
           onCancel={() => setConfirmState(null)}

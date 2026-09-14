@@ -1,0 +1,47 @@
+// Minimal isolated schema for executing workflow migrations with PostgreSQL.
+// This fixture is NOT a dump or a substitute for staging against the live schema.
+export const workflowFixture = `
+create role anon; create role authenticated; create role service_role;
+create schema auth; create schema storage;
+create table auth.users(id uuid primary key);
+create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.uid',true),'')::uuid $$;
+create function public.kd_has_permission(p text) returns boolean language sql stable as $$ select auth.uid() is not null and (current_setting('test.permissions',true)='*' or p=any(string_to_array(current_setting('test.permissions',true),','))) $$;
+create function public.is_admin() returns boolean language sql stable as $$ select public.kd_has_permission('*') $$;
+create function public.kd_account_active() returns boolean language sql stable as $$ select auth.uid() is not null $$;
+create function public.kd_has_role(text[]) returns boolean language sql stable as $$ select public.kd_has_permission('action.jobs_edit') $$;
+create function public.kd_books_closed_until() returns date language sql stable as $$ select nullif(current_setting('test.closed_until',true),'')::date $$;
+create function public.kd_address_key(text) returns text language sql immutable as $$ select lower(btrim($1)) $$;
+create function public.kd_phone_key(text) returns text language sql immutable as $$ select right(regexp_replace($1,'[^0-9]','','g'),10) $$;
+create table public.profiles(id uuid primary key references auth.users(id), full_name text,branch_id uuid,is_active boolean default true);
+create table public.branches(id uuid primary key default gen_random_uuid(),is_default boolean,created_at timestamptz default now());
+create table public.clients(id uuid primary key default gen_random_uuid(),phone_key text unique,phone text,name text,note text,client_type text,legal_name text,bin_iin text,email text,updated_at timestamptz);
+create table public.client_contacts(id uuid primary key default gen_random_uuid(),client_id uuid references public.clients(id),name text,role text,phone text,email text,note text);
+create table public.client_addresses(id uuid primary key default gen_random_uuid(),client_id uuid references public.clients(id),label text,address text,contact_name text,contact_phone text,note text);
+create table public.service_contracts(id uuid primary key default gen_random_uuid(),client_id uuid references public.clients(id),phone text);
+create table public.tasks(id uuid primary key default gen_random_uuid(),title text,description text,type text,priority text,assignee_id uuid,status text default 'new',due_date date,done_at timestamptz,created_by uuid default auth.uid(),created_at timestamptz default now(),updated_at timestamptz);
+grant select,insert,update,delete on public.tasks to authenticated;
+create table public.jobs(id uuid primary key default gen_random_uuid(),client_id uuid,creation_request_id uuid unique,type text,scheduled_date date,scheduled_time text,address text,floor text,area numeric,source text,pest text,price_options jsonb,quoted_price numeric,pricing_mode text,client_phone text,contact_name text,extra_contacts jsonb,guarantee_months int,brand text,partner_id uuid,partner_share numeric,note text,assigned_to uuid,executor_partner_id uuid,executor_share_pct numeric,joint_work boolean,joint_supplier text,joint_cost_share numeric,partner_comp numeric,status text,work_stage text,object_id uuid,branch_id uuid,order_id uuid,visit_no int,visit_kind text,created_by uuid,created_at timestamptz default now(),repeat_state text,repeat_since timestamptz);
+create table public.objects(id uuid primary key default gen_random_uuid(),address_key text unique,address text,area numeric,updated_at timestamptz);
+create table public.orders(id uuid primary key default gen_random_uuid(),address text,object_id uuid,client_phone text,contact_name text,branch_id uuid,agreed_price numeric,status text,opened_on date,created_by uuid,root_job_id uuid);
+create table public.quality_checks(id uuid primary key default gen_random_uuid(),job_id text unique,result text,rating int,note text,review_requested boolean,review_url text,contacted_at timestamptz,status text,checked_by uuid,updated_at timestamptz);
+create table public.partners(id uuid primary key default gen_random_uuid(),name text);
+create table public.tenders(id uuid primary key default gen_random_uuid(),title text,partner_id uuid references public.partners(id));
+create table public.tender_guarantees(id uuid primary key default gen_random_uuid(),tender_id uuid references public.tenders(id),kind text,amount numeric);
+create table public.tender_services(id uuid primary key default gen_random_uuid(),tender_id uuid references public.tenders(id),seq integer,due_date date,done boolean,done_date date);
+create table public.money_moves(id uuid primary key default gen_random_uuid(),direction text,amount numeric,move_date date);
+create table public.tech_expenses(id uuid primary key default gen_random_uuid(),tech_id uuid,status text,amount numeric,expense_date date);
+create table public.chemicals(id uuid primary key default gen_random_uuid(),name text,active_substance text,default_concentration numeric,unit_kind text,purchased_ml numeric,price_per_liter numeric,min_ml numeric);
+create table public.chemical_purchases(id uuid primary key default gen_random_uuid(),chemical_id uuid,purchase_date date,amount numeric,price_per_liter numeric,supplier text,batch_no text,expires_on date,note text,created_by uuid);
+create table public.handouts(id uuid primary key default gen_random_uuid(),chemical_id uuid,tech_id uuid,amount numeric,kind text,note text,created_by uuid,created_at timestamptz default now());
+create table public.inventory_adjustments(id uuid primary key default gen_random_uuid(),chemical_id text,tech_id text,kind text,amount_delta numeric,balance_before numeric,balance_after numeric,event_date date,reason text,note text,created_by uuid,counterparty_tech_id text,transfer_group uuid,created_at timestamptz default now());
+alter table public.jobs add column reported_at timestamptz;
+create table public.report_chemicals(id uuid primary key default gen_random_uuid(),job_id uuid,chemical_id uuid,name text,amount numeric,ml numeric);
+create table public.chemical_sales(id uuid primary key default gen_random_uuid(),chemical_id uuid,from_tech_id uuid,amount numeric);
+create table public.equipment(id uuid primary key default gen_random_uuid(),name text);
+create table public.equipment_handouts(id uuid primary key default gen_random_uuid(),equipment_id uuid,tech_id uuid,qty numeric,handout_date date,status text,note text,created_by uuid);
+create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
+create table storage.objects(id uuid primary key default gen_random_uuid(),name text,bucket_id text);
+alter table storage.objects enable row level security;
+grant usage on schema public,auth,storage to authenticated;
+grant select,insert on storage.objects to authenticated;
+`;

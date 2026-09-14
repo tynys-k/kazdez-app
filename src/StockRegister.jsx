@@ -5,6 +5,9 @@ import {
 } from "lucide-react";
 import { EQUIP_CATEGORIES, chemUnit, fmt, fmtAmount, isoToRu, lineAmount } from "./shared";
 import * as calc from "./calc";
+import Suppliers, { ItemSuppliers, SupplyEditor } from "./workflows/Suppliers";
+import Warehouses, { ItemLocations, WarehouseOperationModal } from "./workflows/Warehouses";
+import "./workflows/workflows.css";
 
 const MOVEMENT_LABELS = {
   revision: "Ревизия",
@@ -26,6 +29,7 @@ function StockStatus({ item }) {
 }
 
 function StockRegister({
+  warehouses = [], warehouseMoves = [], suppliers = [], supplierOffers = [], onReloadSupply = async () => {},
   inventory, techs, techLedger, purchases, handouts, adjustments, jobs, sales,
   equipment, equipIssuedQty, totalStockValue, totalEquipValue, selectedId, onSelect,
   canEditStock, canManageTeam, onStockIn, onHandout, onMovement, onRemoveChem,
@@ -33,9 +37,13 @@ function StockRegister({
   onTransferEquipment, onEquipStatus,
 }) {
   const [query, setQuery] = useState("");
+  const [view, setView] = useState("stock");
+  const [supplyEditor, setSupplyEditor] = useState(null);
+  const [operation, setOperation] = useState(null);
+  const [selectedEquipmentId, setSelectedEquipmentId] = useState("");
   const [status, setStatus] = useState("all");
   const [detailTab, setDetailTab] = useState("locations");
-  const [equipmentTechId, setEquipmentTechId] = useState("");
+
 
   useEffect(() => setDetailTab("locations"), [selectedId]);
 
@@ -69,15 +77,16 @@ function StockRegister({
     if (!selected) return [];
     const chemicalId = String(selected.id);
     const result = [];
+    const warehouseName = (id) => warehouses.find((w) => w.id === id)?.name || "Не распределено (старый учёт)";
 
     purchases.filter((row) => String(row.chemical_id) === chemicalId).forEach((row) => result.push({
       id: `purchase:${row.id}`, date: row.purchase_date, kind: "Приход",
-      from: row.supplier || "Поставщик", to: "Основной склад", amount: Number(row.amount) || 0,
+      from: row.supplier || "Поставщик", to: warehouseName(row.warehouse_id), amount: Number(row.amount) || 0,
       note: [row.batch_no ? `Партия ${row.batch_no}` : "", row.note || ""].filter(Boolean).join(" · "),
     }));
     handouts.filter((row) => String(row.chemical_id) === chemicalId).forEach((row) => result.push({
       id: `handout:${row.id}`, date: eventDate(row.created_at), kind: row.kind === "opening" ? "Начальный остаток" : "Выдача",
-      from: row.kind === "opening" ? "Ввод остатков" : "Основной склад", to: techs.find((t) => String(t.id) === String(row.tech_id))?.full_name || "Сотрудник",
+      from: row.kind === "opening" ? "Ввод остатков" : warehouseName(row.warehouse_id), to: techs.find((t) => String(t.id) === String(row.tech_id))?.full_name || "Сотрудник",
       amount: Number(row.amount) || 0, note: row.note || "",
     }));
     adjustments.filter((row) => String(row.chemical_id) === chemicalId && row.kind !== "transfer_in" && row.kind !== "sold_partner").forEach((row) => {
@@ -104,16 +113,29 @@ function StockRegister({
       from: row.from_tech_id ? (techs.find((t) => String(t.id) === String(row.from_tech_id))?.full_name || "Сотрудник") : "Основной склад",
       to: "Партнёр", amount: -(Number(row.amount) || 0), note: row.note || "",
     }));
+    warehouseMoves.filter((m) => m.item_kind === "chemical" && String(m.item_id) === chemicalId && ["transfer", "revision", "delivery"].includes(m.kind)).forEach((m) => result.push({
+      id: `warehouse:${m.id}`, date: eventDate(m.created_at), kind: ({ transfer: "Перемещение между складами", revision: "Ревизия склада", delivery: "Отгрузка по тендеру" })[m.kind],
+      from: m.from_warehouse_id ? warehouseName(m.from_warehouse_id) : "Акт сверки", to: m.to_warehouse_id ? warehouseName(m.to_warehouse_id) : "По тендеру",
+      amount: m.kind === "delivery" ? -Number(m.amount) : Number(m.amount), note: m.note,
+    }));
     return result.sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  }, [selected, purchases, handouts, adjustments, jobs, sales, techs]);
+  }, [selected, purchases, handouts, adjustments, jobs, sales, techs, warehouses, warehouseMoves]);
 
   const selectedPurchases = selected
     ? purchases.filter((row) => String(row.chemical_id) === String(selected.id)).sort((a, b) => String(b.purchase_date).localeCompare(String(a.purchase_date)))
     : [];
   const equipmentAtEmployees = techs.flatMap((tech) => techEquipment(tech.id).map((row) => ({ tech, ...row })));
+  const supplyItems = [...inventory.map((c) => ({ ...c, item_kind: "chemical" })), ...equipment.map((e) => ({ ...e, item_kind: "equipment" }))];
+  const navigation = <nav className="kd-stock-detail-tabs" aria-label="Разделы склада">{[["stock", "Остатки и имущество"], ["suppliers", "Поставщики"], ["warehouses", "Склады и ревизии"]].map(([id, label]) => <button key={id} className={view === id ? "on" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>;
+  const operationModal = operation && <WarehouseOperationModal context={operation} warehouses={warehouses} moves={warehouseMoves} people={techs} onClose={() => setOperation(null)} onSaved={async () => { await onReloadSupply(); setOperation(null); }} />;
+  const equipmentItem = equipment.find((e) => e.id === selectedEquipmentId);
+  if (view !== "stock") return <div className="kd-list kd-stock-register">{navigation}{view === "suppliers" ? <Suppliers suppliers={suppliers} offers={supplierOffers} chemicals={inventory} equipment={equipment} canEdit={canEditStock} onReload={onReloadSupply} editor={supplyEditor} onEditor={setSupplyEditor} /> : <Warehouses warehouses={warehouses} moves={warehouseMoves} chemicals={rows} equipment={equipment} canEdit={canEditStock} onReload={onReloadSupply} onOperation={setOperation} />}{operationModal}</div>;
 
   return (
     <div className="kd-list kd-stock-register">
+      {navigation}
+      {operationModal}
+      {supplyEditor && <SupplyEditor editor={supplyEditor} suppliers={suppliers} items={supplyItems} onClose={() => setSupplyEditor(null)} onSaved={async () => { await onReloadSupply(); setSupplyEditor(null); }} />}
       <div className="kd-stock-summary" aria-label="Сводка склада">
         <div><span>Препаратов</span><strong>{inventory.length}</strong></div>
         <div><span>Стоимость остатков</span><strong>{fmt(totalStockValue)} ₸</strong></div>
@@ -137,7 +159,7 @@ function StockRegister({
         {inventory.length === 0 ? <div className="kd-empty">Склад пуст. Добавьте первый препарат кнопкой «+ Препарат».</div> : (
           <div className="kd-stock-table-wrap">
             <table className="kd-stock-table">
-              <thead><tr><th>Препарат</th><th>Основной склад</th><th>У сотрудников</th><th>Всего</th><th>Расход / мес.</th><th>Стоимость</th><th>Состояние</th><th aria-label="Открыть" /></tr></thead>
+              <thead><tr><th>Препарат</th><th>На всех складах</th><th>У сотрудников</th><th>Всего</th><th>Расход / мес.</th><th>Стоимость</th><th>Состояние</th><th aria-label="Открыть" /></tr></thead>
               <tbody>
                 {visibleRows.map((item) => (
                   <tr key={item.id} className={String(selectedId) === String(item.id) ? "selected" : ""}>
@@ -168,17 +190,18 @@ function StockRegister({
             {canEditStock && <div className="kd-actions"><button className="kd-btn primary sm" onClick={() => onStockIn(selected)}><ArrowDownCircle size={14} />Оформить приход</button><button className="kd-btn ghost danger sm" onClick={() => onRemoveChem(selected)}><Trash2 size={13} />Удалить</button></div>}
           </header>
           <nav className="kd-stock-detail-tabs" aria-label="Разделы карточки препарата">
-            {[["locations", "Где находится"], ["moves", `Движение · ${movements.length}`], ["purchases", `Закупки и партии · ${selectedPurchases.length}`]].map(([id, label]) => <button key={id} className={detailTab === id ? "on" : ""} onClick={() => setDetailTab(id)}>{label}</button>)}
+            {[["locations", "Где находится"], ["suppliers", "Поставщики и цены"], ["moves", `Движение · ${movements.length}`], ["purchases", `Закупки и партии · ${selectedPurchases.length}`]].map(([id, label]) => <button key={id} className={detailTab === id ? "on" : ""} onClick={() => setDetailTab(id)}>{label}</button>)}
           </nav>
 
           {detailTab === "locations" && <div className="kd-stock-locations">
-            <div className="kd-stock-location-row warehouse"><span className="kd-location-icon"><Package size={16} /></span><span><strong>Основной склад</strong><small>Доступно для выдачи сотрудникам</small></span><strong>{fmtAmount(selected.warehouseBalance, selected.unit_kind)}</strong>{canEditStock && <button className="kd-btn ghost sm" onClick={() => onStockIn(selected)}><Plus size={13} />Приход</button>}</div>
+            <ItemLocations item={selected} kind="chemical" warehouses={warehouses} moves={warehouseMoves} canEdit={canEditStock} onOperation={setOperation} />
             {selected.employeeRows.filter((row) => Number(row.balance) !== 0 || Number(row.received) !== 0).map((row) => <div className="kd-stock-location-row" key={row.tech.id}>
-              <span className="kd-location-icon"><UserRound size={16} /></span><span><strong>{row.tech.full_name || "Без имени"}</strong><small>Получено {fmtAmount(row.received, selected.unit_kind)} · расход {fmtAmount(row.consumed, selected.unit_kind)}</small></span><strong className={row.balance < 0 ? "danger" : ""}>{fmtAmount(row.balance, selected.unit_kind)}</strong>{canEditStock && <span className="kd-location-actions"><button className="kd-btn ghost sm" onClick={() => onHandout(row.tech)}>Выдать</button><button className="kd-btn ghost sm" onClick={() => onMovement(row.tech)}><ClipboardCheck size={13} />Движение</button></span>}
+              <span className="kd-location-icon"><UserRound size={16} /></span><span><strong>{row.tech.full_name || "Без имени"}</strong><small>Получено {fmtAmount(row.received, selected.unit_kind)} · расход {fmtAmount(row.consumed, selected.unit_kind)}</small></span><strong className={row.balance < 0 ? "danger" : ""}>{fmtAmount(row.balance, selected.unit_kind)}</strong>{canEditStock && <span className="kd-location-actions"><button className="kd-btn ghost sm" onClick={() => setOperation({ kind: "chemical", item: selected, employeeId: row.tech.id, operationKind: "issue" })}>Выдать</button><button className="kd-btn ghost sm" onClick={() => onMovement(row.tech, selected)}><ClipboardCheck size={13} />Движение</button></span>}
             </div>)}
             {selected.employeeRows.every((row) => Number(row.balance) === 0 && Number(row.received) === 0) && <div className="kd-empty compact">У сотрудников этого препарата нет.</div>}
           </div>}
 
+          {detailTab === "suppliers" && <ItemSuppliers suppliers={suppliers} offers={supplierOffers} kind="chemical" item={selected} canEdit={canEditStock} onAddOffer={(row) => setSupplyEditor({ kind: "offer", row })} />}
           {detailTab === "moves" && <div className="kd-stock-table-wrap">
             <table className="kd-stock-table kd-movement-table"><thead><tr><th>Дата</th><th>Операция</th><th>Откуда</th><th>Куда</th><th>Количество</th><th>Основание</th></tr></thead><tbody>{movements.map((row) => <tr key={row.id}><td>{isoToRu(row.date) || "—"}</td><td><span className="kd-movement-kind">{row.amount >= 0 ? <ArrowDownCircle size={13} /> : row.kind === "Передача" ? <ArrowRightLeft size={13} /> : <ArrowUpCircle size={13} />}{row.kind}</span></td><td>{row.from}</td><td>{row.to}</td><td><strong className={row.amount < 0 ? "danger" : "positive"}>{row.amount > 0 ? "+" : ""}{fmtAmount(row.amount, selected.unit_kind)}</strong></td><td><span className="kd-table-note">{row.note || "—"}</span></td></tr>)}</tbody></table>
             {movements.length === 0 && <div className="kd-empty compact">Движений по препарату ещё нет.</div>}
@@ -196,8 +219,9 @@ function StockRegister({
       )}
 
       <section className="kd-stock-panel" aria-labelledby="equipment-register-title">
-        <div className="kd-stock-toolbar"><div><h2 id="equipment-register-title">Оборудование и СИЗ</h2><p>Компактный реестр имущества и ответственных сотрудников.</p></div>{canManageTeam && <div className="kd-stock-equip-actions"><select value={equipmentTechId} onChange={(event) => setEquipmentTechId(event.target.value)} aria-label="Сотрудник для выдачи оборудования"><option value="">Выбрать сотрудника</option>{techs.map((tech) => <option value={tech.id} key={tech.id}>{tech.full_name || "Без имени"}</option>)}</select><button className="kd-btn ghost sm" disabled={!equipmentTechId} onClick={() => onIssueEquipment(techs.find((tech) => String(tech.id) === String(equipmentTechId)))}><UserRound size={13} />Выдать</button><button className="kd-btn primary sm" onClick={onAddEquipment}><Plus size={14} />Позиция</button></div>}</div>
-        {equipment.length === 0 ? <div className="kd-empty compact">Оборудование ещё не заведено.</div> : <div className="kd-stock-table-wrap"><table className="kd-stock-table"><thead><tr><th>Позиция</th><th>Категория</th><th>Единица</th><th>Цена</th><th>У сотрудников</th><th>Стоимость</th><th /></tr></thead><tbody>{equipment.map((item) => { const issued = equipIssuedQty(item.id); return <tr key={item.id}><td><strong>{item.name}</strong></td><td>{EQUIP_CATEGORIES[item.category] || item.category}</td><td>{item.unit}</td><td>{fmt(item.price)} ₸</td><td>{issued} {item.unit}</td><td>{fmt(issued * (Number(item.price) || 0))} ₸</td><td>{canManageTeam && <span className="kd-location-actions"><button className="kd-btn ghost sm" onClick={() => onEditEquipment(item)}>Изменить</button><button className="kd-btn ghost danger sm" onClick={() => onRemoveEquipment(item)}><Trash2 size={13} /></button></span>}</td></tr>; })}</tbody></table></div>}
+        <div className="kd-stock-toolbar"><div><h2 id="equipment-register-title">Оборудование и СИЗ</h2><p>Компактный реестр имущества и ответственных сотрудников.</p></div>{canManageTeam && <div className="kd-stock-equip-actions"><button className="kd-btn primary sm" onClick={onAddEquipment}><Plus size={14} />Позиция</button></div>}</div>
+        {equipment.length === 0 ? <div className="kd-empty compact">Оборудование ещё не заведено.</div> : <div className="kd-stock-table-wrap"><table className="kd-stock-table"><thead><tr><th>Позиция</th><th>Категория</th><th>Единица</th><th>Цена</th><th>У сотрудников</th><th>Стоимость</th><th /></tr></thead><tbody>{equipment.map((item) => { const issued = equipIssuedQty(item.id); return <tr key={item.id}><td><button className="kd-stock-name" onClick={() => setSelectedEquipmentId(item.id)}><strong>{item.name}</strong></button></td><td>{EQUIP_CATEGORIES[item.category] || item.category}</td><td>{item.unit}</td><td>{fmt(item.price)} ₸</td><td>{issued} {item.unit}</td><td>{fmt(issued * (Number(item.price) || 0))} ₸</td><td>{canManageTeam && <span className="kd-location-actions"><button className="kd-btn ghost sm" onClick={() => setOperation({ kind: "equipment", item, operationKind: "issue" })}>Выдать со склада</button><button className="kd-btn ghost sm" onClick={() => onEditEquipment(item)}>Изменить</button><button className="kd-btn ghost danger sm" onClick={() => onRemoveEquipment(item)}><Trash2 size={13} /></button></span>}</td></tr>; })}</tbody></table></div>}
+        {equipmentItem && <section className="kd-card"><div className="wf-toolbar"><h3>{equipmentItem.name}</h3><button className="kd-btn ghost sm" onClick={() => setSelectedEquipmentId("")}>Закрыть карточку</button></div><p>{EQUIP_CATEGORIES[equipmentItem.category]} · {fmt(equipmentItem.price)} ₸ / {equipmentItem.unit}</p><ItemLocations item={equipmentItem} kind="equipment" warehouses={warehouses} moves={warehouseMoves} canEdit={canEditStock} onOperation={setOperation} /><ItemSuppliers suppliers={suppliers} offers={supplierOffers} kind="equipment" item={equipmentItem} canEdit={canEditStock} onAddOffer={(row) => setSupplyEditor({ kind: "offer", row })} /></section>}
         <div className="kd-stock-subhead">Где находится оборудование</div>
         {equipmentAtEmployees.length === 0 ? <div className="kd-empty compact">На руках у сотрудников оборудования нет.</div> : <div className="kd-stock-table-wrap"><table className="kd-stock-table"><thead><tr><th>Сотрудник</th><th>Позиция</th><th>Количество</th><th>Выдано</th><th>Стоимость</th><th /></tr></thead><tbody>{equipmentAtEmployees.map((row) => <tr key={row.handout.id}><td><strong>{row.tech.full_name || "Без имени"}</strong></td><td>{row.equip.name}{row.handout.note ? <small>{row.handout.note}</small> : null}</td><td>{row.handout.qty} {row.equip.unit}</td><td>{isoToRu(row.handout.handout_date) || "—"}</td><td>{fmt((Number(row.handout.qty) || 0) * (Number(row.equip.price) || 0))} ₸</td><td>{canManageTeam && <span className="kd-location-actions"><button className="kd-btn ghost sm" onClick={() => onTransferEquipment(row.handout)}>Передать</button><button className="kd-btn ghost sm" onClick={() => onEquipStatus(row.handout, "returned")}>Возврат</button><button className="kd-btn ghost danger sm" onClick={() => onEquipStatus(row.handout, "broken")}>Сломано</button></span>}</td></tr>)}</tbody></table></div>}
       </section>

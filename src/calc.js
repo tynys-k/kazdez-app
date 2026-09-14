@@ -1131,10 +1131,10 @@ export function techLedger(techId, { handouts = [], jobs = [], inventoryAdjustme
     const checkpoint = revisions[0];
     const issuedAfter = handouts
       .filter((h) => String(h.tech_id) === String(techId) && String(h.chemical_id) === String(cid)
-        && (h.created_at || "").slice(0, 10) > checkpoint.event_date)
+        && (checkpoint.cutoff_at ? +new Date(h.created_at) > +new Date(checkpoint.cutoff_at) : (h.created_at || "").slice(0, 10) > checkpoint.event_date))
       .reduce((sum, h) => sum + (Number(h.amount) || 0), 0);
     const consumedAfter = jobs
-      .filter((j) => String(j.assigned_to) === String(techId) && j.scheduled_date > checkpoint.event_date)
+      .filter((j) => String(j.assigned_to) === String(techId) && (checkpoint.cutoff_at ? +new Date(j.reported_at || j.scheduled_date) > +new Date(checkpoint.cutoff_at) : j.scheduled_date > checkpoint.event_date))
       .reduce((sum, j) => sum + (j.chemicals || [])
         .filter((l) => String(l.chemical_id) === String(cid))
         .reduce((s, l) => s + lineAmount(l), 0), 0);

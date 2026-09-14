@@ -16,9 +16,9 @@ describe("client card UI", () => {
     await act(async () => root.render(<ClientDetailsModal client={client}
       jobs={[{ id: "job-1", client_id: "client-1", status: "done", pest: "Тараканы", address: "Макатаева 127", scheduled_date: "2026-09-10", report_paid: 20000 }]}
       contacts={[{ id: "contact-1", client_id: "client-1", name: "Айжан", role: "Управляющая", phone: "+7 700 000 00 00" }]}
-      addresses={[]} contracts={[{ id: "contract-1", client_id: "client-1", service: "Дезинсекция", active: true }]}
+      addresses={[]} legalContracts={[{ id: "contract-1", client_id: "client-1", number: "Д-41", organization: "Дезинсекция", signed_on: "2026-09-01", status: "active" }]}
       attachments={[]} jobProofs={[]} onClose={vi.fn()} onEdit={vi.fn()} onAddNote={vi.fn()} onUpload={vi.fn()}
-      onOpenAttachment={vi.fn()} onOpenJob={vi.fn()} onOpenContract={vi.fn()} onOpenProof={vi.fn()} />));
+      onOpenAttachment={vi.fn()} onOpenJob={vi.fn()} onOpenLegalContract={vi.fn()} onOpenContract={vi.fn()} onOpenProof={vi.fn()} />));
     expect(container.textContent).toContain("Клиент 360° · ТОО Посиделки");
     expect(container.textContent).toContain("Айжан");
     expect(container.textContent).toContain("Макатаева 127");
