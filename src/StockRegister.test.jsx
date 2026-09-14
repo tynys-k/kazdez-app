@@ -17,6 +17,7 @@ const chem = {
 };
 const tech = { id: "tech-1", full_name: "Аян" };
 const props = {
+  warehouses: [{ id: "unallocated", name: "Не распределено", unallocated: true }, { id: "bayzakova", name: "Байзакова" }],
   inventory: [chem], techs: [tech],
   techLedger: () => [{ chem, received: 2500, consumed: 500, balance: 2000 }],
   purchases: [{ id: "purchase-1", chemical_id: "chem-1", purchase_date: "2026-09-01", amount: 10000, price_per_liter: 12000, supplier: "Поставщик", batch_no: "K-41", expires_on: "2027-09-01" }],
@@ -35,7 +36,9 @@ describe("stock register", () => {
     expect(container.textContent).toContain("Остатки препаратов");
     expect(container.textContent).toContain("4.5 л");
     expect(container.textContent).toContain("2 л");
-    expect(container.textContent).toContain("Основной склад");
+    expect(container.textContent).toContain("На всех складах");
+    expect(container.textContent).toContain("Байзакова");
+    expect(container.textContent).toContain("Не распределено");
     expect(container.textContent).toContain("Аян");
   });
 

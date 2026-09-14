@@ -12,6 +12,11 @@ import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestN
 import { canonicalSourceName, canonicalSourceOptions } from "./sourceNormalization";
 import { LEAD_ACTIVITY_KINDS, LEAD_ACTIVITY_OUTCOMES, leadActivityKindLabel, leadActivityOutcomeLabel } from "./leadActivities";
 import { contractHistorySummary, contractVisitState, subscriptionIntervalLabel } from "./subscriptionHistory";
+import { PeoplePicker } from "./workflows/TaskWorkspace";
+import QualityHistory from "./workflows/QualityHistory";
+import JobObjectFields from "./workflows/JobObjectFields";
+import { ContractSummary } from "./workflows/ContractsRegister";
+import { objectPayload, objectDescription } from "./workflows/objectModel";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -267,10 +272,25 @@ function ReportSuccessModal({ onClose }) {
 }
 
 function ModalShell({ title, onClose, children, footer, wide = false }) {
+  const dialogRef = useRef(null);
+  const titleId = React.useId();
+  useEffect(() => {
+    const previous = document.activeElement;
+    dialogRef.current?.querySelector("button")?.focus();
+    return () => { if (previous?.isConnected) previous.focus?.(); };
+  }, []);
+  function trapFocus(event) {
+    if (event.key !== "Tab") return;
+    const focusable = [...dialogRef.current.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')].filter((node) => !node.hidden && node.getClientRects().length);
+    if (!focusable.length) { event.preventDefault(); dialogRef.current.focus(); return; }
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
   return (
     <div className="kd-overlay">
-      <div className={`kd-modal ${wide ? "wide" : ""}`} onClick={(e) => e.stopPropagation()}>
-        <div className="kd-modal-head"><h3>{title}</h3><button className="kd-x" onClick={onClose}><X size={16} /></button></div>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={trapFocus} className={`kd-modal ${wide ? "wide" : ""}`} onClick={(e) => e.stopPropagation()}>
+        <div className="kd-modal-head"><h3 id={titleId}>{title}</h3><button className="kd-x" aria-label="Закрыть окно" onClick={onClose}><X size={16} /></button></div>
         <div className="kd-modal-body">{children}</div>
         {footer && <div className="kd-modal-foot">{footer}</div>}
       </div>
@@ -327,6 +347,7 @@ function jobToForm(job) {
   const [timeFrom, timeTo] = (job.scheduled_time || "").split(/[–-]/).map((s) => s.trim());
   return {
     status: job.status || "new",
+    object_kind: job.object_kind || "", object_details: job.object_details || {},
     type: job.type || "Первичная", scheduled_date: job.scheduled_date || "", time_from: timeFrom || "", time_to: timeTo || "",
     address: job.address || "", floor: job.floor || "", area: job.area ?? "", source: job.source || "", pest: job.pest || "",
     p1label: po[0]?.label || "С запахом", p1amount: po[0]?.amount ?? "",
@@ -413,6 +434,8 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
 
   async function save() {
     if (savingRef.current || !ok) return;
+    let measurements;
+    try { measurements = objectPayload(f); } catch (e) { setSaveError(e.message); return; }
     savingRef.current = true;
     setSaving(true);
     setSaveError("");
@@ -426,6 +449,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
         executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
         executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
       if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
+      Object.assign(payload, measurements);
       if (!initial) payload.request_id = requestIdRef.current;
       if (!keepStatus) payload.status = payload.assigned_to ? "assigned" : "new";
       else if (f.status === "new" || f.status === "assigned") payload.status = payload.assigned_to ? "assigned" : "new";
@@ -552,10 +576,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
         </>
       )}
       </>}
-      {formMode === "expanded" && <div className="kd-grid2">
-        <Field label="Этаж"><input value={f.floor} onChange={set("floor")} inputMode="numeric" placeholder="5" /></Field>
-        <Field label="Метраж (м²)"><input value={f.area} onChange={set("area")} inputMode="numeric" placeholder="45" /></Field>
-      </div>}
+      <JobObjectFields form={f} onChange={setF} />
       <label className="kd-check" style={{ marginBottom: 10 }}>
         <input type="checkbox" checked={isOnSiteEstimate} onChange={(e) => setF({ ...f, pricing_mode: e.target.checked ? "on_site_estimate" : "quoted", p1amount: e.target.checked ? "" : f.p1amount, p2amount: e.target.checked ? "" : f.p2amount })} />
         <span><strong>Цена после оценки на месте</strong><small style={{ display: "block", marginTop: 2 }}>Дезинфектор назовёт точную сумму на объекте. Ориентир для клиента напишите в комментарии ниже.</small></span>
@@ -620,12 +641,13 @@ function PartnerModal({ partner, onClose, onSave }) {
   );
 }
 
-function PartnerJobsModal({ partner, jobs, shareOf, onClose, onOpenClient }) {
+function PartnerJobsModal({ projects, partner, jobs, shareOf, onClose, onOpenClient }) {
   const share = shareOf;
   const list = [...jobs].sort((a, b) => new Date(b.scheduled_date || b.created_at || 0) - new Date(a.scheduled_date || a.created_at || 0));
   const owed = list.filter((j) => j.status === "done" && !j.partner_paid).reduce((s, j) => s + share(j), 0);
   return (
     <ModalShell title={`Заявки партнёра · ${partner.name}`} onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
+      {projects}
       <div className="kd-muted" style={{ marginBottom: 12 }}>Всего заявок: {list.length} · к выплате: {fmt(owed)} ₸</div>
       {list.length === 0 && <div className="kd-empty">У этого партнёра пока нет заявок.</div>}
       {list.map((j) => {
@@ -1047,8 +1069,7 @@ function DetailsModal({ job, header, partnerName, siblings = [], canAddVisit = f
           <div className="kd-row"><span>Вид</span><strong>{job.pest}</strong></div>
           <div className="kd-row"><span>Дата и время</span><strong>{isoToRu(job.scheduled_date) || "—"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</strong></div>
           <div className="kd-row"><span>Адрес</span><strong style={{ textAlign: "right", overflowWrap: "anywhere" }}><AddressText text={job.address} /></strong></div>
-          {job.floor && <div className="kd-row"><span>Этаж</span><strong>{job.floor}</strong></div>}
-          {job.area && <div className="kd-row"><span>Метраж</span><strong>{job.area} м²</strong></div>}
+          {objectDescription(job) && <div className="kd-row"><span>Объект и замеры</span><strong>{objectDescription(job)}</strong></div>}
           {prices.length > 0 && (
             <>
               <div className="kd-section" style={{ marginTop: 12 }}>Цена</div>
@@ -1363,7 +1384,8 @@ function AddChemModal({ onClose, onSave }) {
   );
 }
 
-function StockInModal({ chem, purchases = [], onClose, onSave }) {
+function StockInModal({ chem, purchases = [], warehouses = [], onClose, onSave }) {
+  const [warehouseId, setWarehouseId] = useState("");
   const requestIdRef = useRef(createFinancialRequestId());
   const [qty, setQty] = useState(""); const [price, setPrice] = useState(""); const [saving, setSaving] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -1380,18 +1402,19 @@ function StockInModal({ chem, purchases = [], onClose, onSave }) {
   async function save() {
     setSaving(true); setProblem("");
     const failed = await onSave(chem, (Number(qty) || 0) * (u.factor || 1000), price ? Number(price) : null,
-      { purchase_date: date, supplier: supplier.trim() || null, batch_no: batch.trim() || null, expires_on: expires || null, request_id: requestIdRef.current });
+      { warehouse_id: warehouseId, purchase_date: date, supplier: supplier.trim() || null, batch_no: batch.trim() || null, expires_on: expires || null, request_id: requestIdRef.current });
     if (failed) setProblem(typeof failed === "string" ? failed : "Не сохранилось.");
     setSaving(false);
   }
   return (
     <ModalShell title={`Приход: ${chem.name}`} onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
-      <button className="kd-btn primary" disabled={!(Number(qty) > 0) || !date || saving} onClick={save}>{saving ? "…" : "Оформить"}</button>
+      <button className="kd-btn primary" disabled={!(Number(qty) > 0) || !date || !warehouseId || saving} onClick={save}>{saving ? "…" : "Оформить"}</button>
     </>}>
       {problem && <div className="kd-err" style={{ marginBottom: 12 }}>{problem}</div>}
       <div className="kd-muted" style={{ marginBottom: 12 }}>Текущая цена: {fmt(chem.price_per_liter)} ₸/{u.big}</div>
       <Field label={`Докуплено (${u.big})`}><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="5" /></Field>
+      <Field label="Склад прихода"><select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}><option value="">Выберите склад</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
       <Field label={`Цена за ${u.big} в этом приходе`}><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="оставь пустым, если та же" /></Field>
       {diff !== 0 && (
         <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10, color: diff > 0 ? "var(--rust)" : "var(--green)" }}>
@@ -2474,13 +2497,14 @@ const INVENTORY_MOVE_LABELS = {
 
 // Контрольная точка по препаратам у сотрудника — аналог ревизии кассы для склада.
 // Отдаёт в App неизменяемую запись для inventory_adjustments.
-function InventoryMovementModal({ tech, techs, chemicals, ledger, onClose, onSave }) {
+function InventoryMovementModal({ tech, techs, chemicals, ledger, initialChemicalId = "", onClose, onSave }) {
   const [kind, setKind] = useState("revision");
-  const [chemId, setChemId] = useState("");
+  const [chemId, setChemId] = useState(initialChemicalId);
+  const requestId = useRef(crypto.randomUUID());
   const [amount, setAmount] = useState("");
   const [unit, setUnit] = useState("big");
   const [toTechId, setToTechId] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Almaty" }));
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2488,17 +2512,17 @@ function InventoryMovementModal({ tech, techs, chemicals, ledger, onClose, onSav
   const current = ledger.find((item) => String(item.chem.id) === String(chemId))?.balance || 0;
   const units = chemUnit(chem?.unit_kind);
   const baseAmount = (Number(amount) || 0) * (unit === "big" ? (units.factor || 1000) : 1);
-  const ok = chemId && Number(amount) >= 0 && reason.trim() && date && (kind !== "transfer" || toTechId) && (kind === "revision" || baseAmount > 0);
+  const ok = chemId && amount.trim() !== "" && Number.isFinite(Number(amount)) && Number(amount) >= 0 && reason.trim() && date && (kind !== "transfer" || toTechId) && (kind === "revision" || baseAmount > 0);
   async function save() {
     setSaving(true);
-    await onSave({ kind, chemical_id: chemId, amount: baseAmount, current_balance: current, to_tech_id: toTechId || null, event_date: date, reason: reason.trim(), note: note.trim() || null });
+    await onSave({ request_id: requestId.current, kind, chemical_id: chemId, amount: baseAmount, current_balance: current, to_tech_id: toTechId || null, event_date: date, reason: reason.trim(), note: note.trim() || null });
     setSaving(false);
   }
   return <ModalShell title={`Остатки и движения — ${tech.full_name || "сотрудник"}`} onClose={onClose} footer={<>
     <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
     <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Зафиксировать"}</button>
   </>}>
-    <div className="kd-hint">Запись не заменяет старые данные: система сохранит изменение, остаток до/после, дату, причину и администратора.</div>
+    <div className="kd-hint">Ревизия фиксирует остаток сейчас, с точным временем. Для документов прошлых дней используйте корректировку. История, причина и автор сохраняются.</div>
     <Field label="Операция"><select value={kind} onChange={(e) => setKind(e.target.value)}>{Object.entries(INVENTORY_MOVE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
     <Field label="Препарат"><select value={chemId} onChange={(e) => { setChemId(e.target.value); setAmount(""); }}><option value="">— выбери —</option>{chemicals.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
     {chem && <div className="kd-revision-current"><span>Сейчас по программе</span><strong>{fmtAmount(current, chem.unit_kind)}</strong></div>}
@@ -3262,6 +3286,11 @@ function TaskModal({ task, people, onClose, onSave }) {
   const [type, setType] = useState(task?.type || "errand");
   const [priority, setPriority] = useState(task?.priority || "normal");
   const [assigneeId, setAssigneeId] = useState(task?.assignee_id || "");
+  const [assignees, setAssignees] = useState(task?.assignee_ids || []);
+  const [observers, setObservers] = useState(task?.observer_ids || []);
+  const [commenters, setCommenters] = useState(task?.commenter_ids || []);
+  const [commentPolicy, setCommentPolicy] = useState(task?.comment_policy || "participants");
+  const [dueTime, setDueTime] = useState(task?.due_time || "");
   const [dueMode, setDueMode] = useState(task?.due_date ? "date" : "none");
   const [dueDate, setDueDate] = useState(task?.due_date || new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
@@ -3271,7 +3300,7 @@ function TaskModal({ task, people, onClose, onSave }) {
   async function save() {
     setSaving(true);
     const due = dueMode === "today" ? today : dueMode === "tomorrow" ? tomorrow : dueMode === "date" ? (dueDate || null) : null;
-    await onSave({ title: title.trim(), description: description.trim() || null, type, priority, assignee_id: assigneeId || null, due_date: due }, task);
+    await onSave({ title: title.trim(), description: description.trim() || null, type, priority, assignee_id: assigneeId || null, assignee_ids: assignees, observer_ids: observers, commenter_ids: commenters.filter((id) => [assigneeId, ...assignees, ...observers].includes(id)), comment_policy: commentPolicy, due_date: due, due_time: due ? dueTime || null : null }, task);
     setSaving(false);
   }
   return (
@@ -3286,6 +3315,10 @@ function TaskModal({ task, people, onClose, onSave }) {
         <Field label="Приоритет"><select value={priority} onChange={(e) => setPriority(e.target.value)}><option value="normal">Обычный</option><option value="urgent">🔴 Срочный</option></select></Field>
       </div>
       <Field label="Исполнитель"><select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}><option value="">— не назначен —</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.id.slice(0, 6)}</option>)}</select></Field>
+      <PeoplePicker label="Соответственные" value={assignees} people={people} onChange={setAssignees} />
+      <PeoplePicker label="Наблюдатели" value={observers} people={people} onChange={setObservers} />
+      <Field label="Кто может комментировать"><select value={commentPolicy} onChange={(e) => setCommentPolicy(e.target.value)}><option value="participants">Все участники</option><option value="author">Только автор и управляющие задачами</option><option value="selected">Выбранные участники, автор и управляющие</option></select></Field>
+      {commentPolicy === "selected" && <PeoplePicker label="Могут писать" value={commenters} people={people.filter((p) => [assigneeId, ...assignees, ...observers].includes(p.id))} onChange={setCommenters} />}
       <div className="kd-field"><span>Срок</span>
         <div className="kd-seg" style={{ width: "100%" }}>
           {[{ id: "none", label: "Без срока" }, { id: "today", label: "Сегодня" }, { id: "tomorrow", label: "Завтра" }, { id: "date", label: "Дата" }].map((m) => (
@@ -3294,6 +3327,7 @@ function TaskModal({ task, people, onClose, onSave }) {
         </div>
       </div>
       {dueMode === "date" && <Field label="Выбери дату"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+      {dueMode !== "none" && <Field label="Время срока (местное)"><input type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} /></Field>}
     </ModalShell>
   );
 }
@@ -3778,7 +3812,9 @@ function LeadStageSelectModal({ lead, stages, initialStageId, onClose, onPick })
   );
 }
 
-function TenderModal({ tender, partners, onClose, onSave }) {
+function TenderModal({ tender, partners, people = [], onClose, onSave }) {
+  const [responsibleIds, setResponsibleIds] = useState(tender?.responsible_ids || []);
+  const [customerContacts, setCustomerContacts] = useState(tender?.customer_contacts || []);
   const [contractNo, setContractNo] = useState(tender?.contract_no || "");
   const [customer, setCustomer] = useState(tender?.customer || "");
   const [title, setTitle] = useState(tender?.title || "");
@@ -3813,7 +3849,7 @@ function TenderModal({ tender, partners, onClose, onSave }) {
 
   async function save() {
     setSaving(true);
-    const payload = { contract_no: contractNo.trim() || null, customer: customer.trim() || null, title: title.trim() || null, address: address.trim() || null, amount: Number(amount) || 0, our_share_pct: Number(ourShare) || 0, partner_id: partnerId || null, status, start_date: startDate || null, end_date: endDate || null, note: note.trim() || null };
+    const payload = { responsible_ids: responsibleIds, customer_contacts: customerContacts.filter((c) => c.name || c.phone), contract_no: contractNo.trim() || null, customer: customer.trim() || null, title: title.trim() || null, address: address.trim() || null, amount: Number(amount) || 0, our_share_pct: Number(ourShare) || 0, partner_id: partnerId || null, status, start_date: startDate || null, end_date: endDate || null, note: note.trim() || null };
     await onSave(payload, tender ? null : buildServices(), tender);
     setSaving(false);
   }
@@ -3826,6 +3862,8 @@ function TenderModal({ tender, partners, onClose, onSave }) {
         <Field label="Номер договора"><input value={contractNo} onChange={(e) => setContractNo(e.target.value)} placeholder="№ 123-45" /></Field>
         <Field label="Статус"><select value={status} onChange={(e) => setStatus(e.target.value)}>{Object.entries(TENDER_STATUS).map(([code, s]) => <option key={code} value={code}>{s.label}</option>)}</select></Field>
       </div>
+      <PeoplePicker label="Ответственные за тендер" value={responsibleIds} people={people} onChange={setResponsibleIds} />
+      <section className="wf-section"><h4>Контакты заказчика / госзакупщиков</h4>{customerContacts.map((contact, index) => <div key={index} className="kd-grid2">{[["name", "Имя"], ["role", "Должность"], ["phone", "Телефон"], ["note", "Примечание"]].map(([key, label]) => <Field key={key} label={label}><input value={contact[key] || ""} onChange={(e) => setCustomerContacts((rows) => rows.map((r, i) => i === index ? { ...r, [key]: e.target.value } : r))} /></Field>)}<button className="kd-btn ghost sm" onClick={() => setCustomerContacts((rows) => rows.filter((_, i) => i !== index))}>Убрать контакт</button></div>)}<button className="kd-btn ghost sm" onClick={() => setCustomerContacts((rows) => [...rows, { name: "", phone: "", role: "", note: "" }])}>+ Контакт</button></section>
       <Field label="Заказчик"><input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Напр.: ГУ «Управление ...»" /></Field>
       <Field label="Название / предмет"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Дезинфекция объекта ..." /></Field>
       <Field label="Адрес объекта"><input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="г. Алматы, ..." /></Field>
@@ -4234,7 +4272,7 @@ function FollowupModal({ followup, job, lead, people = [], defaultKind = "lost",
   </ModalShell>;
 }
 
-function QualityModal({ job, check, defaultReviewUrl = "", onClose, onSave }) {
+function QualityModal({ job, check, history = [], jobs = [], people = [], defaultReviewUrl = "", onClose, onSave }) {
   const [result, setResult] = useState(check?.result || "positive");
   const [rating, setRating] = useState(check?.rating ?? "5");
   const [note, setNote] = useState(check?.note || "");
@@ -4243,21 +4281,25 @@ function QualityModal({ job, check, defaultReviewUrl = "", onClose, onSave }) {
   const [saving, setSaving] = useState(false);
   async function save() {
     setSaving(true);
-    await onSave({ job_id: job.id, result, rating: Number(rating) || null, note: note.trim() || null, review_requested: reviewRequested, review_url: reviewUrl.trim() || null, contacted_at: new Date().toISOString(), status: result === "complaint" ? "problem" : "done" }, check);
+    await onSave({ job_id: job.id, result, rating: result === "no_answer" ? null : Number(rating) || null, note: note.trim() || null, review_requested: reviewRequested, review_url: reviewUrl.trim() || null, contacted_at: new Date().toISOString(), status: result === "complaint" ? "problem" : "done" }, check);
     setSaving(false);
   }
   return <ModalShell title="Контроль качества" onClose={onClose} footer={<>
     <button className="kd-btn ghost" onClick={onClose}>Отмена</button><button className="kd-btn primary" disabled={saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
   </>}>
     <div className="kd-muted" style={{ marginBottom: 12 }}>{job.client_phone} · {job.pest} · {job.address}</div>
+    <div className="kd-notebox">{job.type} · выезд {isoToRu(job.scheduled_date)}. {check ? `Этот выезд уже проверен ${fmtTs(check.contacted_at)}. Сохранение добавит новый звонок в историю.` : "Этот выезд ещё не проверен. После сохранения он уйдёт из очереди."}</div>
+    <QualityHistory checks={history} jobs={jobs} people={people} currentJobId={job.id} />
     <Field label="Результат звонка"><select value={result} onChange={(e) => setResult(e.target.value)}><option value="positive">Всё хорошо</option><option value="repeat">Нужен повтор</option><option value="complaint">Есть претензия</option><option value="no_answer">Не ответил</option></select></Field>
-    <Field label="Оценка клиента"><select value={rating} onChange={(e) => setRating(e.target.value)}><option value="5">5 — отлично</option><option value="4">4 — хорошо</option><option value="3">3 — нормально</option><option value="2">2 — плохо</option><option value="1">1 — очень плохо</option></select></Field>
+    {result !== "no_answer" && <Field label="Оценка клиента"><select value={rating} onChange={(e) => setRating(e.target.value)}><option value="">Не оценивал</option><option value="5">5 — отлично</option><option value="4">4 — хорошо</option><option value="3">3 — нормально</option><option value="2">2 — плохо</option><option value="1">1 — очень плохо</option></select></Field>}
     <Field label="Комментарий"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что сказал клиент, что нужно сделать…" /></Field>
     {result === "positive" && <><label className="kd-check"><input type="checkbox" checked={reviewRequested} onChange={(e) => setReviewRequested(e.target.checked)} /><span>Запросить отзыв после сохранения</span></label>{reviewRequested && <Field label="Ссылка на страницу отзывов"><input value={reviewUrl} onChange={(e) => setReviewUrl(e.target.value)} placeholder="2GIS, Яндекс или Google" /></Field>}</>}
   </ModalShell>;
 }
 
-function ContractModal({ contract, people = [], onClose, onSave }) {
+function ContractModal({ contract, clients = [], legalContracts = [], people = [], onClose, onSave }) {
+  const [clientId, setClientId] = useState(contract?.client_id || clients.find((c) => samePhone(c.phone, contract?.phone))?.id || "");
+  const [legalId, setLegalId] = useState(contract?.legal_contract_id || "");
   const [clientName, setClientName] = useState(contract?.client_name || "");
   const [phone, setPhone] = useState(contract?.phone || "+7 ");
   const [address, setAddress] = useState(contract?.address || "");
@@ -4271,12 +4313,14 @@ function ContractModal({ contract, people = [], onClose, onSave }) {
   const [saving, setSaving] = useState(false);
   async function save() {
     setSaving(true);
-    await onSave({ client_name: clientName.trim(), phone: phone.trim(), address: address.trim(), service: service.trim(), price: Number(price) || 0, interval_days: Number(intervalDays) || 30, next_service_date: nextDate, manager_id: managerId || null, note: note.trim() || null, active }, contract);
+    await onSave({ client_id: clientId || null, legal_contract_id: legalId || null, client_name: clientName.trim(), phone: phone.trim(), address: address.trim(), service: service.trim(), price: Number(price) || 0, interval_days: Number(intervalDays) || 30, next_service_date: nextDate, manager_id: managerId || null, note: note.trim() || null, active }, contract);
     setSaving(false);
   }
   return <ModalShell title={contract ? "Абонентский договор" : "Новый абонент"} onClose={onClose} footer={<>
     <button className="kd-btn ghost" onClick={onClose}>Отмена</button><button className="kd-btn primary" disabled={!clientName || !phone || !address || !nextDate || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
   </>}>
+    <Field label="Клиент / контрагент из общей базы"><select value={clientId} onChange={(e) => { const c = clients.find((row) => row.id === e.target.value); setClientId(e.target.value); setLegalId(""); if (c) { setClientName(c.legal_name || c.name || ""); setPhone(c.phone || ""); } }}><option value="">Не привязан — выберите клиента</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.legal_name || c.name || c.phone} · {c.phone}</option>)}</select></Field>
+    <Field label="Юридический договор"><select value={legalId} onChange={(e) => setLegalId(e.target.value)}><option value="">Без привязки</option>{legalContracts.filter((c) => c.client_id === clientId).map((c) => <option key={c.id} value={c.id}>№ {c.number} от {isoToRu(c.signed_on)} · {c.organization}</option>)}</select></Field>
     <div className="kd-grid2"><Field label="Клиент / организация"><input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="ТОО / имя" /></Field><Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} /></Field></div>
     <Field label="Адрес"><input value={address} onChange={(e) => setAddress(e.target.value)} /></Field>
     <div className="kd-grid2"><Field label="Услуга"><input value={service} onChange={(e) => setService(e.target.value)} placeholder="Дезинсекция / дератизация" /></Field><Field label="Стоимость выезда (₸)"><input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" /></Field></div>
@@ -4287,7 +4331,7 @@ function ContractModal({ contract, people = [], onClose, onSave }) {
   </ModalShell>;
 }
 
-function ContractDetailsModal({ contract, jobs = [], managerName, techName, todayIso, onClose, onEdit, onCreateJob, onOpenJob }) {
+function ContractDetailsModal({ legalContract, contacts = [], client, onOpenClient, onOpenLegalContract, contract, jobs = [], managerName, techName, todayIso, onClose, onEdit, onCreateJob, onOpenJob }) {
   const summary = contractHistorySummary(contract, jobs, todayIso);
   const digits = String(contract?.phone || "").replace(/\D/g, "");
   const nextState = summary.overdue
@@ -4309,6 +4353,8 @@ function ContractDetailsModal({ contract, jobs = [], managerName, techName, toda
       {digits && <a className="kd-btn ghost sm" href={`tel:+${digits}`}><Phone size={14} />{contract.phone}</a>}
       {digits && <a className="kd-btn wa sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={14} />WhatsApp</a>}
     </div>
+    <ContractSummary contract={legalContract} onOpen={onOpenLegalContract} />
+    <section className="wf-section"><h4>Контакты контрагента</h4>{client && <button className="kd-btn ghost sm" onClick={() => onOpenClient(client)}>Клиент 360 · {client.name || client.phone}</button>}{contacts.length ? contacts.map((p) => <p key={p.id}><strong>{p.name || "Контакт"}</strong> · {p.role} · <a href={`tel:${p.phone}`}>{p.phone}</a>{p.note && <small> · {p.note}</small>}</p>) : <p className="kd-muted">Дополнительные контакты можно добавить в общей карточке клиента.</p>}</section>
     <div className="kd-subscription-info">
       <div><span>Адрес</span><strong>{contract.address || "Не указан"}</strong></div>
       <div><span>Период</span><strong>{subscriptionIntervalLabel(contract.interval_days)}</strong></div>

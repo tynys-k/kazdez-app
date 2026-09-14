@@ -374,12 +374,12 @@ const DRIVE_LINKS = [
 ];
 // Короткое честное имя раздела: используется в заголовке страницы и мобильной навигации.
 // Счётчики сюда НЕ добавляем — они живут только в боковом меню и только там, где требуют действия.
-const TAB_LABELS = { today: "Сегодня", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Лиды", clients: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторные выезды", growth: "Прибыль по заявкам", analytics: "Аналитика", retention: "Обзвон и качество", subscriptions: "Абоненты", routes: "Маршруты", finance: "Выручка и чек", opex: "Счета и расходы", cash: "Наличные от бригад", stock: "Склад", team: "Сотрудники", payroll: "Зарплата", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина", myequip: "Моё оборудование" };
+const TAB_LABELS = { contracts: "Договоры", today: "Сегодня", jobs: "Заявки", schedule: "График", done: "Выполненные", canceled: "Отменённые", leads: "Лиды", clients: "Клиенты", tasks: "Задачи", tenders: "Тендеры", repeats: "Повторные выезды", growth: "Прибыль по заявкам", analytics: "Аналитика", retention: "Обзвон и качество", subscriptions: "Абоненты", routes: "Маршруты", finance: "Выручка и чек", opex: "Счета и расходы", cash: "Наличные от бригад", stock: "Склад", team: "Сотрудники", payroll: "Зарплата", partners: "Партнёры", docs: "Документы", materials: "Материалы", knowledge: "База знаний", journal: "Журнал", trash: "Корзина", myequip: "Моё оборудование" };
 // Нижняя панель на телефоне даёт ~9 символов на подпись — длинные имена там режутся многоточием.
 // Здесь только те разделы, чьё полное имя не влезает; остальные берутся из TAB_LABELS.
 const TAB_LABELS_SHORT = { payroll: "Зарплата", cash: "Касса", finance: "Выручка", growth: "Прибыль", opex: "Расходы", retention: "Обзвон", repeats: "Повторы", subscriptions: "Абоненты", team: "Люди", myequip: "Инвентарь" };
 // Порядок по частоте использования: сначала ежедневная работа, потом клиенты, деньги, архив, команда.
-const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "routes", "tasks", "leads", "clients", "retention", "subscriptions", "repeats", "finance", "analytics", "growth", "opex", "cash", "done", "canceled", "team", "payroll", "partners", "stock", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
+const ADMIN_TAB_ORDER = ["today", "jobs", "schedule", "routes", "tasks", "leads", "clients", "contracts", "retention", "subscriptions", "repeats", "finance", "analytics", "growth", "opex", "cash", "done", "canceled", "team", "payroll", "partners", "stock", "tenders", "docs", "materials", "knowledge", "journal", "trash"];
 
 // Единый справочник ролей для экрана «Команда и доступы».
 // Поля permissions и defaultPermissions намеренно содержат один набор:

@@ -97,7 +97,9 @@ function HorizontalBars({ rows, valueKey, labelKey = "label", moneyValues = fals
   </div>;
 }
 
-function InternalAnalytics({ jobs }) {
+function InternalAnalytics({ jobs: allJobs }) {
+  const [objectType, setObjectType] = useState("all");
+  const jobs = useMemo(() => allJobs.filter((job) => objectType === "all" || (job.object_kind || "unknown") === objectType), [allJobs, objectType]);
   const allDemand = useMemo(() => realDemandJobs(jobs), [jobs]);
   const years = useMemo(() => [...new Set(allDemand.map((job) => Number(String(job.scheduled_date || job.reported_at || "").slice(0, 4))).filter(Number.isFinite))].sort((a, b) => b - a), [allDemand]);
   const [year, setYear] = useState(() => years[0] || new Date().getFullYear());
@@ -114,6 +116,7 @@ function InternalAnalytics({ jobs }) {
     <div className="kd-analytics-toolbar kd-card">
       <div><div className="kd-section">Реальный спрос по выполненным работам</div><div className="kd-muted">Гарантийные и контрольные выезды не считаются новым спросом.</div></div>
       <div className="kd-analytics-filters">
+        <label>Тип объекта<select value={objectType} onChange={(e) => setObjectType(e.target.value)}><option value="all">Все объекты</option><option value="unknown">Не указан</option><option value="apartment">Квартира</option><option value="house">Частный дом</option><option value="land">Участок</option><option value="commercial">Коммерческий объект</option><option value="other">Другой объект</option></select></label>
         <label>Год<select value={currentYear} onChange={(event) => { setYear(Number(event.target.value)); setPest("all"); }}>{years.length ? years.map((item) => <option key={item}>{item}</option>) : <option>{currentYear}</option>}</select></label>
         <label>Вид работы<select value={pest} onChange={(event) => setPest(event.target.value)}><option value="all">Все виды</option>{allForYear.pests.map((row) => <option key={row.name} value={row.name}>{row.name}</option>)}</select></label>
       </div>
