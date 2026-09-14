@@ -39,6 +39,21 @@ const EMPLOYEE_EVENTS = {
   other: "Другое",
 };
 
+const EMPLOYEE_JOB_TITLES = [
+  "Дезинфектор",
+  "Менеджер",
+  "Бухгалтер",
+  "Главный бухгалтер",
+  "Специалист по государственным закупкам / тендерщик",
+  "Администратор",
+  "Инструктор",
+  "Координатор",
+  "Маркетолог",
+  "Куратор",
+  "Заведующий складом",
+  "Водитель",
+];
+
 // Почему клиента внесли в чёрный список. Список закрытый: «плохой клиент» в
 // свободном поле ничего не объясняет тому, кто читает это через полгода.
 const BLOCK_REASONS = {
@@ -86,7 +101,7 @@ const CHANGE_FIELDS = {
   transport_cost: "Транспорт", other_cost: "Прочие расходы",
   amount: "Сумма", type: "Тип", expense_date: "Дата", account_id: "Счёт",
   direction: "Направление", move_date: "Дата", source: "Основание",
-  role: "Роль", is_active: "Доступ", salary_monthly: "Оклад",
+  role: "Роль доступа", job_title: "Должность", hired_on: "Дата приёма", is_active: "Доступ", salary_monthly: "Оклад",
   work_schedule: "График", access_overrides: "Персональные права",
   cash_opening_balance: "Начальный остаток", cash_opening_date: "Дата остатка",
   pest: "Вредитель", area_from: "Площадь от", area_to: "Площадь до", price: "Цена",
@@ -704,4 +719,4 @@ function copyText(text, onDone) {
 // ----------------------------- root -----------------------------
 
 export {
-  VISIT_KINDS, TECH_DOC_KINDS, TRAINING_TOPICS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };
+  VISIT_KINDS, TECH_DOC_KINDS, TRAINING_TOPICS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, EMPLOYEE_JOB_TITLES, clientMemoFor, winbackMsg, waLink, monthLabel, reviewRequestMsg, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DOC_TYPES, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, MONTHS_GEN, MONTHS_NOM, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, phoneKey, samePhone, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, WORK_STAGE, addressPlain, buildMsg, chemUnit, copyText, dateGroupLabel, dateInFilter, datePresetRange, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isPast, isoOf, isoToRu, jobTime, jobWhatsappUrl, jobWorkStage, lineAmount, ml2l, norm, parseIso, periodRange, pricePerBase, repeatLabel, technicianArrivalMessage, timeRangeMin, timeStart, todayStart };

@@ -37,6 +37,7 @@ import ExecutivePulse from "./workflows/ExecutivePulse";
 import ReportPeriodBar from "./workflows/ReportPeriodBar";
 import MarketingMonthReport from "./workflows/MarketingMonthReport";
 import { payrollCarryover } from "./workflows/payrollCarryoverModel";
+import { employeePosition, payrollEmployees } from "./workflows/employeeModel";
 import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus";
 import { taskParticipant } from "./workflows/taskModel";
 import { qualityHistoryForPhone, qualityPendingJobs } from "./workflows/QualityHistory";
@@ -45,6 +46,7 @@ import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, Re
 const MarketingPage = React.lazy(() => import("./MarketingPage"));
 
 const CLIENT_DIRECTORY_MIGRATION = "2026-09-12_client_directory.sql";
+const EMPLOYEE_HR_MIGRATION = "2026-09-14_employee_hr_fields.sql";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -458,8 +460,26 @@ function Dashboard({ session, profile }) {
 
   async function saveAdminUser(payload) {
     const action = payload.id ? "update" : "create";
-    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action, user: payload } });
+    const { job_title, hired_on, salary_monthly, work_schedule, cash_opening_balance, cash_opening_date, ...accessPayload } = payload;
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action, user: accessPayload } });
     if (error || data?.error) { showToast("Ошибка: " + (data?.error || error?.message || "не удалось сохранить")); return; }
+    const { error: hrError } = await supabase.rpc("save_employee_profile_details", {
+      p_person_id: payload.id || null,
+      p_email: payload.id ? null : payload.email,
+      p_full_name: payload.full_name,
+      p_phone: payload.phone,
+      p_role: payload.role,
+      p_job_title: job_title,
+      p_hired_on: hired_on,
+      p_salary_monthly: salary_monthly,
+      p_work_schedule: work_schedule,
+      p_cash_opening_balance: cash_opening_balance,
+      p_cash_opening_date: cash_opening_date,
+    });
+    if (hrError) {
+      showToast(`Ошибка: учётная запись сохранена, но кадровые данные не записаны. Выполни supabase/${EMPLOYEE_HR_MIGRATION}: ${hrError.message}`);
+      setModal(null); await load(); await refreshAuthUsers(); return;
+    }
     await logAction("Доступы", `${action === "create" ? "Создан" : "Изменён"} сотрудник: ${payload.full_name} · ${ROLE_DEFINITIONS[payload.role]?.label || payload.role}`);
     setModal(null); showToast(action === "create" ? "Сотрудник добавлен" : "Права сохранены"); await load(); await refreshAuthUsers();
   }
@@ -701,7 +721,7 @@ function Dashboard({ session, profile }) {
             .sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || ""))).slice(0, 400);
           localStorage.setItem(snapshotKey, JSON.stringify({
             owner: session.user.id, jobs: cacheJobs, chemicals: res.chemicals.data,
-            profiles: res.profiles.data.map(({ id, full_name, phone, role, is_active, branch_id }) => ({ id, full_name, phone, role, is_active, branch_id })),
+            profiles: res.profiles.data.map(({ id, full_name, phone, role, job_title, hired_on, is_active, branch_id }) => ({ id, full_name, phone, role, job_title, hired_on, is_active, branch_id })),
             settings: Object.fromEntries(res.app_settings.data.map((row) => [row.key, row.value])),
             savedAt: new Date().toISOString(),
           }));
@@ -1855,20 +1875,21 @@ function Dashboard({ session, profile }) {
     showToast("Удалено"); reloadMoney();
   }
   async function editTechProfile(tech, payload) {
-    const { error } = await supabase.from("profiles").update(payload).eq("id", tech.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    // Изменение оклада записываем в историю само: вручную это забывают, а
-    // через год вопрос «сколько он получал весной» остаётся без ответа.
-    const wasSalary = Number(tech.salary_monthly) || 0;
-    const nowSalary = Number(payload.salary_monthly) || 0;
-    if (nowSalary !== wasSalary) {
-      const { error: evError } = await supabase.from("employee_events").insert({
-        person_id: tech.id, kind: "salary", happened_on: new Date().toISOString().slice(0, 10),
-        amount: nowSalary, note: `Было ${fmt(wasSalary)} ₸`, created_by: session.user.id,
-      });
-      if (evError) showToast("Данные сохранены, но в историю запись не попала: " + evError.message);
-    }
-    await logAction("Дезинфектор", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
+    const { error } = await supabase.rpc("save_employee_profile_details", {
+      p_person_id: tech.id,
+      p_email: null,
+      p_full_name: payload.full_name,
+      p_phone: payload.phone,
+      p_role: payload.role,
+      p_job_title: payload.job_title,
+      p_hired_on: payload.hired_on,
+      p_salary_monthly: payload.salary_monthly,
+      p_work_schedule: payload.work_schedule,
+      p_cash_opening_balance: payload.cash_opening_balance,
+      p_cash_opening_date: payload.cash_opening_date,
+    });
+    if (error) { showToast(`Ошибка: ${error.message}. Проверь supabase/${EMPLOYEE_HR_MIGRATION}`); return; }
+    await logAction("Сотрудник", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
     setModal(null); showToast("Сохранено"); reloadPeople();
   }
   async function savePriceRow(row, existing) {
@@ -2720,7 +2741,8 @@ function Dashboard({ session, profile }) {
   // заявкам периода. Выплачено = проведённые tech_expenses периода. Разница — долг.
   // Оклад намеренно не делим на недели: это месячная величина, дробить её некорректно.
   const payrollSalaryCounts = pMode === "month";
-  const payrollRows = techs.map((t) => {
+  const payrollPeople = payrollEmployees(allProfiles);
+  const payrollRows = payrollPeople.map((t) => {
     const jobsOf = jobs.filter((j) => j.assigned_to === t.id && j.status === "done" && inPeriodIso(j.scheduled_date));
     const ownBonus = jobsOf.reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
     // Доплаты за помощь на чужих заявках — такой же заработок сотрудника.
@@ -5370,14 +5392,14 @@ function Dashboard({ session, profile }) {
             <PayrollCarryoverHistory rows={payrollCarryovers} people={allProfiles} canEdit={canManageCash} onAdd={() => setModal({ kind: "payrollCarryover" })} />
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Начисления и выплаты · {range.label}</div>
-              {techs.length === 0 && <div className="kd-muted">Сотрудников пока нет.</div>}
-              {techs.length > 0 && (
+              {payrollPeople.length === 0 && <div className="kd-muted">Сотрудников пока нет.</div>}
+              {payrollPeople.length > 0 && (
                 <div className="kd-ledgerhead kd-payrollrow"><span>Сотрудник</span><span>Оклад</span><span>Бонусы</span><span>Дорожные</span><span>Начислено</span><span>Выплачено</span><span>К выплате</span><span /></div>
               )}
               {payrollRows.map((r) => (
                 <div key={r.tech.id}>
                   <div className="kd-ledgerrow kd-payrollrow">
-                    <span className="kd-ledgername">{r.tech.full_name || "(без имени)"}</span>
+                    <span className="kd-ledgername">{r.tech.full_name || "(без имени)"}<small className="kd-muted">{employeePosition(r.tech)}</small></span>
                     <span className="kd-muted" data-l="Оклад" title={r.salaryCalc.deduction > 0 ? `Оклад ${fmt(r.salaryCalc.base)} ₸, отсутствовал ${r.salaryCalc.absenceDays} дн. при норме ${r.salaryCalc.norm?.offDays}, вычет ${fmt(r.salaryCalc.deduction)} ₸` : ""}>
                       {payrollSalaryCounts ? fmt(r.salary) : "—"}
                       {payrollSalaryCounts && r.salaryCalc.deduction > 0 && <em style={{ display: "block", fontStyle: "normal", fontSize: 10.5, color: "var(--rust)" }}>−{fmt(r.salaryCalc.deduction)} за {r.salaryCalc.excessDays} дн.</em>}
@@ -5784,7 +5806,7 @@ function Dashboard({ session, profile }) {
                   const isSelf = p.id === session.user.id;
                   return <div className={`kd-user-row ${p.is_active === false ? "inactive" : ""}`} key={p.id}>
                     <div className="kd-tech-avatar">{(p.full_name || authUser.email || "?").slice(0, 1).toUpperCase()}</div>
-                    <div className="kd-user-main"><strong>{p.full_name || "Без имени"}</strong><span>{authUser.email || "Почта загружается…"}{p.phone ? ` · ${p.phone}` : ""}</span></div>
+                    <div className="kd-user-main"><strong>{p.full_name || "Без имени"}</strong><span>{employeePosition(p)}{p.hired_on ? ` · принят ${isoToRu(p.hired_on)}` : " · дата приёма не указана"}</span><span>{authUser.email || "Почта загружается…"}{p.phone ? ` · ${p.phone}` : ""}</span></div>
                     <span className="kd-role-badge" style={{ color: roleInfo.color, borderColor: `${roleInfo.color}55`, background: `${roleInfo.color}12` }}>{roleInfo.label}</span>
                     <span className={`kd-access-status ${p.is_active === false ? "off" : "on"}`}>{p.is_active === false ? "Отключён" : "Активен"}</span>
                     <div className="kd-actions">
@@ -5888,7 +5910,7 @@ function Dashboard({ session, profile }) {
                   <details className="kd-more" key={p.id}>
                     <summary>
                       {p.full_name || "Без имени"}
-                      {hist.hired ? ` · с ${isoToRu(hist.hired)}` : " · дата приёма не указана"}
+                      {(p.hired_on || hist.hired) ? ` · с ${isoToRu(p.hired_on || hist.hired)}` : " · дата приёма не указана"}
                       {hist.lastSalary ? ` · оклад ${fmt(hist.lastSalary.amount)} ₸ с ${isoToRu(hist.lastSalary.happened_on)}` : ""}
                       {` · записей ${hist.rows.length}`}
                     </summary>

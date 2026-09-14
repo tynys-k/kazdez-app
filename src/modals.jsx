@@ -7,7 +7,7 @@ import { createReportRequestId } from "./reportSubmission";
 import { createFinancialRequestId } from "./financialPosting";
 import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
-import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, addressPlain, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
+import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, EMPLOYEE_JOB_TITLES, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, addressPlain, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceName, canonicalSourceOptions } from "./sourceNormalization";
 import { LEAD_ACTIVITY_KINDS, LEAD_ACTIVITY_OUTCOMES, leadActivityKindLabel, leadActivityOutcomeLabel } from "./leadActivities";
@@ -2680,31 +2680,50 @@ function PayrollPayModal({ tech, owed, existing = null, accounts = [], onClose, 
   );
 }
 
+function EmployeeJobTitleField({ value, onChange }) {
+  const known = EMPLOYEE_JOB_TITLES.includes(value);
+  return <>
+    <Field label="Должность">
+      <select value={known ? value : "other"} onChange={(event) => onChange(event.target.value === "other" ? "" : event.target.value)}>
+        {EMPLOYEE_JOB_TITLES.map((title) => <option key={title} value={title}>{title}</option>)}
+        <option value="other">Другая должность</option>
+      </select>
+    </Field>
+    {!known && <Field label="Название должности"><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Например, операционный директор" /></Field>}
+  </>;
+}
+
 function TechEditModal({ tech, onClose, onSave }) {
   const [fullName, setFullName] = useState(tech.full_name || "");
   const [phone, setPhone] = useState(tech.phone || "");
   const [role, setRole] = useState(tech.role || "tech");
+  const [jobTitle, setJobTitle] = useState(tech.job_title || ROLE_DEFINITIONS[tech.role]?.label || "Дезинфектор");
+  const [hiredOn, setHiredOn] = useState(tech.hired_on || "");
   const [openBal, setOpenBal] = useState(tech.cash_opening_balance ?? "");
   const [openDate, setOpenDate] = useState(tech.cash_opening_date || "");
   const [salary, setSalary] = useState(tech.salary_monthly ?? "");
   const [schedule, setSchedule] = useState(tech.work_schedule || "");
   const [saving, setSaving] = useState(false);
-  const ok = fullName.trim();
-  async function save() { setSaving(true); await onSave({ full_name: fullName.trim(), phone: phone.trim() || null, role, cash_opening_balance: Number(openBal) || 0, cash_opening_date: openDate || null, salary_monthly: Number(salary) || 0, work_schedule: schedule || null }); setSaving(false); }
+  const ok = fullName.trim() && jobTitle.trim();
+  async function save() { setSaving(true); await onSave({ full_name: fullName.trim(), phone: phone.trim() || null, role, job_title: jobTitle.trim(), hired_on: hiredOn || null, cash_opening_balance: Number(openBal) || 0, cash_opening_date: openDate || null, salary_monthly: Number(salary) || 0, work_schedule: schedule || null }); setSaving(false); }
   return (
     <ModalShell title="Данные сотрудника" onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
     </>}>
-      <div className="kd-muted" style={{ marginBottom: 12 }}>Логин и пароль этим не затрагиваются — меняется только отображаемое имя, телефон и роль в приложении.</div>
+      <div className="kd-muted" style={{ marginBottom: 12 }}>Логин и пароль не меняются. Здесь хранится кадровая информация сотрудника.</div>
       <Field label="Имя (как будет видно в приложении)"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Байсеит" /></Field>
       <Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 ..." /></Field>
-      <Field label="Роль">
-        <select value={role} onChange={(e) => setRole(e.target.value)}>
-          <option value="tech">Дезинфектор (заявки, своя касса, оборудование)</option>
-          <option value="manager">Менеджер (ставит задачи, без доступа к финансам)</option>
-        </select>
-      </Field>
+      <EmployeeJobTitleField value={jobTitle} onChange={setJobTitle} />
+      <div className="kd-grid2">
+        <Field label="Дата приёма на работу"><input type="date" value={hiredOn} onChange={(e) => setHiredOn(e.target.value)} /></Field>
+        <Field label="Роль доступа">
+          <select value={role} disabled={tech.role === "admin"} onChange={(e) => setRole(e.target.value)}>
+            {Object.entries(ROLE_DEFINITIONS).filter(([key]) => key !== "admin" || tech.role === "admin").map(([key, info]) => <option key={key} value={key}>{info.label}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="kd-muted" style={{ marginBottom: 10 }}>Должность отображается в кадровой карточке. Роль доступа определяет доступные разделы системы.</div>
       <div className="kd-section">Оклад</div>
       <Field label="Оклад в месяц (₸)"><input value={salary} onChange={(e) => setSalary(e.target.value)} inputMode="numeric" placeholder="0 — если только процент с заявок" /></Field>
       <Field label="График работы">
@@ -2715,14 +2734,14 @@ function TechEditModal({ tech, onClose, onSave }) {
           <option value="7/0">7/0 — без выходных</option>
         </select>
       </Field>
-      <div className="kd-muted" style={{ marginBottom: 10 }}>Подставляется в раздел «Зарплата» каждый месяц. Бонусы и дорожные туда попадают из заявок автоматически.</div>
+      <div className="kd-muted" style={{ marginBottom: 10 }}>Оклад автоматически попадёт в раздел «Зарплата» каждый месяц.</div>
       <div className="kd-section">Начальный остаток наличных (П.8)</div>
       <div className="kd-grid2">
         <Field label="На руках на дату старта (₸)"><input value={openBal} onChange={(e) => setOpenBal(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
         <Field label="Дата старта учёта"><input type="date" value={openDate} onChange={(e) => setOpenDate(e.target.value)} /></Field>
       </div>
-      <div className="kd-muted" style={{ marginBottom: 10 }}>Заявки и внесения ДО этой даты не влияют на «на руках» — можно спокойно заполнять историю задним числом ради аналитики.</div>
-      <div className="kd-muted">Менеджер — «ключевой человек»: может создавать задачи и назначать их. Роль администратора меняется только напрямую в базе для безопасности.</div>
+      <div className="kd-muted" style={{ marginBottom: 10 }}>Заявки и внесения до этой даты не влияют на остаток «на руках».</div>
+      <div className="kd-muted">Административный доступ нельзя выдать из этой формы — он меняется отдельно ради безопасности.</div>
     </ModalShell>
   );
 }
@@ -4428,6 +4447,10 @@ function UserAccessModal({ user, onClose, onSave }) {
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState(user?.phone || "");
   const [role, setRole] = useState(user?.role || "tech");
+  const [jobTitle, setJobTitle] = useState(user?.job_title || ROLE_DEFINITIONS[user?.role || "tech"]?.label || "Дезинфектор");
+  const [hiredOn, setHiredOn] = useState(user?.hired_on || (isEdit ? "" : new Date().toISOString().slice(0, 10)));
+  const [salary, setSalary] = useState(user?.salary_monthly ?? "");
+  const [schedule, setSchedule] = useState(user?.work_schedule || "");
   const [isActive, setIsActive] = useState(user?.is_active !== false);
   const [overrides, setOverrides] = useState(
     user?.access_overrides && typeof user.access_overrides === "object" ? { ...user.access_overrides } : {}
@@ -4439,7 +4462,7 @@ function UserAccessModal({ user, onClose, onSave }) {
   const roleDefaults = new Set(ROLE_DEFAULT_PERMISSIONS[role] || []);
   const isAdminRole = role === "admin";
   const emailOk = /\S+@\S+\.\S+/.test(email.trim());
-  const ok = fullName.trim() && (isEdit || (emailOk && password.trim().length >= 6));
+  const ok = fullName.trim() && jobTitle.trim() && (isEdit || (hiredOn && emailOk && password.trim().length >= 6));
   const overrideCount = Object.keys(overrides).length;
 
   function stateOf(key) {
@@ -4461,6 +4484,12 @@ function UserAccessModal({ user, onClose, onSave }) {
       full_name: fullName.trim(),
       phone: phone.trim() || null,
       role,
+      job_title: jobTitle.trim(),
+      hired_on: hiredOn,
+      salary_monthly: Number(salary) || 0,
+      work_schedule: schedule || null,
+      cash_opening_balance: Number(user?.cash_opening_balance) || 0,
+      cash_opening_date: user?.cash_opening_date || null,
       is_active: isActive,
       access_overrides: overrides,
     };
@@ -4482,11 +4511,25 @@ function UserAccessModal({ user, onClose, onSave }) {
       </div>
       {!isEdit && <Field label="Пароль (минимум 6 символов)"><input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Придумай пароль" /></Field>}
       {isEdit && <div className="kd-muted" style={{ marginBottom: 10 }}>Почту и пароль здесь изменить нельзя — только имя, телефон, роль и доступы.</div>}
-      <Field label="Роль">
+      <EmployeeJobTitleField value={jobTitle} onChange={setJobTitle} />
+      <div className="kd-grid2">
+        <Field label="Дата приёма на работу"><input type="date" value={hiredOn} onChange={(e) => setHiredOn(e.target.value)} /></Field>
+        <Field label="Оклад в месяц (₸)"><input value={salary} onChange={(e) => setSalary(e.target.value)} inputMode="numeric" placeholder="0" /></Field>
+      </div>
+      <Field label="График работы">
+        <select value={schedule} onChange={(e) => setSchedule(e.target.value)}>
+          <option value="">Без графика — оклад не режется за пропуски</option>
+          <option value="6/1">6/1 — шесть рабочих, один выходной</option>
+          <option value="5/2">5/2 — пятидневка</option>
+          <option value="7/0">7/0 — без выходных</option>
+        </select>
+      </Field>
+      <Field label="Роль доступа">
         <select value={role} onChange={(e) => setRole(e.target.value)}>
           {roleKeys.map((r) => <option key={r} value={r}>{ROLE_DEFINITIONS[r].label} — {ROLE_DEFINITIONS[r].description}</option>)}
         </select>
       </Field>
+      <div className="kd-muted" style={{ marginBottom: 10 }}>Активный сотрудник автоматически появится в «Зарплате». Должность не ограничивает доступ — за это отвечает роль доступа.</div>
       <label className="kd-check"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /><span>Учётная запись активна (снять галочку — вход заблокирован)</span></label>
 
       <div className="kd-section" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
