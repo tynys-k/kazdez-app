@@ -35,6 +35,7 @@ import ContractsRegister from "./workflows/ContractsRegister";
 import PayrollCarryoverModal, { PayrollCarryoverHistory } from "./workflows/PayrollCarryover";
 import ExecutivePulse from "./workflows/ExecutivePulse";
 import ReportPeriodBar from "./workflows/ReportPeriodBar";
+import MarketingMonthReport from "./workflows/MarketingMonthReport";
 import { payrollCarryover } from "./workflows/payrollCarryoverModel";
 import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus";
 import { taskParticipant } from "./workflows/taskModel";
@@ -319,6 +320,7 @@ function Dashboard({ session, profile }) {
   const [mktChannels, setMktChannels] = useState([]);
   const [mktTopups, setMktTopups] = useState([]);
   const [opexView, setOpexView] = useState("accounts");
+  const [marketingMonthOffset, setMarketingMonthOffset] = useState(0);
   const [scheduleDate, setScheduleDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [daysOff, setDaysOff] = useState([]);
   const [followups, setFollowups] = useState([]);
@@ -5578,96 +5580,20 @@ function Dashboard({ session, profile }) {
             })()}
             </>)}
 
-            {opexView === "marketing" && (() => {
-              const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-              const monthStartIso = isoOf(monthStart);
-              const goal = Number(settings.mkt_revenue_goal) || 15000000;
-              const adPct = Number(settings.mkt_ad_percent) || 10;
-              const budget = Math.round(goal * adPct / 100);
-              // выручка этого календарного месяца по источнику (done-заявки)
-              const revenueBySource = (srcKey) => {
-                if (!srcKey) return 0;
-                return jobs.filter((j) => j.status === "done" && j.scheduled_date && j.scheduled_date >= monthStartIso && sourceNamesMatch(j.source, srcKey))
-                  .reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
-              };
-              const topupsThisMonth = (chId) => mktTopups.filter((t) => t.channel_id === chId && t.topup_date >= monthStartIso);
-              const spentThisMonth = (chId) => topupsThisMonth(chId).reduce((s, t) => s + (Number(t.amount) || 0), 0);
-              const totalPlan = mktChannels.reduce((s, c) => s + (Number(c.monthly_plan) || 0), 0);
-              const totalSpent = mktChannels.reduce((s, c) => s + spentThisMonth(c.id), 0);
-              const totalRevenue = jobs.filter((j) => j.status === "done" && j.scheduled_date && j.scheduled_date >= monthStartIso).reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
-              return (
-                <>
-                  <div className="kd-tabbar" style={{ marginBottom: 8 }}>
-                    <div className="kd-title" style={{ fontSize: 18 }}>Маркетинг · {monthStart.toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}</div>
-                    <button className="kd-btn primary" onClick={() => setModal({ kind: "mktChannel" })}><Plus size={15} />Канал</button>
-                  </div>
-
-                  {/* Цель и бюджет */}
-                  <div className="kd-card" style={{ marginBottom: 12 }}>
-                    <div className="kd-section">Цель месяца</div>
-                    <div className="kd-row"><span>Цель по выручке</span><strong>{fmt(goal)} ₸</strong></div>
-                    <div className="kd-row"><span>Доля на рекламу</span><strong>{adPct}%</strong></div>
-                    <div className="kd-row total"><span>Бюджет на рекламу</span><strong style={{ color: "var(--primary-d)" }}>{fmt(budget)} ₸</strong></div>
-                    <div className="kd-muted" style={{ marginTop: 8 }}>Изменить цель и % можно в Настройках → «Маркетинг».</div>
-                  </div>
-
-                  {/* Итоги месяца */}
-                  <div className="kd-card" style={{ marginBottom: 12 }}>
-                    <div className="kd-section">Факт этого месяца</div>
-                    <div className="kd-row"><span>План пополнений</span><strong>{fmt(totalPlan)} ₸</strong></div>
-                    <div className="kd-row"><span>Уже пополнено</span><strong style={{ color: totalSpent >= totalPlan ? "#0E7C66" : "#B4650B" }}>{fmt(totalSpent)} ₸</strong></div>
-                    <div className="kd-row"><span>Осталось пополнить</span><strong>{fmt(Math.max(0, totalPlan - totalSpent))} ₸</strong></div>
-                    <div className="kd-row"><span>Выручка (done-заявки)</span><strong>{fmt(totalRevenue)} ₸</strong></div>
-                    <div className="kd-row total"><span>Общий ROI</span><strong style={{ color: totalSpent > 0 && totalRevenue / totalSpent >= 10 ? "#0E7C66" : "#B4650B" }}>{totalSpent > 0 ? (totalRevenue / totalSpent).toFixed(1) + "×" : "—"}</strong></div>
-                    <div className="kd-muted" style={{ marginTop: 8 }}>Ориентир: каждый 1 ₸ рекламы должен вернуть ≥10 ₸ выручки.</div>
-                  </div>
-
-                  {/* Каналы */}
-                  <div className="kd-list">
-                    {mktChannels.length === 0 && <div className="kd-empty">Каналов нет. Добавь через «+ Канал».</div>}
-                    {mktChannels.map((ch) => {
-                      const spent = spentThisMonth(ch.id);
-                      const plan = Number(ch.monthly_plan) || 0;
-                      const rev = revenueBySource(ch.source_key);
-                      const roi = spent > 0 ? rev / spent : null;
-                      const filled = plan > 0 ? Math.min(100, Math.round(spent / plan * 100)) : 0;
-                      const topups = topupsThisMonth(ch.id);
-                      return (
-                        <div key={ch.id} className="kd-card">
-                          <div className="kd-card-head">
-                            <div className="kd-pest">{ch.name}{ch.is_fixed && <span className="kd-brandtag" style={{ marginLeft: 8 }}>фикс</span>}</div>
-                            <span className="kd-badge" style={{ color: filled >= 100 ? "#0E7C66" : "#B4650B", background: filled >= 100 ? "#E4F3EE" : "#FBEDD9" }}>{filled}% плана</span>
-                          </div>
-                          <div className="kd-mktbar"><div className="kd-mktbarfill" style={{ width: `${filled}%` }} /></div>
-                          <div className="kd-tenderfin">
-                            <div><span className="kd-muted">План/мес</span><strong>{fmt(plan)} ₸</strong></div>
-                            <div><span className="kd-muted">Пополнено</span><strong>{fmt(spent)} ₸</strong></div>
-                            {ch.source_key && <div><span className="kd-muted">Выручка ({ch.source_key})</span><strong>{fmt(rev)} ₸</strong></div>}
-                            {ch.source_key && <div><span className="kd-muted">ROI</span><strong style={{ color: roi != null && roi >= 10 ? "#0E7C66" : roi != null ? "#B42318" : "var(--muted)" }}>{roi != null ? roi.toFixed(1) + "×" : "—"}</strong></div>}
-                          </div>
-                          {topups.length > 0 && (
-                            <div className="kd-returns" style={{ marginTop: 8 }}>
-                              {topups.map((t) => (
-                                <div key={t.id} className="kd-returnrow">
-                                  <span>✓ {fmt(t.amount)} ₸ · {isoToRu(t.topup_date)}{t.account_id ? " · " + (accountById(t.account_id)?.name || "") : ""}</span>
-                                  <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить пополнение ${fmt(t.amount)} ₸?`, () => removeMktTopup(t))}><X size={12} /></button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          <div className="kd-actions">
-                            <button className="kd-btn primary sm" onClick={() => setModal({ kind: "mktTopup", channel: ch })}><Plus size={13} />Пополнил</button>
-                            <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "mktChannel", item: ch })}><Pencil size={13} />Изменить</button>
-                            <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить канал «${ch.name}»? Пополнения и связанные расходы по счетам тоже удалятся.`, () => removeMktChannel(ch))}><Trash2 size={13} /></button>
-                          </div>
-                          {!ch.source_key && <div className="kd-muted" style={{ marginTop: 6 }}>ROI не считается — не привязан источник. Укажи его в «Изменить», чтобы видеть отдачу.</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              );
-            })()}
+            {opexView === "marketing" && <MarketingMonthReport
+              jobs={jobs}
+              channels={mktChannels}
+              topups={mktTopups}
+              settings={settings}
+              monthOffset={marketingMonthOffset}
+              onMonthOffsetChange={setMarketingMonthOffset}
+              onAddChannel={() => setModal({ kind: "mktChannel" })}
+              onEditChannel={(channel) => setModal({ kind: "mktChannel", item: channel })}
+              onRemoveChannel={(channel) => askConfirm(`Удалить канал «${channel.name}»? Пополнения и связанные расходы по счетам тоже удалятся.`, () => removeMktChannel(channel))}
+              onAddTopup={(channel) => setModal({ kind: "mktTopup", channel })}
+              onRemoveTopup={(topup) => askConfirm(`Удалить пополнение ${fmt(topup.amount)} ₸?`, () => removeMktTopup(topup))}
+              accountName={(accountId) => accountById(accountId)?.name || ""}
+            />}
           </>
         )}
 
