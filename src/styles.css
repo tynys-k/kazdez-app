@@ -493,6 +493,7 @@ body{
 .kd-ledgerrow{border-bottom:1px solid var(--line-soft);font-weight:600;}
 .kd-ledgerrow:last-child{border-bottom:none;}
 .kd-ledgername{font-weight:700;}
+.kd-ledgername small{display:block;margin-top:2px;font-size:10.5px;font-weight:500;}
 .kd-ledgerhead span:not(:first-child),.kd-ledgerrow span:not(.kd-ledgername),.kd-ledgerrow strong{text-align:right;}
 .kd-revision-current{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;margin:8px 0 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);}
 .kd-revision-current span{font-size:13px;color:var(--muted);font-weight:700;}

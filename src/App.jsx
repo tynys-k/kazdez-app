@@ -35,7 +35,9 @@ import ContractsRegister from "./workflows/ContractsRegister";
 import PayrollCarryoverModal, { PayrollCarryoverHistory } from "./workflows/PayrollCarryover";
 import ExecutivePulse from "./workflows/ExecutivePulse";
 import ReportPeriodBar from "./workflows/ReportPeriodBar";
+import MarketingMonthReport from "./workflows/MarketingMonthReport";
 import { payrollCarryover } from "./workflows/payrollCarryoverModel";
+import { employeePosition, payrollEmployees } from "./workflows/employeeModel";
 import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus";
 import { taskParticipant } from "./workflows/taskModel";
 import { qualityHistoryForPhone, qualityPendingJobs } from "./workflows/QualityHistory";
@@ -44,6 +46,7 @@ import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, Re
 const MarketingPage = React.lazy(() => import("./MarketingPage"));
 
 const CLIENT_DIRECTORY_MIGRATION = "2026-09-12_client_directory.sql";
+const EMPLOYEE_HR_MIGRATION = "2026-09-14_employee_hr_fields.sql";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -319,6 +322,7 @@ function Dashboard({ session, profile }) {
   const [mktChannels, setMktChannels] = useState([]);
   const [mktTopups, setMktTopups] = useState([]);
   const [opexView, setOpexView] = useState("accounts");
+  const [marketingMonthOffset, setMarketingMonthOffset] = useState(0);
   const [scheduleDate, setScheduleDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [daysOff, setDaysOff] = useState([]);
   const [followups, setFollowups] = useState([]);
@@ -456,8 +460,26 @@ function Dashboard({ session, profile }) {
 
   async function saveAdminUser(payload) {
     const action = payload.id ? "update" : "create";
-    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action, user: payload } });
+    const { job_title, hired_on, salary_monthly, work_schedule, cash_opening_balance, cash_opening_date, ...accessPayload } = payload;
+    const { data, error } = await supabase.functions.invoke("admin-users", { body: { action, user: accessPayload } });
     if (error || data?.error) { showToast("Ошибка: " + (data?.error || error?.message || "не удалось сохранить")); return; }
+    const { error: hrError } = await supabase.rpc("save_employee_profile_details", {
+      p_person_id: payload.id || null,
+      p_email: payload.id ? null : payload.email,
+      p_full_name: payload.full_name,
+      p_phone: payload.phone,
+      p_role: payload.role,
+      p_job_title: job_title,
+      p_hired_on: hired_on,
+      p_salary_monthly: salary_monthly,
+      p_work_schedule: work_schedule,
+      p_cash_opening_balance: cash_opening_balance,
+      p_cash_opening_date: cash_opening_date,
+    });
+    if (hrError) {
+      showToast(`Ошибка: учётная запись сохранена, но кадровые данные не записаны. Выполни supabase/${EMPLOYEE_HR_MIGRATION}: ${hrError.message}`);
+      setModal(null); await load(); await refreshAuthUsers(); return;
+    }
     await logAction("Доступы", `${action === "create" ? "Создан" : "Изменён"} сотрудник: ${payload.full_name} · ${ROLE_DEFINITIONS[payload.role]?.label || payload.role}`);
     setModal(null); showToast(action === "create" ? "Сотрудник добавлен" : "Права сохранены"); await load(); await refreshAuthUsers();
   }
@@ -699,7 +721,7 @@ function Dashboard({ session, profile }) {
             .sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || ""))).slice(0, 400);
           localStorage.setItem(snapshotKey, JSON.stringify({
             owner: session.user.id, jobs: cacheJobs, chemicals: res.chemicals.data,
-            profiles: res.profiles.data.map(({ id, full_name, phone, role, is_active, branch_id }) => ({ id, full_name, phone, role, is_active, branch_id })),
+            profiles: res.profiles.data.map(({ id, full_name, phone, role, job_title, hired_on, is_active, branch_id }) => ({ id, full_name, phone, role, job_title, hired_on, is_active, branch_id })),
             settings: Object.fromEntries(res.app_settings.data.map((row) => [row.key, row.value])),
             savedAt: new Date().toISOString(),
           }));
@@ -1853,20 +1875,21 @@ function Dashboard({ session, profile }) {
     showToast("Удалено"); reloadMoney();
   }
   async function editTechProfile(tech, payload) {
-    const { error } = await supabase.from("profiles").update(payload).eq("id", tech.id);
-    if (error) { showToast("Ошибка: " + error.message); return; }
-    // Изменение оклада записываем в историю само: вручную это забывают, а
-    // через год вопрос «сколько он получал весной» остаётся без ответа.
-    const wasSalary = Number(tech.salary_monthly) || 0;
-    const nowSalary = Number(payload.salary_monthly) || 0;
-    if (nowSalary !== wasSalary) {
-      const { error: evError } = await supabase.from("employee_events").insert({
-        person_id: tech.id, kind: "salary", happened_on: new Date().toISOString().slice(0, 10),
-        amount: nowSalary, note: `Было ${fmt(wasSalary)} ₸`, created_by: session.user.id,
-      });
-      if (evError) showToast("Данные сохранены, но в историю запись не попала: " + evError.message);
-    }
-    await logAction("Дезинфектор", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
+    const { error } = await supabase.rpc("save_employee_profile_details", {
+      p_person_id: tech.id,
+      p_email: null,
+      p_full_name: payload.full_name,
+      p_phone: payload.phone,
+      p_role: payload.role,
+      p_job_title: payload.job_title,
+      p_hired_on: payload.hired_on,
+      p_salary_monthly: payload.salary_monthly,
+      p_work_schedule: payload.work_schedule,
+      p_cash_opening_balance: payload.cash_opening_balance,
+      p_cash_opening_date: payload.cash_opening_date,
+    });
+    if (error) { showToast(`Ошибка: ${error.message}. Проверь supabase/${EMPLOYEE_HR_MIGRATION}`); return; }
+    await logAction("Сотрудник", `Изменены данные: ${tech.full_name || "?"} → ${payload.full_name || "?"}`);
     setModal(null); showToast("Сохранено"); reloadPeople();
   }
   async function savePriceRow(row, existing) {
@@ -2718,7 +2741,8 @@ function Dashboard({ session, profile }) {
   // заявкам периода. Выплачено = проведённые tech_expenses периода. Разница — долг.
   // Оклад намеренно не делим на недели: это месячная величина, дробить её некорректно.
   const payrollSalaryCounts = pMode === "month";
-  const payrollRows = techs.map((t) => {
+  const payrollPeople = payrollEmployees(allProfiles);
+  const payrollRows = payrollPeople.map((t) => {
     const jobsOf = jobs.filter((j) => j.assigned_to === t.id && j.status === "done" && inPeriodIso(j.scheduled_date));
     const ownBonus = jobsOf.reduce((s, j) => s + (Number(j.tech_bonus) || 0), 0);
     // Доплаты за помощь на чужих заявках — такой же заработок сотрудника.
@@ -5368,14 +5392,14 @@ function Dashboard({ session, profile }) {
             <PayrollCarryoverHistory rows={payrollCarryovers} people={allProfiles} canEdit={canManageCash} onAdd={() => setModal({ kind: "payrollCarryover" })} />
             <div className="kd-card" style={{ marginTop: 14 }}>
               <div className="kd-section">Начисления и выплаты · {range.label}</div>
-              {techs.length === 0 && <div className="kd-muted">Сотрудников пока нет.</div>}
-              {techs.length > 0 && (
+              {payrollPeople.length === 0 && <div className="kd-muted">Сотрудников пока нет.</div>}
+              {payrollPeople.length > 0 && (
                 <div className="kd-ledgerhead kd-payrollrow"><span>Сотрудник</span><span>Оклад</span><span>Бонусы</span><span>Дорожные</span><span>Начислено</span><span>Выплачено</span><span>К выплате</span><span /></div>
               )}
               {payrollRows.map((r) => (
                 <div key={r.tech.id}>
                   <div className="kd-ledgerrow kd-payrollrow">
-                    <span className="kd-ledgername">{r.tech.full_name || "(без имени)"}</span>
+                    <span className="kd-ledgername">{r.tech.full_name || "(без имени)"}<small className="kd-muted">{employeePosition(r.tech)}</small></span>
                     <span className="kd-muted" data-l="Оклад" title={r.salaryCalc.deduction > 0 ? `Оклад ${fmt(r.salaryCalc.base)} ₸, отсутствовал ${r.salaryCalc.absenceDays} дн. при норме ${r.salaryCalc.norm?.offDays}, вычет ${fmt(r.salaryCalc.deduction)} ₸` : ""}>
                       {payrollSalaryCounts ? fmt(r.salary) : "—"}
                       {payrollSalaryCounts && r.salaryCalc.deduction > 0 && <em style={{ display: "block", fontStyle: "normal", fontSize: 10.5, color: "var(--rust)" }}>−{fmt(r.salaryCalc.deduction)} за {r.salaryCalc.excessDays} дн.</em>}
@@ -5578,96 +5602,20 @@ function Dashboard({ session, profile }) {
             })()}
             </>)}
 
-            {opexView === "marketing" && (() => {
-              const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-              const monthStartIso = isoOf(monthStart);
-              const goal = Number(settings.mkt_revenue_goal) || 15000000;
-              const adPct = Number(settings.mkt_ad_percent) || 10;
-              const budget = Math.round(goal * adPct / 100);
-              // выручка этого календарного месяца по источнику (done-заявки)
-              const revenueBySource = (srcKey) => {
-                if (!srcKey) return 0;
-                return jobs.filter((j) => j.status === "done" && j.scheduled_date && j.scheduled_date >= monthStartIso && sourceNamesMatch(j.source, srcKey))
-                  .reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
-              };
-              const topupsThisMonth = (chId) => mktTopups.filter((t) => t.channel_id === chId && t.topup_date >= monthStartIso);
-              const spentThisMonth = (chId) => topupsThisMonth(chId).reduce((s, t) => s + (Number(t.amount) || 0), 0);
-              const totalPlan = mktChannels.reduce((s, c) => s + (Number(c.monthly_plan) || 0), 0);
-              const totalSpent = mktChannels.reduce((s, c) => s + spentThisMonth(c.id), 0);
-              const totalRevenue = jobs.filter((j) => j.status === "done" && j.scheduled_date && j.scheduled_date >= monthStartIso).reduce((s, j) => s + (Number(j.report_paid) || 0), 0);
-              return (
-                <>
-                  <div className="kd-tabbar" style={{ marginBottom: 8 }}>
-                    <div className="kd-title" style={{ fontSize: 18 }}>Маркетинг · {monthStart.toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}</div>
-                    <button className="kd-btn primary" onClick={() => setModal({ kind: "mktChannel" })}><Plus size={15} />Канал</button>
-                  </div>
-
-                  {/* Цель и бюджет */}
-                  <div className="kd-card" style={{ marginBottom: 12 }}>
-                    <div className="kd-section">Цель месяца</div>
-                    <div className="kd-row"><span>Цель по выручке</span><strong>{fmt(goal)} ₸</strong></div>
-                    <div className="kd-row"><span>Доля на рекламу</span><strong>{adPct}%</strong></div>
-                    <div className="kd-row total"><span>Бюджет на рекламу</span><strong style={{ color: "var(--primary-d)" }}>{fmt(budget)} ₸</strong></div>
-                    <div className="kd-muted" style={{ marginTop: 8 }}>Изменить цель и % можно в Настройках → «Маркетинг».</div>
-                  </div>
-
-                  {/* Итоги месяца */}
-                  <div className="kd-card" style={{ marginBottom: 12 }}>
-                    <div className="kd-section">Факт этого месяца</div>
-                    <div className="kd-row"><span>План пополнений</span><strong>{fmt(totalPlan)} ₸</strong></div>
-                    <div className="kd-row"><span>Уже пополнено</span><strong style={{ color: totalSpent >= totalPlan ? "#0E7C66" : "#B4650B" }}>{fmt(totalSpent)} ₸</strong></div>
-                    <div className="kd-row"><span>Осталось пополнить</span><strong>{fmt(Math.max(0, totalPlan - totalSpent))} ₸</strong></div>
-                    <div className="kd-row"><span>Выручка (done-заявки)</span><strong>{fmt(totalRevenue)} ₸</strong></div>
-                    <div className="kd-row total"><span>Общий ROI</span><strong style={{ color: totalSpent > 0 && totalRevenue / totalSpent >= 10 ? "#0E7C66" : "#B4650B" }}>{totalSpent > 0 ? (totalRevenue / totalSpent).toFixed(1) + "×" : "—"}</strong></div>
-                    <div className="kd-muted" style={{ marginTop: 8 }}>Ориентир: каждый 1 ₸ рекламы должен вернуть ≥10 ₸ выручки.</div>
-                  </div>
-
-                  {/* Каналы */}
-                  <div className="kd-list">
-                    {mktChannels.length === 0 && <div className="kd-empty">Каналов нет. Добавь через «+ Канал».</div>}
-                    {mktChannels.map((ch) => {
-                      const spent = spentThisMonth(ch.id);
-                      const plan = Number(ch.monthly_plan) || 0;
-                      const rev = revenueBySource(ch.source_key);
-                      const roi = spent > 0 ? rev / spent : null;
-                      const filled = plan > 0 ? Math.min(100, Math.round(spent / plan * 100)) : 0;
-                      const topups = topupsThisMonth(ch.id);
-                      return (
-                        <div key={ch.id} className="kd-card">
-                          <div className="kd-card-head">
-                            <div className="kd-pest">{ch.name}{ch.is_fixed && <span className="kd-brandtag" style={{ marginLeft: 8 }}>фикс</span>}</div>
-                            <span className="kd-badge" style={{ color: filled >= 100 ? "#0E7C66" : "#B4650B", background: filled >= 100 ? "#E4F3EE" : "#FBEDD9" }}>{filled}% плана</span>
-                          </div>
-                          <div className="kd-mktbar"><div className="kd-mktbarfill" style={{ width: `${filled}%` }} /></div>
-                          <div className="kd-tenderfin">
-                            <div><span className="kd-muted">План/мес</span><strong>{fmt(plan)} ₸</strong></div>
-                            <div><span className="kd-muted">Пополнено</span><strong>{fmt(spent)} ₸</strong></div>
-                            {ch.source_key && <div><span className="kd-muted">Выручка ({ch.source_key})</span><strong>{fmt(rev)} ₸</strong></div>}
-                            {ch.source_key && <div><span className="kd-muted">ROI</span><strong style={{ color: roi != null && roi >= 10 ? "#0E7C66" : roi != null ? "#B42318" : "var(--muted)" }}>{roi != null ? roi.toFixed(1) + "×" : "—"}</strong></div>}
-                          </div>
-                          {topups.length > 0 && (
-                            <div className="kd-returns" style={{ marginTop: 8 }}>
-                              {topups.map((t) => (
-                                <div key={t.id} className="kd-returnrow">
-                                  <span>✓ {fmt(t.amount)} ₸ · {isoToRu(t.topup_date)}{t.account_id ? " · " + (accountById(t.account_id)?.name || "") : ""}</span>
-                                  <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить пополнение ${fmt(t.amount)} ₸?`, () => removeMktTopup(t))}><X size={12} /></button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          <div className="kd-actions">
-                            <button className="kd-btn primary sm" onClick={() => setModal({ kind: "mktTopup", channel: ch })}><Plus size={13} />Пополнил</button>
-                            <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "mktChannel", item: ch })}><Pencil size={13} />Изменить</button>
-                            <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить канал «${ch.name}»? Пополнения и связанные расходы по счетам тоже удалятся.`, () => removeMktChannel(ch))}><Trash2 size={13} /></button>
-                          </div>
-                          {!ch.source_key && <div className="kd-muted" style={{ marginTop: 6 }}>ROI не считается — не привязан источник. Укажи его в «Изменить», чтобы видеть отдачу.</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              );
-            })()}
+            {opexView === "marketing" && <MarketingMonthReport
+              jobs={jobs}
+              channels={mktChannels}
+              topups={mktTopups}
+              settings={settings}
+              monthOffset={marketingMonthOffset}
+              onMonthOffsetChange={setMarketingMonthOffset}
+              onAddChannel={() => setModal({ kind: "mktChannel" })}
+              onEditChannel={(channel) => setModal({ kind: "mktChannel", item: channel })}
+              onRemoveChannel={(channel) => askConfirm(`Удалить канал «${channel.name}»? Пополнения и связанные расходы по счетам тоже удалятся.`, () => removeMktChannel(channel))}
+              onAddTopup={(channel) => setModal({ kind: "mktTopup", channel })}
+              onRemoveTopup={(topup) => askConfirm(`Удалить пополнение ${fmt(topup.amount)} ₸?`, () => removeMktTopup(topup))}
+              accountName={(accountId) => accountById(accountId)?.name || ""}
+            />}
           </>
         )}
 
@@ -5858,7 +5806,7 @@ function Dashboard({ session, profile }) {
                   const isSelf = p.id === session.user.id;
                   return <div className={`kd-user-row ${p.is_active === false ? "inactive" : ""}`} key={p.id}>
                     <div className="kd-tech-avatar">{(p.full_name || authUser.email || "?").slice(0, 1).toUpperCase()}</div>
-                    <div className="kd-user-main"><strong>{p.full_name || "Без имени"}</strong><span>{authUser.email || "Почта загружается…"}{p.phone ? ` · ${p.phone}` : ""}</span></div>
+                    <div className="kd-user-main"><strong>{p.full_name || "Без имени"}</strong><span>{employeePosition(p)}{p.hired_on ? ` · принят ${isoToRu(p.hired_on)}` : " · дата приёма не указана"}</span><span>{authUser.email || "Почта загружается…"}{p.phone ? ` · ${p.phone}` : ""}</span></div>
                     <span className="kd-role-badge" style={{ color: roleInfo.color, borderColor: `${roleInfo.color}55`, background: `${roleInfo.color}12` }}>{roleInfo.label}</span>
                     <span className={`kd-access-status ${p.is_active === false ? "off" : "on"}`}>{p.is_active === false ? "Отключён" : "Активен"}</span>
                     <div className="kd-actions">
@@ -5962,7 +5910,7 @@ function Dashboard({ session, profile }) {
                   <details className="kd-more" key={p.id}>
                     <summary>
                       {p.full_name || "Без имени"}
-                      {hist.hired ? ` · с ${isoToRu(hist.hired)}` : " · дата приёма не указана"}
+                      {(p.hired_on || hist.hired) ? ` · с ${isoToRu(p.hired_on || hist.hired)}` : " · дата приёма не указана"}
                       {hist.lastSalary ? ` · оклад ${fmt(hist.lastSalary.amount)} ₸ с ${isoToRu(hist.lastSalary.happened_on)}` : ""}
                       {` · записей ${hist.rows.length}`}
                     </summary>
