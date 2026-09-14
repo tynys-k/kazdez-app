@@ -79,14 +79,16 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
   const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
   const mapUrl = yandexMapUrl(job.address);
   const whatsappUrl = roleWhatsappUrl(job, isAdmin);
+  const rowAmount = job.report_paid ?? job.price_options?.[0]?.amount;
+  const rowAssignee = assignedName || executorName || "Не назначен";
   if (compact) return (
-    <button type="button" className="kd-done-row" onClick={onExpand} aria-label={`Открыть заявку ${job.id}`}>
-      <span className="kd-done-address">{addressPlain(job.address) || "Адрес не указан"}</span>
-      <span data-label="Дата">{isoToRu(job.scheduled_date) || "—"}</span>
-      <span data-label="Заявка">№ {String(job.order_id || job.id || "").slice(0, 8)}</span>
-      <strong data-label="Сумма">{fmt(job.report_paid)} ₸</strong>
-      <span data-label="Телефон">{job.client_phone || "—"}</span>
-      <span className="kd-brandtag">{brandLabel}</span>
+    <button type="button" className={`kd-done-row kd-job-row ${job.status === "done" ? "done" : "active"}`} onClick={onExpand} aria-label={`Открыть заявку: ${job.pest || "без названия"}, ${addressPlain(job.address) || "адрес не указан"}`}>
+      <span className="kd-job-row-main"><strong>{job.pest || "Заявка"}</strong><small>{addressPlain(job.address) || "Адрес не указан"}</small></span>
+      <span data-label="Дата">{isoToRu(job.scheduled_date) || "Без даты"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
+      <span data-label="Клиент">{job.client_phone || "Телефон не указан"}</span>
+      <span data-label="Исполнитель">{rowAssignee}</span>
+      <strong data-label="Сумма">{rowAmount != null ? `${fmt(rowAmount)} ₸` : "—"}</strong>
+      <span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>
       <ChevronRight size={17} className="kd-done-open" />
     </button>
   );
