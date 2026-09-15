@@ -39,9 +39,11 @@ import MarketingMonthReport from "./workflows/MarketingMonthReport";
 import { payrollCarryover } from "./workflows/payrollCarryoverModel";
 import { employeePosition, payrollEmployees } from "./workflows/employeeModel";
 import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus";
+import { Badge, DetailDrawer, ListRow, Pagination } from "./ui/primitives";
+import { formatDate, formatMoney, formatPhone } from "./ui/formatters";
 import { taskParticipant } from "./workflows/taskModel";
 import { qualityHistoryForPhone, qualityPendingJobs } from "./workflows/QualityHistory";
-import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
+import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatList, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 const MarketingPage = React.lazy(() => import("./MarketingPage"));
 
@@ -89,6 +91,21 @@ function yandexMapUrl(text) {
   return clean && clean !== "📍 точка на карте" ? `https://yandex.com/maps/?text=${encodeURIComponent(clean)}` : "https://yandex.com/maps/";
 }
 
+function ClientDirectoryList({ clients, jobs, contracts, followups, onOpen }) {
+  const pageSize = 25;
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(clients.length / pageSize));
+  useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
+  const visible = clients.slice((page - 1) * pageSize, page * pageSize);
+  return <><div className="ui-list">{visible.map((client) => {
+    const summary = clientSummary(client, jobs, contracts, followups);
+    return <ListRow key={client.id} title={client.name || formatPhone(client.phone)} meta={client.legal_name || (client.client_type === "company" ? "Организация" : "Физическое лицо")}
+      status={<Badge tone={summary.activeContracts ? "positive" : "neutral"}>{summary.activeContracts ? "Абонент" : "Клиент"}</Badge>}
+      aside={<><span>{formatMoney(summary.revenue)}</span><small>{summary.done} выполнено · {summary.jobs} заявок</small></>}
+      onClick={() => onOpen(client)}><span>{formatPhone(client.phone)}</span></ListRow>;
+  })}</div><Pagination page={page} pageSize={pageSize} total={clients.length} onPageChange={setPage} /></>;
+}
+
 const NL = String.fromCharCode(10);
 class AppErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { failed: false }; }
@@ -109,10 +126,8 @@ function AppContent() {
   const publicToken = searchParams.get("track");
   const showLogin = searchParams.has("login");
   useEffect(() => {
-    // Умолчание — тёмная: она и так у всех сейчас. Светлая включается сознательно
-    // в Настройках, иначе после появления темы вся команда получила бы новый вид
-    // приложения без предупреждения.
-    document.documentElement.setAttribute("data-theme", localStorage.getItem("kd-theme") || "dark");
+    // Новый эталон — светлый «Пульс компании»; явный выбор тёмной темы сохраняется.
+    document.documentElement.setAttribute("data-theme", localStorage.getItem("kd-theme") || "light");
   }, []);
   if (publicToken) return <PublicJobPage token={publicToken} />;
   const visitorPage = showLogin ? <Login /> : <React.Suspense fallback={<div className="kd-center">Загрузка…</div>}><MarketingPage /></React.Suspense>;
@@ -317,6 +332,8 @@ function Dashboard({ session, profile }) {
   const [leadOwnerFilter, setLeadOwnerFilter] = useState("");
   const [leadSourceFilter, setLeadSourceFilter] = useState("");
   const [leadClientTypeFilter, setLeadClientTypeFilter] = useState("");
+  const [leadPage, setLeadPage] = useState(1);
+  const [selectedLeadId, setSelectedLeadId] = useState(null);
   const [partnerSearch, setPartnerSearch] = useState("");
   const [teamRepFilter, setTeamRepFilter] = useState({ preset: "month" });
   const [mktChannels, setMktChannels] = useState([]);
@@ -328,6 +345,8 @@ function Dashboard({ session, profile }) {
   const [followups, setFollowups] = useState([]);
   const [qualityChecks, setQualityChecks] = useState([]);
   const [contracts, setContracts] = useState([]);
+  const [subscriptionPage, setSubscriptionPage] = useState(1);
+  const [selectedSubscriptionId, setSelectedSubscriptionId] = useState(null);
   const [clientEvents, setClientEvents] = useState([]);
   const [publicFeedback, setPublicFeedback] = useState([]);
   const [jobProofs, setJobProofs] = useState([]);
@@ -382,6 +401,8 @@ function Dashboard({ session, profile }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [sideOpen, setSideOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [activeJobPage, setActiveJobPage] = useState(1);
+  const [doneJobPage, setDoneJobPage] = useState(1);
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [doneSortDir, setDoneSortDir] = useState("desc");
@@ -2995,7 +3016,10 @@ function Dashboard({ session, profile }) {
   const statusMatched = statusFilter === "all" ? activeJobs : activeJobs.filter((j) => j.status === statusFilter);
   const filteredActive = statusMatched.filter(matchSearch).filter((j) => dateInFilter(j.scheduled_date, jobsDateFilter));
   const sorted = [...filteredActive].sort((a, b) => jobTime(a) - jobTime(b));
-  const groups = groupByDate(sorted);
+  const jobPageSize = 25;
+  const activePageCount = Math.max(1, Math.ceil(sorted.length / jobPageSize));
+  useEffect(() => { if (activeJobPage > activePageCount) setActiveJobPage(activePageCount); }, [activeJobPage, activePageCount]);
+  const groups = groupByDate(sorted.slice((activeJobPage - 1) * jobPageSize, activeJobPage * jobPageSize));
   const doneFiltered = doneJobs
     .filter(matchSearch)
     .filter((j) => dateInFilter(j.scheduled_date, doneDateFilter))
@@ -3011,7 +3035,12 @@ function Dashboard({ session, profile }) {
     const db = new Date(b.scheduled_date || b.reported_at || 0).getTime();
     return doneSortDir === "desc" ? db - da : da - db;
   });
-  const doneGroups = groupByDate(doneSorted);
+  const donePageCount = Math.max(1, Math.ceil(doneSorted.length / jobPageSize));
+  useEffect(() => { if (doneJobPage > donePageCount) setDoneJobPage(donePageCount); }, [doneJobPage, donePageCount]);
+  const doneGroups = groupByDate(doneSorted.slice((doneJobPage - 1) * jobPageSize, doneJobPage * jobPageSize));
+  const subscriptionPageCount = Math.max(1, Math.ceil(contracts.length / jobPageSize));
+  useEffect(() => { if (subscriptionPage > subscriptionPageCount) setSubscriptionPage(subscriptionPageCount); }, [subscriptionPage, subscriptionPageCount]);
+  const visibleSubscriptions = contracts.slice((subscriptionPage - 1) * jobPageSize, subscriptionPage * jobPageSize);
   const canceledFiltered = canceledJobs.filter((j) => dateInFilter(j.scheduled_date, canceledDateFilter));
   const myOpenTasks = tasks.filter((t) => taskParticipant(t, session.user.id) && t.status !== "done").length;
   const allOpenTasks = tasks.filter((t) => t.status !== "done").length;
@@ -3219,6 +3248,10 @@ function Dashboard({ session, profile }) {
     return !stage.is_final && !stage.is_lost && calc.leadNextActionState(lead).kind === leadQueueFilter;
   };
   const displayedLeadCount = filteredLeadList.filter(leadMatchesCurrentView).length;
+  const leadPageSize = 25;
+  const leadPageCount = Math.max(1, Math.ceil(displayedLeadCount / leadPageSize));
+  useEffect(() => { if (leadPage > leadPageCount) setLeadPage(leadPageCount); }, [leadPage, leadPageCount]);
+  const pagedLeadIds = new Set(filteredLeadList.filter(leadMatchesCurrentView).slice((leadPage - 1) * leadPageSize, leadPage * leadPageSize).map((lead) => lead.id));
   const totalLeadCount = leads.filter(leadMatchesCurrentView).length;
   const leadFiltersActive = !!(leadSearch || leadSort !== "newest" || leadFreshness !== "all"
     || leadOwnerFilter || leadSourceFilter || leadClientTypeFilter || leadStageFilter !== "all" || leadQueueFilter !== "all");
@@ -3876,6 +3909,7 @@ function Dashboard({ session, profile }) {
                   </div>
                 </div>
               ))}
+            <Pagination page={activeJobPage} pageSize={jobPageSize} total={sorted.length} onPageChange={(page) => { setExpandedActiveId(""); setActiveJobPage(page); }} />
           </>
         )}
 
@@ -4028,6 +4062,7 @@ function Dashboard({ session, profile }) {
                   </div>
                 </div>
               ))}
+            <Pagination page={doneJobPage} pageSize={jobPageSize} total={doneSorted.length} onPageChange={(page) => { setExpandedDoneId(""); setDoneJobPage(page); }} />
           </>
         )}
 
@@ -4219,18 +4254,26 @@ function Dashboard({ session, profile }) {
                 .filter((lead) => leadQueueFilter === "all"
                   ? leadStageFilter !== "all" || (!st.is_final && !st.is_lost)
                   : !st.is_final && !st.is_lost && calc.leadNextActionState(lead).kind === leadQueueFilter);
-              if (leadStageFilter === "all" && stageLeads.length === 0) return null;
+              const visibleStageLeads = stageLeads.filter((lead) => pagedLeadIds.has(lead.id));
+              if (!visibleStageLeads.length) return null;
               return (
                 <div key={st.id} className="kd-group">
                   <div className="kd-datehead"><span>{st.name}{st.is_lost ? " ✕" : ""}</span><span className="kd-datecount">{stageLeads.length}</span></div>
                   <div className="kd-list">
                     {stageLeads.length === 0 && <div className="kd-muted" style={{ padding: "2px 2px 8px" }}>Пусто</div>}
-                    {stageLeads.map((l) => {
+                    {visibleStageLeads.map((l) => {
                       const timeline = leadTimeline(l.id);
                       const latest = leadActivitySummary(timeline[0]);
                       const lastContact = timeline.find((event) => ["call", "whatsapp", "message", "meeting"].includes(event.kind));
                       const digits = String(l.phone || "").replace(/\D/g, "");
-                      return <div key={l.id} className="kd-card kd-leadcard">
+                      const nextAction = calc.leadNextActionState(l);
+                      return <React.Fragment key={l.id}>
+                        <ListRow title={l.name || formatPhone(l.phone)} meta={addressPlain(l.address) || l.source || "Адрес не указан"}
+                          status={<Badge tone={nextAction.kind === "overdue" ? "danger" : nextAction.kind === "today" ? "warning" : st.is_final ? "neutral" : "positive"}>{st.name}</Badge>}
+                          aside={<><span>{formatPhone(l.phone)}</span><small>{l.next_action_at ? fmtTs(l.next_action_at) : "Следующий шаг не задан"}</small></>}
+                          onClick={() => setSelectedLeadId(l.id)} />
+                        <DetailDrawer open={selectedLeadId === l.id} title={l.name || formatPhone(l.phone)} onClose={() => setSelectedLeadId(null)}>
+                        <div className="kd-card kd-leadcard">
                         <div className="kd-card-head">
                           <div className="kd-pest">{l.name || l.phone || "Без имени"}</div>
                           {(() => {
@@ -4285,12 +4328,15 @@ function Dashboard({ session, profile }) {
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "lead", lead: l })}><Pencil size={13} /></button>
                           <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить клиента «${l.name || l.phone || "?"}» из воронки?`, () => removeLead(l))}><Trash2 size={13} /></button>
                         </div>
-                      </div>;
+                      </div>
+                        </DetailDrawer>
+                      </React.Fragment>;
                     })}
                   </div>
                 </div>
               );
             })}
+            <Pagination page={leadPage} pageSize={leadPageSize} total={displayedLeadCount} onPageChange={(page) => { setSelectedLeadId(null); setLeadPage(page); }} />
           </div>
         )}
 
@@ -4456,18 +4502,10 @@ function Dashboard({ session, profile }) {
         )}
 
         {!loading && tab === "repeats" && (
-          <div className="kd-list">
-            {jobs.filter((j) => j.repeat_state === "on_repeat").length === 0 &&
-              <div className="kd-empty">На повторе пока никого нет. Выполненную заявку можно отправить сюда кнопкой «На повтор».</div>}
-            {jobs.filter((j) => j.repeat_state === "on_repeat")
-              .sort((a, b) => new Date(a.repeat_since || 0) - new Date(b.repeat_since || 0))
-              .map((j) => (
-                <RepeatCard key={j.id} job={j} onSaveNote={saveRepeatNote} onCreate={createRepeatJob}
-                  onFinish={(job) => askConfirm(`Завершить повтор по заявке «${job.pest} · ${job.address}»? Клиент отказался от повторной обработки. Заявка вернётся в «Выполненные».`, () => finishRepeat(job), { danger: false, confirmLabel: "Да, завершить" })}
-                  onUnset={(job) => askConfirm(`Убрать заявку «${job.pest} · ${job.address}» с повтора и вернуть в «Выполненные»?`, () => unsetRepeat(job), { danger: false, confirmLabel: "Да, убрать" })}
-                  repeatHint={j.brand === "partner" && partnerById(j.partner_id) ? `Повтор у партнёра ${partnerById(j.partner_id).name}: ${repeatLabel(partnerById(j.partner_id).repeat_policy)}` : "Повтор: 50% от первичной (стандарт)"} />
-              ))}
-          </div>
+          <RepeatList jobs={jobs.filter((j) => j.repeat_state === "on_repeat")} onSaveNote={saveRepeatNote} onCreate={createRepeatJob}
+            onFinish={(job) => askConfirm(`Завершить повтор по заявке «${job.pest} · ${job.address}»? Клиент отказался от повторной обработки. Заявка вернётся в «Выполненные».`, () => finishRepeat(job), { danger: false, confirmLabel: "Да, завершить" })}
+            onUnset={(job) => askConfirm(`Убрать заявку «${job.pest} · ${job.address}» с повтора и вернуть в «Выполненные»?`, () => unsetRepeat(job), { danger: false, confirmLabel: "Да, убрать" })}
+            repeatHintOf={(j) => j.brand === "partner" && partnerById(j.partner_id) ? `Повтор у партнёра ${partnerById(j.partner_id).name}: ${repeatLabel(partnerById(j.partner_id).repeat_policy)}` : "Повтор: 50% от первичной (стандарт)"} />
         )}
 
         {!loading && tab === "growth" && (
@@ -4707,18 +4745,7 @@ function Dashboard({ session, profile }) {
             {isAdmin && <RegularClientRule value={settings.regular_client_threshold} onSave={(value) => saveAppSetting("regular_client_threshold", value)} />}
             <div className="kd-client-directory-head"><div><div className="kd-title">Клиентская база</div><div className="kd-muted">Контакты, объекты, обращения, заявки, договоры и файлы в одной карточке.</div></div><div className="kd-searchbar"><Search size={16} className="kd-search-icon"/><input className="kd-search" value={clientSearch} onChange={(e)=>setClientSearch(e.target.value)} placeholder="Имя, телефон, БИН, адрес…"/>{clientSearch && <button className="kd-x" onClick={()=>setClientSearch("")}><X size={15}/></button>}</div></div>
             {directoryClients.length === 0 && <div className="kd-empty">{clients.length ? "По этому запросу клиентов нет." : "Клиентские карточки появятся из заявок или по кнопке «+ Клиент»."}</div>}
-            <div className="kd-client-directory-grid">{directoryClients.map((client) => {
-              const summary = clientSummary(client, jobs, contracts, followups);
-              const addresses = collectClientAddresses(client, clientAddresses, jobs);
-              const contactCount = clientContacts.filter((row)=>String(row.client_id)===String(client.id)).length + 1;
-              return <button className="kd-card kd-client-directory-card" key={client.id} onClick={()=>openClientCard(client)}>
-                <div className="kd-card-head"><div><div className="kd-pest">{client.name || client.phone || "Без имени"}</div><div className="kd-muted">{client.legal_name || (client.client_type === "company" ? "Организация" : "Физическое лицо")}</div></div><span className="kd-badge" style={{color:summary.activeContracts?"#0E7C66":"#6E7871",background:summary.activeContracts?"#E4F3EE":"#F0F0EE"}}>{summary.activeContracts ? "абонент" : "клиент"}</span></div>
-                <ClientStatusBadges client={client} jobs={jobs} threshold={settings.regular_client_threshold} />
-                <div className="kd-client-directory-contact"><Phone size={14}/><span>{client.phone || "Телефон не указан"}</span>{client.email && <><Mail size={14}/><span>{client.email}</span></>}</div>
-                <div className="kd-row"><span>Адреса и объекты</span><strong>{addresses.length}</strong></div><div className="kd-row"><span>Контактные лица</span><strong>{contactCount}</strong></div><div className="kd-row"><span>История заявок</span><strong>{summary.done} выполнено · {summary.jobs} всего</strong></div><div className="kd-row total"><span>LTV клиента</span><strong>{fmt(summary.revenue)} ₸</strong></div>
-                <div className="kd-client-directory-open">Открыть полную карточку <ArrowRight size={14}/></div>
-              </button>;
-            })}</div>
+            <ClientDirectoryList clients={directoryClients} jobs={jobs} contracts={contracts} followups={followups} onOpen={openClientCard} />
           </div>
         )}
 
@@ -4732,11 +4759,17 @@ function Dashboard({ session, profile }) {
               <div className="kd-kpicard"><span>Неактивных</span><strong>{contracts.length - activeContracts.length}</strong><small>приостановленные договоры</small></div>
             </div>
             {contracts.length === 0 && <div className="kd-empty">Абонентских договоров нет. Добавь первый договор кнопкой «+ Абонент».</div>}
-            <div className="kd-contractgrid">{contracts.map((c) => {
+            <div className="ui-list">{visibleSubscriptions.map((c) => {
               const history = contractHistorySummary(c, jobs, todayIso);
               const due = history.dueWithoutJob || history.overdue > 0;
-              return <div className={`kd-card kd-subscription-card ${due ? "low" : ""}`} key={c.id}>
-                <div className="kd-card-head"><div className="kd-pest">{c.client_name}</div><span className="kd-badge" style={{ color: c.active !== false ? "#0E7C66" : "#6E7871", background: c.active !== false ? "#E4F3EE" : "#F0F0EE" }}>{c.active !== false ? "активен" : "пауза"}</span></div>
+              return <React.Fragment key={c.id}>
+                <ListRow title={c.client_name || "Абонент"} meta={addressPlain(c.address) || c.service || "Адрес не указан"}
+                  status={<Badge tone={c.active === false ? "neutral" : due ? "warning" : "positive"}>{c.active === false ? "Пауза" : due ? "Пора создать заявку" : "Активен"}</Badge>}
+                  aside={<><span>{formatMoney(c.price)}</span><small>{subscriptionIntervalLabel(c.interval_days)} · {formatDate(c.next_service_date)}</small></>}
+                  onClick={() => setSelectedSubscriptionId(c.id)} />
+                <DetailDrawer open={selectedSubscriptionId === c.id} title={c.client_name || "Абонент"} onClose={() => setSelectedSubscriptionId(null)}>
+              <div className={`kd-card kd-subscription-card ${due ? "low" : ""}`}>
+                <div className="kd-card-head"><div className="kd-pest">{c.client_name}</div><Badge tone={c.active === false ? "neutral" : "positive"}>{c.active !== false ? "Активен" : "Пауза"}</Badge></div>
                 <div className="kd-addr">{c.address}</div>
                 <div className="kd-subscription-period"><Repeat2 size={15} /><span><strong>{subscriptionIntervalLabel(c.interval_days)}</strong><small>{c.service}</small></span></div>
                 <div className="kd-row"><span>Последний выезд</span><strong>{history.lastDone ? isoToRu(history.lastDone.scheduled_date) : "Ещё не было"}</strong></div>
@@ -4749,8 +4782,11 @@ function Dashboard({ session, profile }) {
                   <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "contract", contract: c })}><Pencil size={13} />Изменить</button>
                   <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить договор «${c.client_name}»?`, () => removeContract(c))}><Trash2 size={13} /></button>
                 </div>
-              </div>;
+              </div>
+                </DetailDrawer>
+              </React.Fragment>;
             })}</div>
+            <Pagination page={subscriptionPage} pageSize={jobPageSize} total={contracts.length} onPageChange={(page) => { setSelectedSubscriptionId(null); setSubscriptionPage(page); }} />
           </div>
         )}
 

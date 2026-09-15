@@ -4,6 +4,8 @@ import {
   CheckCircle2, Clock3, Copy, Cpu, Megaphone,
   Minus, Route, ShieldAlert, TrendingDown, TrendingUp, Users,
 } from "lucide-react";
+import { Button, Card, Hero, KpiCard, SegmentedControl } from "../ui/primitives";
+import { formatMoney } from "../ui/formatters";
 import "./executivePulse.css";
 
 const ROLE_LENSES = [
@@ -15,7 +17,7 @@ const ROLE_LENSES = [
   { id: "cto", label: "CTO", title: "Система", icon: Cpu },
 ];
 
-const money = (value) => `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Number(value) || 0)} ₸`;
+const money = formatMoney;
 const integer = (value) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Number(value) || 0);
 
 function Delta({ value }) {
@@ -25,16 +27,8 @@ function Delta({ value }) {
 }
 
 function MetricCard({ card, onNavigate }) {
-  const content = <>
-    <span className="ep-metric-label">{card.label}</span>
-    <strong className={card.tone || ""}>{card.format === "money" ? money(card.value) : card.format === "percent" ? `${integer(card.value)}%` : integer(card.value)}</strong>
-    {card.delta !== undefined ? <Delta value={card.delta} /> : <small>{card.detail}</small>}
-    {card.delta !== undefined && card.detail && <small>{card.detail}</small>}
-    {card.tab && <ArrowRight className="ep-metric-arrow" size={15} aria-hidden="true" />}
-  </>;
-  return card.tab
-    ? <button type="button" className="ep-metric" onClick={() => onNavigate(card.tab)}>{content}</button>
-    : <div className="ep-metric">{content}</div>;
+  const trend = card.delta !== undefined ? <Delta value={card.delta} /> : null;
+  return <KpiCard label={card.label} value={card.format === "money" ? money(card.value) : card.format === "percent" ? `${integer(card.value)}%` : integer(card.value)} trend={trend} description={card.detail} className={card.tone ? `ep-tone-${card.tone}` : ""} onClick={card.tab ? () => onNavigate(card.tab) : undefined} />;
 }
 
 function TrendChart({ rows }) {
@@ -57,7 +51,7 @@ function TrendChart({ rows }) {
 
 function OperationsPanel({ data, onNavigate }) {
   const completion = data.today.total ? Math.round(data.today.done / data.today.total * 100) : 0;
-  return <section className="ep-panel ep-operations">
+  return <Card className="ep-panel ep-operations">
     <header><div><span className="ep-kicker">Операции сегодня</span><h3>{data.today.total ? `${data.today.done} из ${data.today.total} выполнено` : "Выездов на сегодня нет"}</h3></div><button type="button" onClick={() => onNavigate("jobs")}>Все заявки <ArrowRight size={14} /></button></header>
     <div className="ep-progress"><i style={{ width: `${completion}%` }} /><span>{completion}%</span></div>
     <div className="ep-oper-grid">
@@ -72,11 +66,11 @@ function OperationsPanel({ data, onNavigate }) {
         <time>{job.time || "—"}</time><span><b>{job.title}</b><small>{job.address}</small></span><ArrowRight size={13} />
       </button>)}
     </div>}
-  </section>;
+  </Card>;
 }
 
 function ChannelPanel({ channels, onNavigate }) {
-  return <section className="ep-panel ep-channels">
+  return <Card className="ep-panel ep-channels">
     <header><div><span className="ep-kicker">CMO · текущий месяц</span><h3>Каналы привлечения</h3></div><button type="button" onClick={() => onNavigate("analytics")}>Аналитика <ArrowRight size={14} /></button></header>
     <div className="ep-channel-head"><span>Канал</span><span>Заявки</span><span>Выручка</span><span>ROMI*</span></div>
     <div className="ep-channel-list">
@@ -85,7 +79,7 @@ function ChannelPanel({ channels, onNavigate }) {
       </div>) : <p>За текущий месяц данных по каналам ещё нет.</p>}
     </div>
     <small>* Выручка ÷ рекламные расходы. «—» означает, что расход по каналу не зафиксирован.</small>
-  </section>;
+  </Card>;
 }
 
 export default function ExecutivePulse({ data, alerts, channels, onNavigate, onCopy }) {
@@ -137,42 +131,30 @@ export default function ExecutivePulse({ data, alerts, channels, onNavigate, onC
       : alerts.length ? `${alerts.length} контрольных точек требуют внимания` : "Критических отклонений по загруженным данным нет";
 
   return <div className="ep-dashboard">
-    <section className="ep-command">
-      <div className="ep-command-copy">
-        <span className="ep-live"><i /> Пульс компании · {data.dateLabel}</span>
-        <h2>{headline}</h2>
-        <p>Единый экран решений: деньги, клиенты, загрузка, команда и системные риски.</p>
-      </div>
-      <div className="ep-command-actions">
-        <span className={data.system.online ? "online" : "offline"}>{data.system.online ? "Данные в сети" : "Нет подключения"} · {data.system.freshness}</span>
-        <button type="button" onClick={onCopy}><Copy size={15} />Скопировать сводку</button>
-      </div>
-    </section>
+    <Hero eyebrow={`Пульс компании · ${data.dateLabel}`} title={headline} subtitle="Единый экран решений: деньги, клиенты, загрузка, команда и системные риски." action={<div className="ep-hero-action"><span className={data.system.online ? "online" : "offline"}>{data.system.online ? "Данные в сети" : "Нет подключения"} · {data.system.freshness}</span><Button variant="secondary" size="sm" onClick={onCopy}><Copy />Скопировать сводку</Button></div>} />
 
-    <nav className="ep-lenses" aria-label="Управленческий взгляд">
-      {ROLE_LENSES.map(({ id, label, title, icon: Icon }) => <button type="button" key={id} className={lens === id ? "active" : ""} onClick={() => setLens(id)} aria-pressed={lens === id}><Icon size={15} /><span><b>{label}</b><small>{title}</small></span></button>)}
-    </nav>
+    <SegmentedControl label="Управленческий взгляд" value={lens} onChange={setLens} options={ROLE_LENSES.map(({ id, label, title, icon: Icon }) => ({ value: id, label: <><Icon aria-hidden="true" /><span><b>{label}</b><small>{title}</small></span></> }))} className="ep-lenses" />
 
     <div className="ep-lens-title"><span>{currentLens.label}</span><h3>{currentLens.title}</h3><p>Показатели рассчитаны по фактам в системе, без вручную придуманных целей.</p></div>
     <section className="ep-metrics">{cards[lens].map((card) => <MetricCard key={card.label} card={card} onNavigate={onNavigate} />)}</section>
 
     <div className="ep-main-grid">
-      <section className="ep-panel ep-performance">
+      <Card className="ep-panel ep-performance">
         <header><div><span className="ep-kicker">CEO / CFO · 6 месяцев</span><h3>Выручка и полная прибыль</h3></div><button type="button" onClick={() => onNavigate("growth")}>Подробнее <ArrowRight size={14} /></button></header>
         <TrendChart rows={data.trend} />
         <div className="ep-performance-foot"><span>Полная прибыль учитывает прямые расходы, зарплату, маркетинг и постоянные затраты.</span></div>
-      </section>
+      </Card>
       <OperationsPanel data={data} onNavigate={onNavigate} />
     </div>
 
     <div className="ep-main-grid ep-lower-grid">
       <ChannelPanel channels={channels} onNavigate={onNavigate} />
-      <section className="ep-panel ep-alerts">
+      <Card className="ep-panel ep-alerts">
         <header><div><span className="ep-kicker">Центр решений</span><h3>Что требует внимания</h3></div><span className={critical.length ? "ep-alert-count danger" : "ep-alert-count"}>{alerts.length}</span></header>
         {alerts.length ? <div className="ep-alert-list">{alerts.slice(0, 7).map((alert) => <button type="button" key={alert.id} className={alert.tone} onClick={() => onNavigate(alert.tab)}><AlertTriangle size={15} /><span>{alert.label}</span><strong>{alert.value}</strong><ArrowRight size={14} /></button>)}</div>
           : <div className="ep-clear"><CheckCircle2 size={18} /><span><b>Очередь пуста</b><small>По загруженным данным критичных предупреждений нет.</small></span></div>}
         {alerts.length > 7 && <button type="button" className="ep-more-alerts" onClick={() => onNavigate(alerts[7].tab)}>Ещё {alerts.length - 7} контрольных точек <ArrowRight size={14} /></button>}
-      </section>
+      </Card>
     </div>
 
     {data.system.warnings > 0 && <div className="ep-data-note"><ShieldAlert size={17} /><span><b>Показатели могут быть неполными.</b> {data.system.warnings} разделов вернули предупреждение при последней загрузке.</span></div>}

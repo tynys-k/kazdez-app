@@ -1,6 +1,7 @@
 // KAZDEZ-USABILITY-YANDEX-2026-07-18
 import React, { useState } from "react";
 import { Calendar, ExternalLink } from "lucide-react";
+import { buildMapUrl } from "./ui/formatters";
 
 const fmt = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 const ml2l = (ml) => Math.round(((Number(ml) || 0) / 1000) * 100) / 100;
@@ -553,7 +554,10 @@ function timeRangeMin(t) {
 }
 // Адрес без ссылок (для компактных карточек): вырезаем URL, если остался пустой — метка карты
 function addressPlain(text) {
-  const s = String(text || "").replace(/https?:\/\/[^\s]+/g, "").replace(/\s{2,}/g, " ").trim().replace(/[,;·]+$/, "");
+  const s = String(text || "")
+    .replace(/https?:\/\/[^\s]+|https?%3A%2F%2F[^\s]+/gi, "")
+    .replace(/(?:Яндекс Карты|Google Maps)\s+(?:\d+%2F|%2F)[^\s]*/gi, "На карте")
+    .replace(/\s{2,}/g, " ").trim().replace(/[,;·]+$/, "");
   return s || (text ? "📍 точка на карте" : "");
 }
 function yandexMapUrl(text) {
@@ -587,11 +591,12 @@ function groupByDate(jobs) {
 }
 function AddressText({ text }) {
   if (!text) return null;
-  const urlMatch = String(text).match(/https?:\/\/[^\s]+/);
-  if (!urlMatch) return <>{text}</>;
-  const url = yandexMapUrl(text);
-  const before = text.slice(0, urlMatch.index).trim();
-  const after = text.slice(urlMatch.index + url.length).trim();
+  const raw = String(text);
+  const urlMatch = raw.match(/https?:\/\/[^\s]+|https?%3A%2F%2F[^\s]+/i);
+  if (!urlMatch) return <>{addressPlain(raw)}</>;
+  const before = addressPlain(raw.slice(0, urlMatch.index));
+  const after = addressPlain(raw.slice(urlMatch.index + urlMatch[0].length));
+  const url = buildMapUrl({ url: urlMatch[0], address: before || after }) || yandexMapUrl(raw);
   return (
     <>
       {before && <span>{before} </span>}

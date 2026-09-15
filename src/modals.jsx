@@ -17,6 +17,8 @@ import QualityHistory from "./workflows/QualityHistory";
 import JobObjectFields from "./workflows/JobObjectFields";
 import { ContractSummary } from "./workflows/ContractsRegister";
 import { objectPayload, objectDescription } from "./workflows/objectModel";
+import { Badge, Button, DetailDrawer, EmptyState, ListRow, Pagination, Textarea } from "./ui/primitives";
+import { formatDate, formatMoney, formatPhone } from "./ui/formatters";
 
 // Локальное описание этапов: совместимо с shared.jsx из предыдущей версии.
 const WORK_STAGE = {
@@ -81,18 +83,20 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
   const whatsappUrl = roleWhatsappUrl(job, isAdmin);
   const rowAmount = job.report_paid ?? job.price_options?.[0]?.amount;
   const rowAssignee = assignedName || executorName || "Не назначен";
-  if (compact) return (
+  const compactRow = (
     <button type="button" className={`kd-done-row kd-job-row ${job.status === "done" ? "done" : "active"}`} onClick={onExpand} aria-label={`Открыть заявку: ${job.pest || "без названия"}, ${addressPlain(job.address) || "адрес не указан"}`}>
       <span className="kd-job-row-main"><strong>{job.pest || "Заявка"}</strong><small>{addressPlain(job.address) || "Адрес не указан"}</small></span>
-      <span data-label="Дата">{isoToRu(job.scheduled_date) || "Без даты"}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
-      <span data-label="Клиент">{job.client_phone || "Телефон не указан"}</span>
+      <span data-label="Дата">{formatDate(job.scheduled_date)}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
+      <span data-label="Клиент">{formatPhone(job.client_phone)}</span>
       <span data-label="Исполнитель">{rowAssignee}</span>
-      <strong data-label="Сумма">{rowAmount != null ? `${fmt(rowAmount)} ₸` : "—"}</strong>
-      <span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>
+      <strong data-label="Сумма">{formatMoney(rowAmount)}</strong>
+      <Badge tone={stageKey === "canceled" ? "danger" : stageKey === "done" ? "positive" : stageKey === "assigned" ? "warning" : "neutral"}>{stage.short}</Badge>
       <ChevronRight size={17} className="kd-done-open" />
     </button>
   );
+  if (compact) return compactRow;
   return (
+    <>{compactRow}<DetailDrawer open title={job.pest || "Заявка"} onClose={onCollapse || (() => {})}>
     <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><div className="kd-cardbadges">{onCollapse && <button type="button" className="kd-btn ghost sm" onClick={onCollapse}>Свернуть</button>}<span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>{stageKey !== job.status && <span className="kd-badge subtle" style={{ color: st.color, background: st.bg }}>{st.label}</span>}</div></div>
       <div className="kd-meta">
@@ -207,35 +211,51 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
         </div>
       )}
     </div>
+    </DetailDrawer></>
   );
 }
 
 function RepeatCard({ job, onSaveNote, onCreate, onFinish, onUnset, repeatHint }) {
   const [note, setNote] = useState(job.repeat_note || "");
+  const [open, setOpen] = useState(false);
   const days = daysSince(job.repeat_since);
   const due = days >= 5;
   return (
-    <div className={`kd-card ${due ? "low" : ""}`}>
-      <div className="kd-card-head">
-        <div className="kd-pest">{job.pest}</div>
-        <span className="kd-badge" style={due ? { color: "#B42318", background: "#FCE6E4" } : { color: "#B45309", background: "#FCF1E2" }}>
-          {due ? "пора связаться" : `${days} дн. назад`}
-        </span>
-      </div>
-      <div className="kd-addr"><AddressText text={job.address} /></div>
-      <div className="kd-card-foot"><span className="kd-muted">Клиент: {job.client_phone}</span></div>
-      {repeatHint && <div className="kd-hint">💡 {repeatHint}</div>}
-      <Field label="Как прошёл созвон / заметка">
-        <textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Напр.: созвонился, согласен на субботу" />
-      </Field>
-      <div className="kd-actions">
-        <button className="kd-btn ghost sm" onClick={() => onSaveNote(job, note)}>Сохранить заметку</button>
-        <button className="kd-btn primary sm" onClick={() => onCreate(job)}>Создать повторную заявку</button>
-        <button className="kd-btn ghost danger sm" onClick={() => onFinish(job)}>Отказался — завершить</button>
-        <button className="kd-btn ghost sm" onClick={() => onUnset(job)}>Убрать с повтора</button>
-      </div>
-    </div>
+    <>
+      <ListRow
+        title={job.pest || "Повторный выезд"}
+        meta={addressPlain(job.address) || "Адрес не указан"}
+        status={<Badge tone={due ? "danger" : "warning"}>{due ? "Пора связаться" : `${days} дн. назад`}</Badge>}
+        aside={<><span>{formatPhone(job.client_phone)}</span><small>{formatDate(job.repeat_since)}</small></>}
+        onClick={() => setOpen(true)}
+        actions={<Button variant="ghost" size="sm" aria-label={`Открыть ${job.pest || "повтор"}`} onClick={() => setOpen(true)}><ChevronRight /></Button>}
+      />
+      <DetailDrawer open={open} title={job.pest || "Повторный выезд"} onClose={() => setOpen(false)} footer={<>
+        <Button variant="ghost" size="sm" onClick={() => onUnset(job)}>Убрать с повтора</Button>
+        <Button variant="danger" size="sm" onClick={() => onFinish(job)}>Клиент отказался</Button>
+        <Button variant="primary" size="sm" onClick={() => onCreate(job)}>Создать заявку</Button>
+      </>}>
+        <div className="kd-addr"><AddressText text={job.address} /></div>
+        <div className="ui-repeat-facts"><div><span>Клиент</span><a href={`tel:${String(job.client_phone || "").replace(/\D/g, "")}`}>{formatPhone(job.client_phone)}</a></div><div><span>На повторе с</span><strong>{formatDate(job.repeat_since)}</strong></div></div>
+        {repeatHint && <div className="kd-hint">{repeatHint}</div>}
+        <Field label="Как прошёл созвон / заметка">
+          <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Например: созвонился, согласен на субботу" />
+        </Field>
+        <Button variant="secondary" size="sm" onClick={() => onSaveNote(job, note)}>Сохранить заметку</Button>
+      </DetailDrawer>
+    </>
   );
+}
+
+function RepeatList({ jobs, onSaveNote, onCreate, onFinish, onUnset, repeatHintOf }) {
+  const pageSize = 25;
+  const [page, setPage] = useState(1);
+  const sorted = [...jobs].sort((a, b) => new Date(a.repeat_since || 0) - new Date(b.repeat_since || 0));
+  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
+  useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
+  if (!sorted.length) return <EmptyState title="На повторе пока никого нет" description="Выполненную заявку можно отправить сюда из её карточки." />;
+  const visible = sorted.slice((page - 1) * pageSize, page * pageSize);
+  return <><div className="ui-list">{visible.map((job) => <RepeatCard key={job.id} job={job} onSaveNote={onSaveNote} onCreate={onCreate} onFinish={onFinish} onUnset={onUnset} repeatHint={repeatHintOf?.(job)} />)}</div><Pagination page={page} pageSize={pageSize} total={sorted.length} onPageChange={setPage} /></>;
 }
 
 // ----------------------------- modals -----------------------------
@@ -4566,4 +4586,4 @@ function UserAccessModal({ user, onClose, onSave }) {
   );
 }
 
-export { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
+export { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSalePayModal, ChemSaleModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, TrainingModal, PlanModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, CatalogList, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, ExpenseModal, Field, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, ModalShell, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatCard, RepeatList, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, SettingsSection, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm };
