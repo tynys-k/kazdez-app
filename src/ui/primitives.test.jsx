@@ -31,4 +31,11 @@ describe("shared UI primitives", () => {
     await act(async () => container.querySelector('[aria-label="Закрыть"]').click());
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("keeps ordinary details on the right and centers only requested dialogs", async () => {
+    await act(async () => root.render(<DetailDrawer open title="Стандартная деталь" onClose={() => {}}>Текст</DetailDrawer>));
+    expect(container.querySelector(".ui-drawer--center")).toBeNull();
+    await act(async () => root.render(<DetailDrawer open placement="center" title="Карточка заявки" onClose={() => {}}>Текст</DetailDrawer>));
+    expect(container.querySelector(".ui-drawer--center")).not.toBeNull();
+  });
 });

@@ -215,7 +215,7 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
   // A drawer must never open without a way to close it. Older callers can still
   // render the regular card while their list is migrated to compact rows.
   if (!onCollapse) return detail;
-  return <>{compactRow}<DetailDrawer open title={job.pest || "Заявка"} onClose={onCollapse}>{detail}</DetailDrawer></>;
+  return <>{compactRow}<DetailDrawer open placement="center" title={job.pest || "Заявка"} onClose={onCollapse}>{detail}</DetailDrawer></>;
 }
 
 function RepeatCard({ job, onSaveNote, onCreate, onFinish, onUnset, repeatHint }) {

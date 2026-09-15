@@ -34,6 +34,8 @@ describe("canceled job detail", () => {
     await act(async () => container.querySelectorAll(".kd-job-row")[1].click());
     expect(container.querySelectorAll(".kd-job-row")).toHaveLength(3);
     expect(container.querySelectorAll(".ui-drawer-layer")).toHaveLength(1);
+    expect(container.querySelector(".ui-drawer-layer--center")).not.toBeNull();
+    expect(container.querySelector(".ui-drawer--center")).not.toBeNull();
     expect(container.querySelector('[role="dialog"]').textContent).toContain("Отменённая заявка 2");
 
     await act(async () => container.querySelector('[aria-label="Закрыть"]').click());
