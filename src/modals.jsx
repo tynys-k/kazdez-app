@@ -2893,7 +2893,7 @@ function SettingsSection({ title, subtitle, open, onToggle, children }) {
   );
 }
 
-function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], onSavePriceRow, onRemovePriceRow, accounts = [], tabOrder = [], leadStages = [], onAddLeadStage, onRemoveLeadStage, onMoveLeadStage, onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat }) {
+function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], onSavePriceRow, onRemovePriceRow, accounts = [], tabOrder = [], leadStages = [], onAddLeadStage, onRemoveLeadStage, onMoveLeadStage, onClose, onSaveSetting, onSetTheme, onAddSource, onRemoveSource, onAddPest, onRemovePest, onAddExpCat, onRemoveExpCat, onSetExpCatPurpose }) {
   const [newStage, setNewStage] = useState("");
   const [theme, setThemeLocal] = useState(localStorage.getItem("kd-theme") || "light");
   const [qrRate, setQrRate] = useState(settings.qr_fee_rate ?? 0.95);
@@ -3077,7 +3077,7 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
         </SettingsSection>
 
         <SettingsSection title="Категории расходов" subtitle={`${parents.length} категорий · для учёта в Финансах`} open={openSection === "expcats"} onToggle={() => toggle("expcats")}>
-          <div className="kd-muted" style={{ marginBottom: 10 }}>Категория → внутри неё подкатегории. Например: «Реклама» → OLX, Instagram, Google.</div>
+          <div className="kd-muted" style={{ marginBottom: 10 }}>Категория → внутри неё подкатегории. Отметьте затраты на развитие отдельно: доля таких расходов будет видна в финансовом анализе. Метка не означает, что вложение уже окупилось.</div>
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
             <input value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="Новая категория (напр.: Аренда)" style={inputStyle} />
             <button className="kd-btn primary sm" disabled={!newCat.trim()} onClick={() => { onAddExpCat(newCat, null); setNewCat(""); }}><Plus size={14} />Добавить</button>
@@ -3087,7 +3087,7 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
             <div key={cat.id} className="kd-catbox">
               <div className="kd-card-head" style={{ marginBottom: 8 }}>
                 <div className="kd-pest" style={{ fontSize: 15 }}>{cat.name}</div>
-                <button className="kd-btn ghost danger sm" onClick={() => onRemoveExpCat(cat)}><Trash2 size={13} /></button>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}><select aria-label={`Назначение категории ${cat.name}`} value={cat.purpose || "operations"} onChange={(e) => onSetExpCatPurpose(cat, e.target.value)}><option value="operations">Текущие</option><option value="growth">Развитие</option></select><button className="kd-btn ghost danger sm" onClick={() => onRemoveExpCat(cat)}><Trash2 size={13} /></button></div>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
                 {subsOf(cat.id).length === 0 && <span className="kd-muted">Без подкатегорий</span>}
@@ -3203,26 +3203,35 @@ function OpexModal({ opex, expCats, onClose, onSave }) {
   );
 }
 
-function MoveModal({ move, accounts, expCats, onClose, onSave }) {
-  const [direction, setDirection] = useState(move?.direction || "expense");
-  const [accountId, setAccountId] = useState(move?.account_id || (accounts[0]?.id || ""));
-  const [toAccountId, setToAccountId] = useState(move?.to_account_id || "");
+function MoveModal({ move, defaults, accounts, expCats, onClose, onSave }) {
+  const initial = move || defaults;
+  const [direction, setDirection] = useState(initial?.direction || "expense");
+  const [accountId, setAccountId] = useState(initial?.account_id || (accounts[0]?.id || ""));
+  const [toAccountId, setToAccountId] = useState(initial?.to_account_id || "");
   const [amount, setAmount] = useState(move?.amount ?? "");
   const [moveDate, setMoveDate] = useState(move?.move_date || new Date().toISOString().slice(0, 10));
   const [categoryId, setCategoryId] = useState(move?.category_id || "");
   const [subcategoryId, setSubcategoryId] = useState(move?.subcategory_id || "");
+  const [financeClass, setFinanceClass] = useState(move?.finance_class || "standard");
+  const [incomeChannel, setIncomeChannel] = useState(move?.income_channel || "");
   const [note, setNote] = useState(move?.note || "");
   const [saving, setSaving] = useState(false);
   const parents = (expCats || []).filter((c) => !c.parent_id);
   const subs = (expCats || []).filter((c) => c.parent_id === categoryId);
-  const ok = accountId && Number(amount) > 0 && (direction !== "transfer" || (toAccountId && toAccountId !== accountId));
+  const usedFinanceClass = direction === "expense" && accounts.find((a) => a.id === accountId)?.scope !== "owner" ? financeClass : "standard";
+  const ok = accountId && Number(amount) > 0 && (direction !== "transfer" || (toAccountId && toAccountId !== accountId))
+    && (usedFinanceClass !== "owner_direct_spend" || note.trim())
+    && (direction !== "income" || accounts.find((a) => a.id === accountId)?.scope === "owner" || incomeChannel);
   async function save() {
     setSaving(true);
     await onSave({
       direction, account_id: accountId, to_account_id: direction === "transfer" ? toAccountId : null,
       amount: Number(amount) || 0, move_date: moveDate || null,
-      category_id: direction === "expense" ? (categoryId || null) : null,
-      subcategory_id: direction === "expense" ? (subcategoryId || null) : null, note: note || null,
+      category_id: direction === "expense" && usedFinanceClass === "standard" ? (categoryId || null) : null,
+      subcategory_id: direction === "expense" && usedFinanceClass === "standard" ? (subcategoryId || null) : null,
+      finance_class: usedFinanceClass,
+      income_channel: direction === "income" && accounts.find((a) => a.id === accountId)?.scope !== "owner" ? incomeChannel : null,
+      note: note || null,
     }, move);
     setSaving(false);
   }
@@ -3236,19 +3245,23 @@ function MoveModal({ move, accounts, expCats, onClose, onSave }) {
         <button className={`kd-segbtn ${direction === "expense" ? "on" : ""}`} onClick={() => setDirection("expense")}>Расход</button>
         <button className={`kd-segbtn ${direction === "transfer" ? "on" : ""}`} onClick={() => setDirection("transfer")}>Перевод</button>
       </div>
+      {direction === "transfer" && <div className="kd-hint">Перевод Kaspi Pay → «Наличные» переносит деньги между счетами, но не является расходом. Перевод на личный счёт владельца показывается отдельно как изъятие, а не как затрата компании.</div>}
+      {direction === "expense" && accounts.find((a) => a.id === accountId)?.scope !== "owner" && <Field label="Чьи это расходы"><select value={financeClass} onChange={(e) => setFinanceClass(e.target.value)}><option value="standard">Расход компании</option><option value="owner_direct_spend">Личная трата владельца с бизнес-счёта</option></select></Field>}
+      {direction === "income" && accounts.find((a) => a.id === accountId)?.scope !== "owner" && <Field label="Канал дохода"><select value={incomeChannel} onChange={(e) => setIncomeChannel(e.target.value)}><option value="">— выбери —</option><option value="clients">Клиенты / заявки</option><option value="tenders">Тендеры</option><option value="products">Продажа препаратов</option><option value="other">Прочие поступления</option></select></Field>}
       <Field label={direction === "transfer" ? "Со счёта" : "Счёт"}><select value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
       {direction === "transfer" && <Field label="На счёт"><select value={toAccountId} onChange={(e) => setToAccountId(e.target.value)}><option value="">— выбери —</option>{accounts.filter((a) => a.id !== accountId).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>}
       <div className="kd-grid2">
         <Field label="Сумма (₸)"><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" placeholder="50000" /></Field>
         <Field label="Дата"><input type="date" value={moveDate} onChange={(e) => setMoveDate(e.target.value)} /></Field>
       </div>
-      {direction === "expense" && parents.length > 0 && (
+      {direction === "expense" && usedFinanceClass === "standard" && parents.length > 0 && (
         <>
           <Field label="Статья расхода"><select value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setSubcategoryId(""); }}><option value="">— без статьи —</option>{parents.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
           {subs.length > 0 && <Field label="Подстатья"><select value={subcategoryId} onChange={(e) => setSubcategoryId(e.target.value)}><option value="">— без подстатьи —</option>{subs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>}
         </>
       )}
       <Field label="Комментарий"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="за что / откуда / комментарий" /></Field>
+      {usedFinanceClass === "owner_direct_spend" && <div className="kd-hint">Сумма уйдёт из кассы компании, но в анализе будет «изъятие владельца + личная трата», не расход на бизнес.</div>}
     </ModalShell>
   );
 }
@@ -3256,11 +3269,12 @@ function MoveModal({ move, accounts, expCats, onClose, onSave }) {
 function AccountModal({ item, onClose, onSave, onRemove }) {
   const [name, setName] = useState(item?.name || "");
   const [kind, setKind] = useState(item?.kind || "bank");
+  const [scope, setScope] = useState(item?.scope || "business");
   const [openingBalance, setOpeningBalance] = useState(item?.opening_balance ?? "");
   const [openingDate, setOpeningDate] = useState(item?.opening_date || new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const ok = name.trim();
-  async function save() { setSaving(true); await onSave({ name: name.trim(), kind, opening_balance: Number(openingBalance) || 0, opening_date: openingDate || null }, item); setSaving(false); }
+  async function save() { setSaving(true); await onSave({ name: name.trim(), kind, scope, opening_balance: Number(openingBalance) || 0, opening_date: openingDate || null }, item); setSaving(false); }
   return (
     <ModalShell title={item ? "Счёт" : "Новый счёт"} onClose={onClose} footer={<>
       {item && <button className="kd-btn ghost danger" onClick={() => onRemove(item)} style={{ marginRight: "auto" }}>Удалить</button>}
@@ -3269,6 +3283,8 @@ function AccountModal({ item, onClose, onSave, onRemove }) {
     </>}>
       <Field label="Название счёта"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Напр.: Halyk Bank" /></Field>
       <Field label="Тип"><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="bank">Банковский счёт</option><option value="cash">Наличные</option><option value="other">Другое</option></select></Field>
+      <Field label="Чьи деньги"><select value={scope} onChange={(e) => setScope(e.target.value)}><option value="business">Компания</option><option value="owner">Личный счёт владельца</option></select></Field>
+      <div className="kd-hint">Личный счёт не входит в деньги компании. Перевод с бизнес-счёта на личный — изъятие владельца, не операционный расход.</div>
       <div className="kd-hint">Начальный остаток — сколько реально лежит на счёте на указанную дату. С неё система начнёт считать. Так баланс в приложении сойдётся с банком.</div>
       <div className="kd-grid2">
         <Field label="Начальный остаток (₸)"><input value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} inputMode="numeric" placeholder="0" /></Field>

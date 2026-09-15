@@ -7,6 +7,8 @@ import TaskBoard from "./TaskBoard";
 import ContractsRegister from "./ContractsRegister";
 import StockRegister from "../StockRegister";
 import JobObjectFields from "./JobObjectFields";
+import BankReconciliation from "./BankReconciliation";
+import FinanceAnalysis from "./FinanceAnalysis";
 import { JobCard } from "../modals";
 import "../styles.css";
 import "./workflows.css";
@@ -25,6 +27,11 @@ const previewJobs = [
   { id: "demo-job-1", pest: "Блохи", type: "Первичная", brand: "Sanitex", status: "new", work_stage: "assigned", scheduled_date: "2026-09-14", scheduled_time: "12:00", address: "9 мкр., д. 27, кв. 5", client_phone: "+7 777 125 8013", assigned_to: people[1].id, price_options: [{ amount: 17000 }], area: 44, note: "Блохи с подвала приходят, КСК не делает" },
   { id: "demo-job-2", pest: "Постельные клопы", type: "Первичная", brand: "KazDez", status: "new", work_stage: "assigned", scheduled_date: "2026-09-14", scheduled_time: "13:30", address: "ул. Абая, д. 18, кв. 42", client_phone: "+7 701 555 1212", assigned_to: people[1].id, price_options: [{ amount: 25000 }] },
 ];
+const previewAccounts = [{ id: "demo-kaspi", name: "Kaspi Pay", kind: "bank", scope: "business" }, { id: "demo-cash", name: "Наличные", kind: "cash", scope: "business" }, { id: "demo-owner", name: "Личный счёт", kind: "bank", scope: "owner" }];
+const previewMoney = [{ id: "demo-paid", account_id: "demo-kaspi", direction: "expense", amount: 140000, move_date: "2026-09-15", category_id: "demo-chem-cat", source: "manual", note: "Препараты для склада" }, { id: "demo-cash-transfer", account_id: "demo-kaspi", to_account_id: "demo-cash", direction: "transfer", amount: 25000, move_date: "2026-09-15", source: "manual", note: "Снял в кассу" }];
+const previewBankStatements = [{ id: "demo-statement", account_id: "demo-kaspi", bank_name: "Kaspi Pay", filename: "kaspi-15-sep.xlsx", period_from: "2026-09-15", period_to: "2026-09-15", imported_count: 3, duplicate_count: 0, closing_balance: 341000 }];
+const previewBankRows = [{ id: "demo-r1", statement_id: "demo-statement", account_id: "demo-kaspi", booked_on: "2026-09-15", direction: "expense", amount: 140000, description: "Покупка препаратов", fingerprint: "demo-a" }, { id: "demo-r2", statement_id: "demo-statement", account_id: "demo-kaspi", booked_on: "2026-09-15", direction: "expense", amount: 4000, description: "Списание Kaspi", fingerprint: "demo-b" }, { id: "demo-r3", statement_id: "demo-statement", account_id: "demo-kaspi", booked_on: "2026-09-15", direction: "expense", amount: 25000, description: "Снятие наличных", fingerprint: "demo-c" }];
+const previewCategories = [{ id: "demo-chem-cat", name: "Препараты", purpose: "operations" }, { id: "demo-growth-cat", name: "Развитие", purpose: "growth" }];
 const noop = () => {};
 function ResponsivePreview() {
   const [width, setWidth] = useState(320);
@@ -32,12 +39,14 @@ function ResponsivePreview() {
 }
 function Preview() {
   const [page, setPage] = useState("Задачи"), [tasks, setTasks] = useState(initialTasks), [selected, setSelected] = useState(null), [expandedJob, setExpandedJob] = useState(""), [form, setForm] = useState({ object_kind: "commercial", object_details: { measurement: "fumigation", volume_method: "dimensions", length_m: 5, width_m: 4, height_m: 3 } });
-  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Заявки", "Склад", "Договоры", "Тип объекта"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
+  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
     {page === "Задачи" && <TaskBoard tasks={tasks} people={people} userId={people[0].id} canManage onCreate={noop} onEdit={noop} onRemove={noop} onStatus={async (task, status) => { setTasks(tasks.map((t) => t.id === task.id ? { ...t, status } : t)); return true; }} />}
     {page === "Заявки" && <section><h2>Заявки</h2><p className="kd-muted">Нажмите на строку, чтобы увидеть детали и действия.</p><div className="kd-list">{previewJobs.map((job) => <JobCard key={job.id} job={job} compact={expandedJob !== job.id} onExpand={() => setExpandedJob(job.id)} onCollapse={() => setExpandedJob("")} isAdmin assignedName="Аян" onHistory={noop} onObject={noop} onProof={noop} onCopyPublicLink={noop} onReport={noop} onCancel={noop} onAssign={noop} onEdit={noop} onDelete={noop} />)}</div></section>}
     {page === "Склад" && <StockRegister warehouses={warehouses} warehouseMoves={moves} suppliers={suppliers} supplierOffers={offers} inventory={[chemical]} techs={people} techLedger={(id) => id === people[1].id ? [{ chem: chemical, received: 1000, consumed: 0, balance: 1000 }] : []} purchases={[]} handouts={[]} adjustments={[]} jobs={[]} sales={[]} equipment={[]} equipIssuedQty={() => 0} totalStockValue={102000} totalEquipValue={0} selectedId={chemical.id} onSelect={noop} canEditStock canManageTeam onStockIn={noop} onMovement={noop} onRemoveChem={noop} onAddEquipment={noop} onEditEquipment={noop} onRemoveEquipment={noop} techEquipment={() => []} onTransferEquipment={noop} onEquipStatus={noop} />}
     {page === "Договоры" && <ContractsRegister contracts={[{ id: "demo-contract", client_id: "demo-client", number: "Д-2026/15", signed_on: "2026-09-14", organization: "ТОО Тестовая организация", title: "Абонентское обслуживание", status: "active", amount: 180000 }]} clients={[{ id: "demo-client", name: "Тестовый клиент", phone: "+7 700 000 0000" }]} people={people} canEdit selectedId={selected} onSelect={setSelected} onReload={noop} onOpenClient={noop} />}
     {page === "Тип объекта" && <section className="kd-card"><h2>Параметры объекта</h2><JobObjectFields form={form} onChange={setForm} /></section>}
+    {page === "Выписки" && <BankReconciliation statements={previewBankStatements} transactions={previewBankRows} evidence={[]} accounts={previewAccounts} moves={previewMoney} manualExpenses={[]} categories={previewCategories} jobs={[]} qrAccountId="demo-kaspi" qrFeeRate={0.0095} accountBalanceAt={() => 341000} onReload={noop} />}
+    {page === "Финансы" && <FinanceAnalysis moves={previewMoney} accounts={previewAccounts} categories={previewCategories} bankRows={previewBankRows} evidence={[]} jobs={[]} manualExpenses={[]} />}
   </main>;
 }
 if (import.meta.env.DEV) {

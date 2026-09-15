@@ -1,0 +1,33 @@
+.bank-reconciliation{display:grid;gap:1rem;}
+.bank-reconciliation .kd-card{box-shadow:none;}
+.bank-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface);}
+.bank-metrics>div{display:flex;flex-direction:column;gap:.25rem;padding:1rem;border-right:1px solid var(--line);}
+.bank-metrics>div:last-child{border-right:0;}
+.bank-metrics span{font-size:.75rem;color:var(--muted);}
+.bank-metrics strong{font-size:1.15rem;color:var(--ink);font-variant-numeric:tabular-nums;}
+.bank-reconciliation form label{display:flex;flex-direction:column;gap:.4rem;font-size:.8rem;font-weight:700;color:var(--muted);}
+.bank-reconciliation form input:not([type="checkbox"]):not([type="file"]),.bank-reconciliation form select{width:100%;min-height:2.75rem;padding:.5rem .75rem;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);color:var(--ink);font:inherit;}
+.bank-reconciliation form input[type="file"]{padding:.5rem;border:1px dashed var(--line);border-radius:var(--radius-sm);width:100%;}
+.bank-reconciliation form input:focus-visible,.bank-reconciliation form select:focus-visible,.bank-reconciliation button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+.bank-formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem 1rem;margin:1rem 0;}
+.bank-import .kd-btn{margin-top:1rem;}
+.bank-preview{padding:1rem 0;border-top:1px solid var(--line);margin-top:1rem;}
+.bank-table-wrap{overflow-x:auto;max-width:100%;}
+.bank-table-wrap table{border-collapse:collapse;width:100%;min-width:560px;text-align:left;}
+.bank-table-wrap th,.bank-table-wrap td{padding:.65rem .75rem;border-bottom:1px solid var(--line);vertical-align:top;font-size:.85rem;}
+.bank-table-wrap th{font-size:.7rem;color:var(--muted);font-weight:700;white-space:nowrap;}
+.bank-table-wrap td small{display:block;color:var(--muted);font-size:.75rem;margin-top:.2rem;}
+.bank-amount{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700;}
+.bank-confirm{display:flex!important;flex-direction:row!important;align-items:center;gap:.5rem!important;font-size:.8rem;font-weight:600;color:var(--ink);}
+.bank-statement-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.5rem;}
+.bank-statement{display:flex;flex-direction:column;text-align:left;gap:.25rem;background:var(--surface-sunk);color:var(--ink);border:1px solid var(--line);border-radius:var(--radius-sm);padding:.75rem;cursor:pointer;font:inherit;}
+.bank-statement.selected{border-color:var(--primary);}
+.bank-statement small{color:var(--muted);overflow-wrap:anywhere;}
+.bank-statement span{font-size:.75rem;color:var(--muted);}
+.bank-section-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.75rem;}
+.bank-controls{border-top:1px solid var(--line);padding-top:.75rem;flex-wrap:wrap;}
+.bank-action{margin-top:1rem;padding:1rem;border:1px solid var(--line);border-radius:var(--radius-sm);display:grid;gap:.75rem;background:var(--surface-sunk);}
+.bank-action-tabs{width:fit-content;max-width:100%;}
+.bank-action .kd-btn{justify-self:start;}
+@media(max-width:760px){.bank-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}.bank-metrics>div:nth-child(2){border-right:0;}.bank-metrics>div:nth-child(-n+2){border-bottom:1px solid var(--line);}}
+@media(max-width:520px){.bank-formgrid{grid-template-columns:1fr;}.bank-section-head{align-items:flex-start;flex-direction:column;}.bank-metrics strong{font-size:1rem;}}
