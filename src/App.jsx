@@ -37,6 +37,8 @@ import ExecutivePulse from "./workflows/ExecutivePulse";
 import ReportPeriodBar from "./workflows/ReportPeriodBar";
 import MarketingMonthReport from "./workflows/MarketingMonthReport";
 import PersonalDebts from "./workflows/PersonalDebts";
+import BankReconciliation from "./workflows/BankReconciliation";
+import FinanceAnalysis from "./workflows/FinanceAnalysis";
 import { payrollCarryover } from "./workflows/payrollCarryoverModel";
 import { employeePosition, payrollEmployees } from "./workflows/employeeModel";
 import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus";
@@ -316,6 +318,9 @@ function Dashboard({ session, profile }) {
   const [moves, setMoves] = useState([]);
   const [personalDebts, setPersonalDebts] = useState([]);
   const [personalDebtEvents, setPersonalDebtEvents] = useState([]);
+  const [bankStatements, setBankStatements] = useState([]);
+  const [bankTransactions, setBankTransactions] = useState([]);
+  const [bankEvidence, setBankEvidence] = useState([]);
   const [tenders, setTenders] = useState([]);
   const [selectedTenderId, setSelectedTenderId] = useState(null);
   const [tenderPayments, setTenderPayments] = useState([]);
@@ -627,6 +632,9 @@ function Dashboard({ session, profile }) {
     { key: "money_moves", label: "Движение денег", run: () => fetchAllRows("money_moves", { column: "move_date", ascending: false }), set: setMoves },
     { key: "personal_debts", when: () => canManageCash, label: "Личные долги", run: () => fetchAllRows("personal_debts", { column: "created_at", ascending: false }), set: setPersonalDebts },
     { key: "personal_debt_events", when: () => canManageCash, label: "Операции по долгам", run: () => fetchAllRows("personal_debt_events", { column: "created_at", ascending: false }), set: setPersonalDebtEvents },
+    { key: "bank_statements", when: () => canManageCash, label: "Банковские выписки", run: () => fetchAllRows("bank_statements", { column: "created_at", ascending: false }), set: setBankStatements },
+    { key: "bank_transactions", when: () => canManageCash, label: "Операции выписок", run: () => fetchAllRows("bank_transactions", { column: "booked_on", ascending: false }), set: setBankTransactions },
+    { key: "bank_evidence", when: () => canManageCash, label: "Сверенные операции", run: () => fetchAllRows("bank_evidence", { column: "verified_at", ascending: false }), set: setBankEvidence },
     { key: "tender_deliveries", when: () => canAccess("tab.tenders") || canAccess("tab.stock"), label: "Препараты в тендерах", run: () => fetchAllRows("tender_deliveries", { column: "created_at", ascending: false }), set: setTenderDeliveries },
     { key: "tender_payments", when: () => canAccess("tab.tenders") || canAccess("tab.partners"), label: "Платежи тендеров", run: () => fetchAllRows("tender_payments", { column: "created_at", ascending: false }), set: setTenderPayments },
     { key: "tenders", label: "Тендеры", run: () => supabase.from("tenders").select("*").order("created_at", { ascending: false }), set: setTenders },
@@ -1984,6 +1992,12 @@ function Dashboard({ session, profile }) {
     await logAction("Категории расходов", `Удалено: ${item.name}`);
     load();
   }
+  async function setExpCatPurpose(item, purpose) {
+    const { error } = await supabase.rpc("set_expense_category_purpose", { p_category_id: item.id, p_purpose: purpose });
+    if (error) { showToast("Ошибка: " + error.message); return; }
+    await logAction("Категории расходов", `${item.name}: ${purpose === "growth" ? "развитие" : "текущие"}`);
+    load(["expense_categories"]);
+  }
   async function saveOpex(payload, existing) {
     if (blockedByClosedPeriod(payload.spent_date) || (existing && blockedByClosedPeriod(existing.spent_date))) return;
     const res = existing ? await supabase.from("opex").update(payload).eq("id", existing.id) : await supabase.from("opex").insert({ ...payload, created_by: session.user.id });
@@ -2826,13 +2840,15 @@ function Dashboard({ session, profile }) {
   });
   const qrAutoIncome = qrJobsForAuto.reduce((s, j) => s + (Number(j.report_qr) || 0), 0);
   const qrAutoFee = qrJobsForAuto.reduce((s, j) => s + (Number(j.report_qr) || 0) * qrFeeRate, 0);
-  const accountBalance = (accId) => {
+  const accountBalance = (accId, asOf = null) => {
     const acc = accountById(accId);
     const openDate = acc?.opening_date || null;
+    if (asOf && openDate && asOf < openDate) return null;
     // движения считаем начиная с даты начального остатка (или все, если дата не задана)
     const afterOpen = (d) => !openDate || (d || "") >= openDate;
     let bal = Number(acc?.opening_balance) || 0;
     moves.forEach((m) => {
+      if (asOf && m.move_date > asOf) return;
       if (m.direction === "income" && m.account_id === accId && afterOpen(m.move_date)) bal += Number(m.amount) || 0;
       if (m.direction === "expense" && m.account_id === accId && afterOpen(m.move_date)) bal -= Number(m.amount) || 0;
       if (m.direction === "transfer") {
@@ -2840,7 +2856,12 @@ function Dashboard({ session, profile }) {
         if (m.to_account_id === accId && afterOpen(m.move_date)) bal += Number(m.amount) || 0;
       }
     });
-    if (accId && accId === qrAccountId) bal += qrAutoIncome - qrAutoFee;
+    if (accId && accId === qrAccountId) {
+      if (asOf) {
+        const qrAt = qrJobsForAuto.filter((j) => j.scheduled_date <= asOf);
+        bal += qrAt.reduce((sum, j) => sum + (Number(j.report_qr) || 0) * (1 - qrFeeRate), 0);
+      } else bal += qrAutoIncome - qrAutoFee;
+    }
     return bal;
   };
   const opexInRangeList = opex.filter((o) => {
@@ -3094,7 +3115,7 @@ function Dashboard({ session, profile }) {
   const todayPlan = todayJobs.reduce((s, j) => s + Math.max(0, ...(j.price_options || []).map((p) => Number(p.amount) || 0)), 0);
   // Хватит ли денег. Сводим то, что уже известно: остатки счетов, наличные
   // у бригад, ожидаемые поступления и долг по зарплате.
-  const totalOnAccounts = accounts.reduce((s, a) => s + accountBalance(a.id), 0);
+  const totalOnAccounts = accounts.filter((a) => a.scope !== "owner").reduce((s, a) => s + accountBalance(a.id), 0);
   const totalInHands = techs.reduce((s, t) => s + techCashOnHand(t.id), 0);
   const forecast = calc.cashForecast({
     onAccounts: totalOnAccounts,
@@ -5534,11 +5555,20 @@ function Dashboard({ session, profile }) {
                 {aging.rows.length > 40 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны 40 из {aging.rows.length} — сначала самые старые.</div>}
               </div>
             )}
-            <div className="kd-seg" style={{ marginBottom: 14 }}>
+            <div className="kd-seg kd-finance-nav" style={{ marginBottom: 14 }}>
               <button className={`kd-segbtn ${opexView === "accounts" ? "on" : ""}`} onClick={() => setOpexView("accounts")}>Счета и движения</button>
+              <button className={`kd-segbtn ${opexView === "statements" ? "on" : ""}`} onClick={() => setOpexView("statements")}>Выписки и сверка</button>
+              <button className={`kd-segbtn ${opexView === "analysis" ? "on" : ""}`} onClick={() => setOpexView("analysis")}>Финансовый анализ</button>
               <button className={`kd-segbtn ${opexView === "debts" ? "on" : ""}`} onClick={() => setOpexView("debts")}>Долги и займы</button>
               <button className={`kd-segbtn ${opexView === "marketing" ? "on" : ""}`} onClick={() => setOpexView("marketing")}>Маркетинг</button>
             </div>
+
+            {opexView === "statements" && <BankReconciliation statements={bankStatements} transactions={bankTransactions} evidence={bankEvidence}
+              accounts={accounts} moves={moves} manualExpenses={opex} categories={expCats} jobs={jobs} qrAccountId={qrAccountId} qrFeeRate={qrFeeRate}
+              accountBalanceAt={accountBalance} onReload={() => load(["bank_statements", "bank_transactions", "bank_evidence", "money_moves", "accounts", "opex"])} />}
+
+            {opexView === "analysis" && <FinanceAnalysis moves={moves} accounts={accounts} categories={expCats}
+              bankRows={bankTransactions} evidence={bankEvidence} jobs={jobs} manualExpenses={opex} />}
 
             {opexView === "debts" && <PersonalDebts debts={personalDebts} events={personalDebtEvents} accounts={accounts}
               blockedByClosedPeriod={blockedByClosedPeriod}
@@ -5573,6 +5603,10 @@ function Dashboard({ session, profile }) {
               <div className="kd-title" style={{ fontSize: 18 }}>Финансы · счета</div>
               <div className="kd-tabactions">
                 <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "account" })}><Plus size={14} />Счёт</button>
+                {accounts.some((a) => a.kind === "cash" && a.scope !== "owner") && <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "move", defaults: {
+                  direction: "transfer", account_id: qrAccountId || accounts.find((a) => a.kind === "bank" && a.scope !== "owner")?.id || "",
+                  to_account_id: accounts.find((a) => a.kind === "cash" && a.scope !== "owner")?.id || "",
+                } })}><ArrowRightLeft size={14} />В кассу</button>}
                 <button className="kd-btn primary" onClick={() => setModal({ kind: "move" })}><Plus size={15} />Движение</button>
               </div>
             </div>
@@ -5588,6 +5622,7 @@ function Dashboard({ session, profile }) {
                   <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20, color: accountBalance(a.id) < 0 ? "#B3261E" : "var(--ink)" }}>{fmt(accountBalance(a.id))} ₸</div>
                   {(Number(a.opening_balance) > 0 || a.opening_date) && <div className="kd-muted" style={{ fontSize: 12, marginTop: 3 }}>старт: {fmt(Number(a.opening_balance) || 0)} ₸{a.opening_date ? ` с ${isoToRu(a.opening_date)}` : ""}</div>}
                   <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {a.scope === "owner" && <span className="kd-srctag">личный счёт · вне денег компании</span>}
                     {a.id === qrAccountId && <span className="kd-srctag">сюда падают QR</span>}
                     {a.id === cashDepositAccountId && <span className="kd-brandtag">сдача налички</span>}
                   </div>
@@ -5632,6 +5667,7 @@ function Dashboard({ session, profile }) {
                       const sign = isIncome ? "+ " : isExpense ? "− " : "";
                       const title = isTransfer ? `${accountById(m.account_id)?.name || "?"} → ${accountById(m.to_account_id)?.name || "?"}` : (accountById(m.account_id)?.name || "?");
                       const cat = m.category_id ? catName(m.category_id) + (m.subcategory_id ? " · " + catName(m.subcategory_id) : "") : "";
+                      const verified = bankEvidence.some((proof) => proof.move_id === m.id);
                       return (
                         <div key={m.id} className="kd-card">
                           <div className="kd-card-head">
@@ -5645,9 +5681,11 @@ function Dashboard({ session, profile }) {
                             <span>{isoToRu(m.move_date) || "без даты"}</span>
                             {cat && <><span>·</span><span className="kd-doctag">{cat}</span></>}
                             {m.source !== "manual" && <><span>·</span><span className="kd-muted">авто</span></>}
+                            {m.finance_class === "owner_direct_spend" && <><span>·</span><span className="kd-doctag">личная трата владельца</span></>}
+                            {verified && <><span>·</span><span className="kd-brandtag">подтверждено банком</span></>}
                           </div>
                           {m.note && <div className="kd-notebox">📝 {m.note}</div>}
-                          {m.source === "manual" && (
+                          {m.source === "manual" && !verified && (
                             <div className="kd-actions">
                               <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "move", move: m })}><Pencil size={13} />Изменить</button>
                               <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить движение на ${fmt(m.amount)} ₸?`, () => removeMove(m))}><Trash2 size={13} /></button>
@@ -6558,10 +6596,11 @@ function Dashboard({ session, profile }) {
           onRemovePest={(item) => removeCatalogItem("pest_types", item)}
           onAddExpCat={addExpCat}
           onRemoveExpCat={removeExpCat}
+          onSetExpCatPurpose={setExpCatPurpose}
         />
       )}
       {modal?.kind === "opex" && <OpexModal opex={modal.opex} expCats={expCats} onClose={() => setModal(null)} onSave={saveOpex} />}
-      {modal?.kind === "move" && <MoveModal move={modal.move} accounts={accounts} expCats={expCats} onClose={() => setModal(null)} onSave={saveMove} />}
+      {modal?.kind === "move" && <MoveModal move={modal.move} defaults={modal.defaults} accounts={accounts} expCats={expCats} onClose={() => setModal(null)} onSave={saveMove} />}
       {modal?.kind === "account" && <AccountModal item={modal.item} onClose={() => setModal(null)} onSave={saveAccount} onRemove={removeAccount} />}
       {modal?.kind === "confirmDeposit" && <ConfirmDepositModal dep={modal.dep} techName={techById(modal.dep.tech_id)?.full_name} accounts={accounts} defaultAccountId={cashDepositAccountId} onClose={() => setModal(null)} onConfirm={(accId, decidedOn) => decideDeposit(modal.dep, "confirmed", null, accId, decidedOn)} />}
       {modal?.kind === "deposit" && <DepositModal max={modal.max} onClose={() => setModal(null)} onSave={requestDeposit} />}

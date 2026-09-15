@@ -317,6 +317,8 @@ body{
 .kd-seg{display:inline-flex;background:var(--surface-sunk);border:1px solid var(--line);border-radius:var(--radius-sm);padding:3px;gap:2px;}
 .kd-segbtn{border:none;background:transparent;color:var(--muted);font:inherit;font-weight:700;font-size:13px;padding:7px 13px;border-radius:9px;cursor:pointer;min-height:36px;white-space:nowrap;transition:color .15s,background .15s;}
 .kd-segbtn.on{background:var(--surface-hi);color:var(--ink);box-shadow:var(--shadow-sm);}
+.kd-finance-nav{display:flex;max-width:100%;overflow-x:auto;scrollbar-width:thin;}
+.kd-finance-nav .kd-segbtn{flex:0 0 auto;}
 
 .kd-datefilter{margin-bottom:16px;}
 .kd-datechips{display:flex;flex-wrap:wrap;gap:7px;}
