@@ -1,0 +1,118 @@
+:root {
+  color-scheme: light;
+
+  /* Semantic colors: the only palette consumed by UI components. */
+  --bg: #f4f7f5;
+  --bg-2: #edf2ef;
+  --surface: #ffffff;
+  --surface-muted: #f0f5f2;
+  --surface-sunk: var(--surface-muted);
+  --surface-hi: #fbfcfb;
+  --border: rgba(15, 45, 32, 0.12);
+  --border-strong: rgba(15, 45, 32, 0.2);
+  --text: #102019;
+  --text-muted: #5f7067;
+  --text-subtle: #87958d;
+  --accent: #087a58;
+  --accent-hover: #066247;
+  --accent-contrast: #ffffff;
+  --hero-bg: #0a1812;
+  --hero-text: #f5fbf7;
+  --danger: #b42318;
+  --warning: #9a6208;
+  --positive: #087a58;
+  --info: #245f9e;
+  --violet: #6f52a2;
+  --wa: #128c4a;
+  --hero-eyebrow: #71ddb0;
+
+  /* Type scale. */
+  --font-family: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-numeric: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+  --fs-hero: clamp(1.75rem, 3vw, 2.375rem);
+  --fs-h1: 1.375rem;
+  --fs-h2: 1rem;
+  --fs-kpi: 1.75rem;
+  --fs-body: 0.875rem;
+  --fs-sm: 0.75rem;
+  --fs-label: 0.625rem;
+
+  /* Four-pixel spacing scale. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  --r-sm: 0.5rem;
+  --r-md: 0.75rem;
+  --r-lg: 1.125rem;
+  --shadow-card: 0 0.75rem 2rem -1.5rem rgba(15, 45, 32, 0.28);
+  --shadow-sm: var(--shadow-card);
+  --shadow-pop: var(--shadow-card);
+  --card-veil: rgba(255, 255, 255, 0.58);
+  --card-veil-hover: rgba(255, 255, 255, 0.24);
+  --sidebar: 16rem;
+  --content-max: 80rem;
+  --control-sm: 2rem;
+  --control-md: 2.5rem;
+  --row-min: 3.25rem;
+  --drawer-width: 31rem;
+
+  /* Compatibility aliases for the established kd-* surface. */
+  --ink: var(--text);
+  --ink-soft: var(--text-muted);
+  --muted: var(--text-muted);
+  --faint: var(--text-subtle);
+  --line: var(--border);
+  --line-soft: color-mix(in srgb, var(--border) 55%, transparent);
+  --line-hi: var(--border-strong);
+  --primary: var(--accent);
+  --primary-d: var(--accent-hover);
+  --accent-ink: var(--accent-contrast);
+  --rust: var(--danger);
+  --amber: var(--warning);
+  --blue: var(--info);
+  --radius-sm: var(--r-sm);
+  --radius: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --font-body: var(--font-family);
+  --font-display: var(--font-family);
+  --font-mono: var(--font-numeric);
+  --primary-tint: color-mix(in srgb, var(--accent) 10%, transparent);
+  --rust-tint: color-mix(in srgb, var(--danger) 9%, transparent);
+  --amber-tint: color-mix(in srgb, var(--warning) 10%, transparent);
+  --blue-tint: color-mix(in srgb, var(--info) 10%, transparent);
+  --violet-tint: color-mix(in srgb, var(--violet) 10%, transparent);
+  --em-glow: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #080d0a;
+  --bg-2: #0c120e;
+  --surface: #101712;
+  --surface-muted: #0c130f;
+  --surface-hi: #151d17;
+  --border: rgba(196, 226, 207, 0.1);
+  --border-strong: rgba(196, 226, 207, 0.18);
+  --text: #edf5ef;
+  --text-muted: #a3b1a8;
+  --text-subtle: #738078;
+  --accent: #42d7a0;
+  --accent-hover: #68e3b4;
+  --accent-contrast: #05150d;
+  --hero-bg: #07100b;
+  --hero-text: #f2faf5;
+  --danger: #ff8178;
+  --warning: #f3b85b;
+  --positive: #58dca9;
+  --info: #82b9f4;
+  --violet: #b79bf0;
+  --wa: #25d366;
+  --hero-eyebrow: #71ddb0;
+  --card-veil: rgba(9, 13, 11, 0.84);
+  --card-veil-hover: rgba(20, 27, 22, 0.8);
+  --shadow-card: 0 1rem 2.5rem -1.75rem rgba(0, 0, 0, 0.78);
+}
