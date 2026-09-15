@@ -36,6 +36,7 @@ import PayrollCarryoverModal, { PayrollCarryoverHistory } from "./workflows/Payr
 import ExecutivePulse from "./workflows/ExecutivePulse";
 import ReportPeriodBar from "./workflows/ReportPeriodBar";
 import MarketingMonthReport from "./workflows/MarketingMonthReport";
+import PersonalDebts from "./workflows/PersonalDebts";
 import { payrollCarryover } from "./workflows/payrollCarryoverModel";
 import { employeePosition, payrollEmployees } from "./workflows/employeeModel";
 import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus";
@@ -313,6 +314,8 @@ function Dashboard({ session, profile }) {
   function openLegalContract(contract) { setModal(null); setSelectedLegalId(contract.id); setTab("contracts"); }
   const [accounts, setAccounts] = useState([]);
   const [moves, setMoves] = useState([]);
+  const [personalDebts, setPersonalDebts] = useState([]);
+  const [personalDebtEvents, setPersonalDebtEvents] = useState([]);
   const [tenders, setTenders] = useState([]);
   const [selectedTenderId, setSelectedTenderId] = useState(null);
   const [tenderPayments, setTenderPayments] = useState([]);
@@ -622,6 +625,8 @@ function Dashboard({ session, profile }) {
     { key: "tasks", label: "Задачи", run: () => fetchAllRows("tasks", { column: "created_at", ascending: false }), set: setTasks },
     { key: "accounts", label: "Счета", run: () => supabase.from("accounts").select("*").order("sort"), set: setAccounts },
     { key: "money_moves", label: "Движение денег", run: () => fetchAllRows("money_moves", { column: "move_date", ascending: false }), set: setMoves },
+    { key: "personal_debts", when: () => canManageCash, label: "Личные долги", run: () => fetchAllRows("personal_debts", { column: "created_at", ascending: false }), set: setPersonalDebts },
+    { key: "personal_debt_events", when: () => canManageCash, label: "Операции по долгам", run: () => fetchAllRows("personal_debt_events", { column: "created_at", ascending: false }), set: setPersonalDebtEvents },
     { key: "tender_deliveries", when: () => canAccess("tab.tenders") || canAccess("tab.stock"), label: "Препараты в тендерах", run: () => fetchAllRows("tender_deliveries", { column: "created_at", ascending: false }), set: setTenderDeliveries },
     { key: "tender_payments", when: () => canAccess("tab.tenders") || canAccess("tab.partners"), label: "Платежи тендеров", run: () => fetchAllRows("tender_payments", { column: "created_at", ascending: false }), set: setTenderPayments },
     { key: "tenders", label: "Тендеры", run: () => supabase.from("tenders").select("*").order("created_at", { ascending: false }), set: setTenders },
@@ -5531,8 +5536,13 @@ function Dashboard({ session, profile }) {
             )}
             <div className="kd-seg" style={{ marginBottom: 14 }}>
               <button className={`kd-segbtn ${opexView === "accounts" ? "on" : ""}`} onClick={() => setOpexView("accounts")}>Счета и движения</button>
+              <button className={`kd-segbtn ${opexView === "debts" ? "on" : ""}`} onClick={() => setOpexView("debts")}>Долги и займы</button>
               <button className={`kd-segbtn ${opexView === "marketing" ? "on" : ""}`} onClick={() => setOpexView("marketing")}>Маркетинг</button>
             </div>
+
+            {opexView === "debts" && <PersonalDebts debts={personalDebts} events={personalDebtEvents} accounts={accounts}
+              blockedByClosedPeriod={blockedByClosedPeriod}
+              onReload={() => load(["personal_debts", "personal_debt_events", "money_moves"])} />}
 
             {opexView === "accounts" && (<>
             <div className="kd-card" style={{ marginBottom: 14 }}>
