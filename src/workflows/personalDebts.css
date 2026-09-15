@@ -1,0 +1,8 @@
+.personal-debts .kd-formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;}
+.personal-debts form label{display:flex;flex-direction:column;gap:6px;margin:8px 0;font-size:12px;font-weight:700;color:var(--muted);}
+.personal-debts form input,.personal-debts form select{width:100%;min-height:42px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);color:var(--ink);font:inherit;font-size:14px;}
+.personal-debts form input:focus-visible,.personal-debts form select:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+.personal-debts .kd-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:9px;}
+.personal-debts .kd-list .kd-card{box-shadow:none;}
+.personal-debts .kd-list .kd-card:hover{transform:none;}
+@media(max-width:680px){.personal-debts .kd-formgrid,.personal-debts .kd-list{grid-template-columns:1fr;}}
