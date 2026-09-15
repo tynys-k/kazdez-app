@@ -109,6 +109,7 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
         {Number(job.visit_no) > 1 && (<><span>·</span><span className="kd-repeattag">визит {job.visit_no}{VISIT_KINDS[job.visit_kind] ? ` · ${VISIT_KINDS[job.visit_kind].short}` : ""}</span></>)}
       </div>
       <PartnerOrigin name={visiblePartnerName} />
+      {job.status === "done" && <div className="kd-muted">Документы: акт работ · {Number(job.guarantee_months) > 0 ? `гарантийный талон после обработки № ${Number(job.guarantee_after_visit) || 2}, срок ${job.guarantee_months} мес.` : "без гарантии"}</div>}
       <div className="kd-addr"><AddressText text={job.address} /></div>
       {job.note && <div className="kd-notebox">📝 {job.note}</div>}
       <div className="kd-prices">
@@ -193,8 +194,8 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
         <details className="kd-more">
           <summary>Ещё</summary>
           <div className="kd-actions">
-            {job.status === "done" && job.type === "Первичная" && onAct && <button className="kd-btn ghost sm" onClick={onAct}>Акт</button>}
-            {job.status === "done" && job.type !== "Первичная" && onCert && <button className="kd-btn ghost sm" onClick={onCert}>Сертификат</button>}
+            {job.status === "done" && onAct && <button className="kd-btn ghost sm" onClick={onAct}>Акт работ</button>}
+            {job.status === "done" && Number(job.guarantee_months) > 0 && (Number(job.visit_no) || 1) === (Number(job.guarantee_after_visit) || 2) && onCert && <button className="kd-btn ghost sm" onClick={onCert}>Гарантийный талон</button>}
             {job.status === "done" && !job.repeat_state && <button className="kd-btn ghost sm" onClick={onRepeat}>На повтор</button>}
             {share > 0 && !job.partner_paid && onPayPartner && <button className="kd-btn ghost sm" onClick={onPayPartner}>Выплатить долю</button>}
             {job.partner_comp > 0 && !job.partner_comp_paid && onCompPaid && <button className="kd-btn ghost sm" onClick={onCompPaid}>Компенсация получена</button>}
@@ -376,14 +377,14 @@ function jobToForm(job) {
     address: job.address || "", floor: job.floor || "", area: job.area ?? "", source: job.source || "", pest: job.pest || "",
     p1label: po[0]?.label || "С запахом", p1amount: po[0]?.amount ?? "",
     p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
-    client_phone: job.client_phone || "+7 ", contact_name: job.contact_name || "", extra_contacts: Array.isArray(job.extra_contacts) ? job.extra_contacts : [], guarantee_months: job.guarantee_months ?? 6,
+    client_phone: job.client_phone || "+7 ", contact_name: job.contact_name || "", extra_contacts: Array.isArray(job.extra_contacts) ? job.extra_contacts : [], guarantee_months: job.guarantee_months ?? 6, guarantee_after_visit: job.guarantee_after_visit ?? 2, guarantee_terms: job.guarantee_terms || "",
     pricing_mode: job.pricing_mode || "quoted",
     brand: job.brand || "KazDez", partner_id: job.partner_id || "", partner_share: job.partner_share ?? "",
     note: job.note || "", assigned_to: job.assigned_to || "", executor_kind: job.executor_partner_id ? "partner" : "tech", executor_partner_id: job.executor_partner_id || "", executor_share_pct: job.executor_share_pct ?? "", joint_work: !!job.joint_work, joint_supplier: job.joint_supplier || "us", joint_cost_share: job.joint_cost_share ?? "", partner_comp: job.partner_comp ?? "",
   };
 }
 
-const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", pricing_mode: "quoted", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
+const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", pricing_mode: "quoted", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, guarantee_after_visit: 2, guarantee_terms: "", brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
 
 function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, findBlocked, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, onClose, onSave }) {
   const draftKey = newJobDraftStorageKey(draftOwnerId);
@@ -394,7 +395,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
   const draft = draftRef.current;
   const requestIdRef = useRef(initial ? null : (draft?.requestId || createFinancialRequestId()));
   const startingFormRaw = initial || draft?.form || emptyJobForm(defaultGuarantee);
-  const startingForm = { ...startingFormRaw, pest: canonicalPestName(startingFormRaw.pest), source: canonicalSourceName(startingFormRaw.source) };
+  const startingForm = { guarantee_after_visit: 2, ...startingFormRaw, pest: canonicalPestName(startingFormRaw.pest), source: canonicalSourceName(startingFormRaw.source) };
   const [f, setF] = useState(startingForm);
   const [formMode, setFormMode] = useState(initial ? "expanded" : (draft?.mode || "quick"));
   const [draftRestored, setDraftRestored] = useState(!!draft?.form);
@@ -423,7 +424,8 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
     : [];
   const latestClient = clientHistory[0];
   const activeGuarantee = clientHistory.find((j) => {
-    if (j.status !== "done" || !j.scheduled_date || !j.guarantee_months) return false;
+    if (j.status !== "done" || !j.scheduled_date || !j.guarantee_months
+      || (Number(j.visit_no) || 1) < (Number(j.guarantee_after_visit) || 2)) return false;
     const until = new Date(`${j.scheduled_date}T00:00:00`);
     until.setMonth(until.getMonth() + Number(j.guarantee_months || 0));
     return until.getTime() >= Date.now();
@@ -458,6 +460,11 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
 
   async function save() {
     if (savingRef.current || !ok) return;
+    if (String(f.guarantee_months).trim() === "" || !Number.isInteger(Number(f.guarantee_months)) || Number(f.guarantee_months) < 0 || Number(f.guarantee_months) > 120
+      || !Number.isInteger(Number(f.guarantee_after_visit)) || Number(f.guarantee_after_visit) < 1 || Number(f.guarantee_after_visit) > 10) {
+      setSaveError("Укажите срок гарантии от 0 до 120 месяцев и номер обработки от 1 до 10.");
+      return;
+    }
     let measurements;
     try { measurements = objectPayload(f); } catch (e) { setSaveError(e.message); return; }
     savingRef.current = true;
@@ -469,7 +476,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
       if (!isOnSiteEstimate && f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
       const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
       const isPartner = f.brand === "partner";
-      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: canonicalSourceName(f.source), pest: canonicalPestName(f.pest), price_options, pricing_mode: f.pricing_mode || "quoted", client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months) || 6, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
+      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: canonicalSourceName(f.source), pest: canonicalPestName(f.pest), price_options, pricing_mode: f.pricing_mode || "quoted", client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months), guarantee_after_visit: Number(f.guarantee_after_visit), guarantee_terms: f.guarantee_terms?.trim() || null, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
         executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
         executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
       if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
@@ -630,11 +637,13 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
         </div>
       ))}
       <button type="button" className="kd-btn ghost sm" style={{ marginBottom: 12 }} onClick={() => setF({ ...f, extra_contacts: [...(f.extra_contacts || []), { phone: "+7 ", role: "" }] })}><Plus size={13} />Доп. номер для связи</button>
-      <div className="kd-grid2">
-        <Field label="Гарантия (мес.)"><input value={f.guarantee_months} onChange={set("guarantee_months")} inputMode="numeric" /></Field>
-        <div />
-      </div>
       </>}
+      <div className="kd-grid2">
+        <Field label="Гарантия, месяцев (0 — без гарантии)"><input type="number" min="0" max="120" step="1" value={f.guarantee_months} onChange={set("guarantee_months")} /></Field>
+        <Field label="Гарантия начинается после обработки №"><select value={f.guarantee_after_visit ?? 2} onChange={set("guarantee_after_visit")}>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select></Field>
+      </div>
+      <div className="kd-muted">Для дератизации можно выбрать № 1; если согласован курс из двух обработок — № 2. Акт доступен после каждого выполненного выезда, гарантийный талон — начиная с выбранного номера.</div>
+      {Number(f.guarantee_months) > 0 && <Field label="Особые условия гарантии (необязательно)"><textarea className="kd-textarea" value={f.guarantee_terms || ""} onChange={set("guarantee_terms")} placeholder="Например: повторный выезд при сохранении признаков активности; условия доступа к объекту" /></Field>}
       <Field label="Примечание / комментарий (видно только команде, клиенту не идёт)">
         <textarea className="kd-textarea" value={f.note} onChange={set("note")} placeholder={isOnSiteEstimate ? "Напр.: клиенту сказали ориентировочно 10–20 тыс. ₸; точная цена после осмотра" : "Напр.: домофон не работает, звонить за 30 мин, есть собака"} />
       </Field>
@@ -1273,7 +1282,7 @@ function HistoryModal({ job, blockedInfo, onBlock, jobs, followups = [], quality
 
       {view === "overview" && <div className="kd-client360-overview">
         <div className="kd-client360-panel"><div className="kd-section">Следующее действие</div>{nextJob ? <><strong>{isoToRu(nextJob.scheduled_date) || "Дата уточняется"} · {nextJob.scheduled_time || "время уточняется"}</strong><span>{nextJob.type} · {nextJob.pest}</span></> : clientFollowups.find((f) => f.status !== "done") ? <><strong>Связаться {isoToRu(clientFollowups.find((f) => f.status !== "done").due_date)}</strong><span>{clientFollowups.find((f) => f.status !== "done").note || "Запланированное касание"}</span></> : <><strong>Не запланировано</strong><span>Создай касание, чтобы клиент не потерялся.</span></>}</div>
-        <div className="kd-client360-panel"><div className="kd-section">Последняя работа</div>{lastDone ? <><strong>{isoToRu(lastDone.scheduled_date)} · {lastDone.pest}</strong><span>{fmt(lastDone.report_paid)} ₸ · гарантия {lastDone.guarantee_months || 0} мес.</span></> : <><strong>Ещё не было</strong><span>Клиент пока без выполненных заявок.</span></>}</div>
+        <div className="kd-client360-panel"><div className="kd-section">Последняя работа</div>{lastDone ? <><strong>{isoToRu(lastDone.scheduled_date)} · {lastDone.pest}</strong><span>{fmt(lastDone.report_paid)} ₸ · {Number(lastDone.guarantee_months) > 0 ? ((Number(lastDone.visit_no) || 1) >= (Number(lastDone.guarantee_after_visit) || 2) ? `гарантия ${lastDone.guarantee_months} мес.` : `гарантия после обработки № ${Number(lastDone.guarantee_after_visit) || 2}`) : "без гарантии"}</span></> : <><strong>Ещё не было</strong><span>Клиент пока без выполненных заявок.</span></>}</div>
         <div className="kd-client360-note"><div className="kd-section">Внутренняя заметка</div><textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что важно знать при следующем контакте…" /><button className="kd-btn primary sm" disabled={!note.trim() || saving} onClick={saveNote}>{saving ? "Сохраняем…" : "Добавить в хронологию"}</button></div>
       </div>}
 
@@ -3127,12 +3136,6 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
           </div>
           <Field label="Адрес"><input defaultValue={settings.company_address ?? ""} onBlur={(e) => onSaveSetting("company_address", e.target.value.trim() || null)} placeholder="г. Алматы, ул. …, д. …" /></Field>
           <Field label="ФИО директора (для строки под подписью)"><input defaultValue={settings.company_director ?? ""} onBlur={(e) => onSaveSetting("company_director", e.target.value.trim() || null)} placeholder="Директор Тыныспаев К." /></Field>
-
-          <div className="kd-section" style={{ marginTop: 6 }}>Акт: срок второй обработки</div>
-          <div className="kd-grid2">
-            <Field label="Повтор через, дней (от)"><input defaultValue={settings.repeat_days_min ?? 5} inputMode="numeric" onBlur={(e) => onSaveSetting("repeat_days_min", Number(e.target.value) || 5)} /></Field>
-            <Field label="Повтор через, дней (до)"><input defaultValue={settings.repeat_days_max ?? 14} inputMode="numeric" onBlur={(e) => onSaveSetting("repeat_days_max", Number(e.target.value) || 14)} /></Field>
-          </div>
 
           <div className="kd-section" style={{ marginTop: 6 }}>Печать и подпись</div>
           <div className="kd-grid2">
