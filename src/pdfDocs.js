@@ -1,5 +1,5 @@
 // src/pdfDocs.js
-// Шаг 3: настоящий гарантийный сертификат с реквизитами компании из Настроек.
+// Документы используют согласованный по заказу номер начала гарантии.
 // (Печать и подпись добавим на следующем шаге.)
 // Библиотека уже стоит: pdfmake
 
@@ -22,16 +22,6 @@ function dateRu(iso) {
   return d && m && y ? `${d}.${m}.${y}` : iso;
 }
 
-// ── прибавить N дней к дате и вернуть в формате ДД.ММ.ГГГГ ──
-function addDays(iso, n) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d)) return "—";
-  d.setDate(d.getDate() + Number(n || 0));
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${dd}.${mm}.${d.getFullYear()}`;
-}
 
 // pdfmake supports PNG/JPEG data URLs. Old or manually edited settings may
 // contain an empty/truncated value; omit only that decoration instead of
@@ -58,9 +48,13 @@ function company(settings = {}) {
 }
 
 // ── макет гарантийного сертификата ──
-function certificateDef(job, c) {
-  const months = job.guarantee_months || 6;
-  const number = job.doc_number || `ГС-${new Date().getFullYear()}-00001`;
+export function certificateDef(job, c) {
+  const months = Number(job.guarantee_months);
+  if (!Number.isInteger(months) || months < 1 || months > 120
+    || (Number(job.visit_no) || 1) !== (Number(job.guarantee_after_visit) || 2)) {
+    throw new Error("Гарантийный талон доступен только после согласованной обработки при положительном сроке гарантии.");
+  }
+  const number = job.doc_number || `ГТ-${new Date().getFullYear()}-00001`;
   const date = dateRu(job.scheduled_date);
   const sy = 650; // вертикальное положение блока подписи/печати. Если стоят высоко/низко — меняй это одно число.
 
@@ -86,7 +80,7 @@ function certificateDef(job, c) {
             width: "auto",
             stack: [
               { text: "ГАРАНТИЙНЫЙ", bold: true, fontSize: 15, alignment: "right" },
-              { text: "СЕРТИФИКАТ", bold: true, fontSize: 15, alignment: "right" },
+              { text: "ТАЛОН", bold: true, fontSize: 15, alignment: "right" },
               { text: `№ ${number}`, alignment: "right", margin: [0, 6, 0, 0] },
               { text: `от ${date}`, alignment: "right", fontSize: 10, color: MUTED },
             ],
@@ -124,9 +118,11 @@ function certificateDef(job, c) {
       { text: "Условия гарантии", bold: true, margin: [0, 18, 0, 6] },
       {
         ul: [
-          `Гарантия действует ${months} месяцев с даты повторной (закрепляющей) обработки.`,
-          "При повторном появлении вредителей в гарантийный срок повторная обработка проводится бесплатно.",
-          "Гарантия сохраняется при соблюдении рекомендаций специалиста: доступ к объекту, отсутствие самостоятельных обработок, соблюдение чистоты.",
+          `Гарантия действует ${months} мес. с даты обработки № ${Number(job.visit_no) || 1} (${date}).`,
+          ...(job.guarantee_terms ? [job.guarantee_terms] : [
+            "Гарантийное обращение рассматривается после осмотра объекта и проверки соблюдения рекомендаций специалиста.",
+            "Условия повторного выезда согласуются с заказчиком с учётом вида услуги и результатов осмотра.",
+          ]),
         ],
         fontSize: 10,
         color: "#333",
@@ -153,16 +149,13 @@ function certificateDef(job, c) {
 // ── создать и скачать сертификат по заявке ──
 export function generateCertificate(job, settings) {
   const def = certificateDef(job, company(settings));
-  pdfMake.createPdf(def).download(`Сертификат-${job.doc_number || "тест"}.pdf`);
+  pdfMake.createPdf(def).download(`Гарантийный-талон-${job.doc_number || "работы"}.pdf`);
 }
 
-// ── макет АКТА о проведении дезинфекционных работ (для первичной обработки,
-//    когда гарантия появляется только после второй обработки) ──
-function actDef(job, c, minDays, maxDays) {
+// ── акт выполненных работ для любого завершённого выезда ──
+export function actDef(job, c) {
   const number = job.doc_number || `АКТ-${new Date().getFullYear()}-00001`;
   const date = dateRu(job.scheduled_date);
-  const fromDate = addDays(job.scheduled_date, minDays);
-  const toDate = addDays(job.scheduled_date, maxDays);
   const chems = job.chemicals && job.chemicals.length ? job.chemicals : null;
   const sy = 650;
 
@@ -186,8 +179,8 @@ function actDef(job, c, minDays, maxDays) {
           {
             width: "auto",
             stack: [
-              { text: "АКТ О ПРОВЕДЕНИИ", bold: true, fontSize: 14, alignment: "right" },
-              { text: "ДЕЗИНФЕКЦИОННЫХ РАБОТ", bold: true, fontSize: 14, alignment: "right" },
+              { text: "АКТ ВЫПОЛНЕННЫХ", bold: true, fontSize: 14, alignment: "right" },
+              { text: "РАБОТ", bold: true, fontSize: 14, alignment: "right" },
               { text: `№ ${number}`, alignment: "right", margin: [0, 6, 0, 0] },
               { text: `от ${date}`, alignment: "right", fontSize: 10, color: MUTED },
             ],
@@ -198,7 +191,7 @@ function actDef(job, c, minDays, maxDays) {
       { canvas: [{ type: "line", x1: 0, y1: 10, x2: 511, y2: 10, lineWidth: 1.4, lineColor: GREEN }], margin: [0, 8, 0, 16] },
 
       {
-        text: `Настоящим подтверждается, что специалистами ${c.name} проведена дезинфекционная обработка объекта Заказчика.`,
+        text: `Настоящим подтверждается, что специалистами ${c.name} выполнены работы по обработке объекта Заказчика.`,
         margin: [0, 0, 0, 14],
       },
 
@@ -225,8 +218,8 @@ function actDef(job, c, minDays, maxDays) {
         ? { ul: chems, fontSize: 10, color: "#333" }
         : { text: "Не указаны.", fontSize: 10, color: MUTED },
 
-      // блок про отложенную гарантию (выделен)
-      {
+      // Условие о следующем визите печатается только пока гарантия не началась.
+      ...((Number(job.guarantee_months) > 0 && (Number(job.visit_no) || 1) < (Number(job.guarantee_after_visit) || 2)) ? [{
         table: {
           widths: ["*"],
           body: [[
@@ -234,7 +227,7 @@ function actDef(job, c, minDays, maxDays) {
               stack: [
                 { text: "Гарантия", bold: true, color: GREEN, margin: [0, 0, 0, 4] },
                 {
-                  text: `Гарантия на выполненные работы предоставляется только после проведения второй (закрепляющей) обработки. Вторую обработку необходимо провести в срок от ${minDays} до ${maxDays} дней с даты первичной обработки — ориентировочно с ${fromDate} по ${toDate}.`,
+                  text: `По согласованному плану гарантия ${job.guarantee_months} мес. начинается после обработки № ${Number(job.guarantee_after_visit) || 2}. Дату следующей обработки необходимо согласовать с заказчиком.`,
                   fontSize: 10,
                 },
               ],
@@ -248,7 +241,7 @@ function actDef(job, c, minDays, maxDays) {
           fillColor: () => "#EAF4F0",
         },
         margin: [0, 14, 0, 0],
-      },
+      }] : []),
 
       // подпись и печать — те же позиции, что в сертификате
       { text: c.director, bold: true, absolutePosition: { x: 42, y: sy } },
@@ -269,9 +262,7 @@ function actDef(job, c, minDays, maxDays) {
 
 // ── создать и скачать акт по заявке ──
 export function generateAct(job, settings) {
-  const minDays = Number(settings?.repeat_days_min) || 5;
-  const maxDays = Number(settings?.repeat_days_max) || 14;
-  const def = actDef(job, company(settings), minDays, maxDays);
+  const def = actDef(job, company(settings));
   pdfMake.createPdf(def).download(`Акт-${job.doc_number || "работы"}.pdf`);
 }
 
@@ -285,6 +276,8 @@ export function testPdf(settings) {
     scheduled_date: "2026-07-14",
     scheduled_time: "11:00",
     guarantee_months: settings?.default_guarantee_months || 6,
+    guarantee_after_visit: 1,
+    visit_no: 1,
     tech: "Тыныс",
   };
   generateCertificate(demoJob, settings);

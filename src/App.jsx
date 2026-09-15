@@ -1032,12 +1032,12 @@ function Dashboard({ session, profile }) {
   const techLedger = (techId) => calc.techLedger(techId, { handouts, jobs, inventoryAdjustments, chemicals });
   const techById = (id) => techs.find((t) => t.id === id);
   const pestGuideObj = (() => { try { return JSON.parse(settings.pest_guide || "{}"); } catch { return {}; } })();
-  // сделать гарантийный сертификат по заявке (реальные данные)
+  // Гарантийный талон оформляется после согласованного визита.
   async function certifyJob(job) {
     try {
       const [documentSettings, { generateCertificate }] = await Promise.all([loadCompanyImages(), loadPdfDocuments()]);
       const yr = new Date().getFullYear();
-      const num = `ГС-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
+      const num = `ГТ-${yr}-${(String(job.id).replace(/\D/g, "").slice(-6) || "000001")}`;
       generateCertificate({
         address: addressPlain(job.address),
         type: job.type,
@@ -1046,6 +1046,9 @@ function Dashboard({ session, profile }) {
         scheduled_date: job.scheduled_date,
         scheduled_time: job.scheduled_time,
         guarantee_months: job.guarantee_months,
+        guarantee_after_visit: job.guarantee_after_visit,
+        guarantee_terms: job.guarantee_terms,
+        visit_no: job.visit_no,
         tech: techById(job.assigned_to)?.full_name,
         client_phone: job.client_phone,
         contact_name: job.contact_name,
@@ -1053,10 +1056,10 @@ function Dashboard({ session, profile }) {
       }, documentSettings);
     } catch (error) {
       logClientError({ kind: "handled", place: "certifyJob", message: error?.message || String(error), stack: error?.stack });
-      showToast(documentFailureMessage(error, "Сертификат"));
+      showToast(documentFailureMessage(error, "Гарантийный талон"));
     }
   }
-  // сделать акт о проведении дезработ (для первичной обработки — гарантия после второй)
+  // Акт подтверждает фактические работы на любом завершённом визите.
   async function certifyAct(job) {
     try {
       const [documentSettings, { generateAct }] = await Promise.all([loadCompanyImages(), loadPdfDocuments()]);
@@ -1070,6 +1073,10 @@ function Dashboard({ session, profile }) {
         address: addressPlain(job.address),
         type: job.type,
         pest: job.pest,
+        guarantee_months: job.guarantee_months,
+        guarantee_after_visit: job.guarantee_after_visit,
+        guarantee_terms: job.guarantee_terms,
+        visit_no: job.visit_no,
         area: job.area,
         scheduled_date: job.scheduled_date,
         scheduled_time: job.scheduled_time,
