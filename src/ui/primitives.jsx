@@ -91,7 +91,7 @@ function Pagination({ page, pageSize, total, onPageChange }) {
   return <nav className="ui-pagination" aria-label="Страницы списка"><span>{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} из {total}</span><Button size="sm" iconOnly aria-label="Предыдущая страница" disabled={page <= 1} onClick={() => onPageChange(page - 1)}><ChevronLeft /></Button><strong>{page} / {pages}</strong><Button size="sm" iconOnly aria-label="Следующая страница" disabled={page >= pages} onClick={() => onPageChange(page + 1)}><ChevronRight /></Button></nav>;
 }
 
-function DetailDrawer({ open, title, onClose, children, footer }) {
+function DetailDrawer({ open, title, onClose, children, footer, placement = "right" }) {
   const titleId = useId();
   const drawerRef = useRef(null);
   useEffect(() => {
@@ -110,7 +110,7 @@ function DetailDrawer({ open, title, onClose, children, footer }) {
     else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
   };
   if (!open) return null;
-  return <div className="ui-drawer-layer" role="presentation" onMouseDown={onClose}><aside ref={drawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} className="ui-drawer" onKeyDown={trapFocus} onMouseDown={(event) => event.stopPropagation()}><header><h2 id={titleId}>{title}</h2><Button variant="ghost" size="sm" iconOnly aria-label="Закрыть" onClick={onClose}><X /></Button></header><div className="ui-drawer__body">{children}</div>{footer && <footer>{footer}</footer>}</aside></div>;
+  return <div className={`ui-drawer-layer ${placement === "center" ? "ui-drawer-layer--center" : ""}`} role="presentation" onMouseDown={onClose}><aside ref={drawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`ui-drawer ${placement === "center" ? "ui-drawer--center" : ""}`} onKeyDown={trapFocus} onMouseDown={(event) => event.stopPropagation()}><header><h2 id={titleId}>{title}</h2><Button variant="ghost" size="sm" iconOnly aria-label="Закрыть" onClick={onClose}><X /></Button></header><div className="ui-drawer__body">{children}</div>{footer && <footer>{footer}</footer>}</aside></div>;
 }
 
 export { Badge, Button, Card, DataTable, DetailDrawer, EmptyState, Field, Hero, KpiCard, ListRow, Pagination, SegmentedControl, Textarea };
