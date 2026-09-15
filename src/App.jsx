@@ -403,12 +403,14 @@ function Dashboard({ session, profile }) {
   const [search, setSearch] = useState("");
   const [activeJobPage, setActiveJobPage] = useState(1);
   const [doneJobPage, setDoneJobPage] = useState(1);
+  const [canceledJobPage, setCanceledJobPage] = useState(1);
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [doneSortDir, setDoneSortDir] = useState("desc");
   const [doneBrandFilter, setDoneBrandFilter] = useState("all");
   const [expandedActiveId, setExpandedActiveId] = useState("");
   const [expandedDoneId, setExpandedDoneId] = useState("");
+  const [expandedCanceledId, setExpandedCanceledId] = useState("");
   const [techFilter, setTechFilter] = useState("");
   const [stockChemFilter, setStockChemFilter] = useState("");
   const [teamTechFilter, setTeamTechFilter] = useState("");
@@ -3042,6 +3044,10 @@ function Dashboard({ session, profile }) {
   useEffect(() => { if (subscriptionPage > subscriptionPageCount) setSubscriptionPage(subscriptionPageCount); }, [subscriptionPage, subscriptionPageCount]);
   const visibleSubscriptions = contracts.slice((subscriptionPage - 1) * jobPageSize, subscriptionPage * jobPageSize);
   const canceledFiltered = canceledJobs.filter((j) => dateInFilter(j.scheduled_date, canceledDateFilter));
+  const canceledSorted = [...canceledFiltered].sort((a, b) => new Date(b.canceled_at || 0) - new Date(a.canceled_at || 0));
+  const canceledPageCount = Math.max(1, Math.ceil(canceledSorted.length / jobPageSize));
+  useEffect(() => { if (canceledJobPage > canceledPageCount) setCanceledJobPage(canceledPageCount); }, [canceledJobPage, canceledPageCount]);
+  const canceledVisible = canceledSorted.slice((canceledJobPage - 1) * jobPageSize, canceledJobPage * jobPageSize);
   const myOpenTasks = tasks.filter((t) => taskParticipant(t, session.user.id) && t.status !== "done").length;
   const allOpenTasks = tasks.filter((t) => t.status !== "done").length;
   const todayIsoT = new Date().toISOString().slice(0, 10);
@@ -4466,11 +4472,11 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "canceled" && (
           <div className="kd-list">
-            <DateFilterBar filter={canceledDateFilter} onChange={setCanceledDateFilter} />
+            <DateFilterBar filter={canceledDateFilter} onChange={(filter) => { setExpandedCanceledId(""); setCanceledJobPage(1); setCanceledDateFilter(filter); }} />
             {canceledJobs.length === 0 ? <div className="kd-empty">Отменённых заявок нет.</div> :
               canceledFiltered.length === 0 ? <div className="kd-empty">По этому фильтру ничего не найдено.</div> :
-              [...canceledFiltered].sort((a, b) => new Date(b.canceled_at || 0) - new Date(a.canceled_at || 0)).map((j) => (
-                <JobCard key={j.id} job={j} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat="" share={partnerShareAmt(j)}
+              canceledVisible.map((j) => (
+                <JobCard key={j.id} job={j} compact={expandedCanceledId !== j.id} onExpand={() => setExpandedCanceledId(j.id)} onCollapse={() => setExpandedCanceledId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat="" share={partnerShareAmt(j)}
                   onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                   onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                   onCopyPublicLink={() => copyPublicJobLink(j)}
@@ -4498,6 +4504,7 @@ function Dashboard({ session, profile }) {
                   onOpenDetails={() => setModal({ kind: "details", job: j })}
                   onDelete={() => askConfirm(`Удалить заявку «${j.pest} · ${j.address}»? Она уйдёт в корзину.`, () => deleteJob(j))} />
               ))}
+            <Pagination page={canceledJobPage} pageSize={jobPageSize} total={canceledSorted.length} onPageChange={(page) => { setExpandedCanceledId(""); setCanceledJobPage(page); }} />
           </div>
         )}
 

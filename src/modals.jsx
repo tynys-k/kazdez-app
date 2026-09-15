@@ -95,8 +95,7 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
     </button>
   );
   if (compact) return compactRow;
-  return (
-    <>{compactRow}<DetailDrawer open title={job.pest || "Заявка"} onClose={onCollapse || (() => {})}>
+  const detail = (
     <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><div className="kd-cardbadges">{onCollapse && <button type="button" className="kd-btn ghost sm" onClick={onCollapse}>Свернуть</button>}<span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>{stageKey !== job.status && <span className="kd-badge subtle" style={{ color: st.color, background: st.bg }}>{st.label}</span>}</div></div>
       <div className="kd-meta">
@@ -211,8 +210,11 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
         </div>
       )}
     </div>
-    </DetailDrawer></>
   );
+  // A drawer must never open without a way to close it. Older callers can still
+  // render the regular card while their list is migrated to compact rows.
+  if (!onCollapse) return detail;
+  return <>{compactRow}<DetailDrawer open title={job.pest || "Заявка"} onClose={onCollapse}>{detail}</DetailDrawer></>;
 }
 
 function RepeatCard({ job, onSaveNote, onCreate, onFinish, onUnset, repeatHint }) {
