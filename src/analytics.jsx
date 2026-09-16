@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from "react";
-import { BarChart3, BookOpen, CalendarRange, ExternalLink, Megaphone, Target } from "lucide-react";
+import { BarChart3, BookOpen, CalendarRange, ExternalLink, Gauge, Megaphone, Target } from "lucide-react";
 import { SEASONALITY_DATA } from "./seasonalityData";
 import { canonicalPestName } from "./pestNormalization";
 import { sourceNamesMatch } from "./sourceNormalization";
+import AdsIntelligence from "./workflows/AdsIntelligence";
 
 const MONTHS_SHORT = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
 const EXCLUDED_VISITS = new Set(["guarantee", "control"]);
@@ -213,15 +214,16 @@ function ExternalAnalytics({ jobs, channels, topups, settings, onOpenMarketing }
   </div>;
 }
 
-export function AnalyticsTab({ jobs, channels, topups, settings, onOpenMarketing }) {
+export function AnalyticsTab({ jobs, channels, topups, settings, adAccounts = [], adAssets = [], adMetrics = [], adPromotions = [], canEditAds = false, onReloadAds, onOpenMarketing }) {
   const [view, setView] = useState("internal");
   return <div className="kd-analytics">
     <div className="kd-analytics-switch" role="tablist" aria-label="Источник аналитики">
       <button className={view === "internal" ? "on" : ""} onClick={() => setView("internal")}><BarChart3 size={18} /><span><strong>Наши реальные данные</strong><small>Что уже заказывали и оплачивали</small></span></button>
       <button className={view === "external" ? "on" : ""} onClick={() => setView("external")}><BookOpen size={18} /><span><strong>Внешние источники</strong><small>Сезонность из Excel и медиаплан</small></span></button>
+      <button className={view === "ads" ? "on" : ""} onClick={() => setView("ads")}><Gauge size={18} /><span><strong>Реклама 360</strong><small>OLX, Instagram, Google и Яндекс до прибыли</small></span></button>
     </div>
-    {view === "internal"
-      ? <InternalAnalytics jobs={jobs} />
-      : <ExternalAnalytics jobs={jobs} channels={channels} topups={topups} settings={settings} onOpenMarketing={onOpenMarketing} />}
+    {view === "internal" && <InternalAnalytics jobs={jobs} />}
+    {view === "external" && <ExternalAnalytics jobs={jobs} channels={channels} topups={topups} settings={settings} onOpenMarketing={onOpenMarketing} />}
+    {view === "ads" && <AdsIntelligence accounts={adAccounts} assets={adAssets} metrics={adMetrics} promotions={adPromotions} settings={settings} canEdit={canEditAds} onReload={onReloadAds} />}
   </div>;
 }
