@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
 import { AlertTriangle, BarChart3, Clock3, Database, FlaskConical, Plus, Sparkles, Target, Upload } from "lucide-react";
-import { supabase } from "../supabaseClient";
 import { fmt } from "../shared";
 import {
   PLATFORM_LABELS, PROMOTION_LABELS, allocateBudget, buildAssetPerformance,
@@ -38,7 +37,8 @@ export default function AdsIntelligence({ accounts = [], assets = [], metrics = 
   async function mutate(action, reloadKeys = ["ad_accounts", "ad_assets", "ad_metrics", "ad_promotions"]) {
     setBusy(true); setNotice("");
     try {
-      const result = await action();
+      const { supabase } = await import("../supabaseClient");
+      const result = await action(supabase);
       if (result?.error) throw result.error;
       await onReload?.(reloadKeys);
       setNotice("Сохранено. Рекомендации пересчитаны.");
@@ -46,16 +46,16 @@ export default function AdsIntelligence({ accounts = [], assets = [], metrics = 
     finally { setBusy(false); }
   }
 
-  const addAccount = () => mutate(() => supabase.from("ad_accounts").insert({ ...accountForm, name: accountForm.name.trim() }));
-  const seedOlx = () => mutate(() => supabase.from("ad_accounts").upsert([
+  const addAccount = () => mutate((db) => db.from("ad_accounts").insert({ ...accountForm, name: accountForm.name.trim() }));
+  const seedOlx = () => mutate((db) => db.from("ad_accounts").upsert([
     { platform: "olx", name: "Бренд KazDez" }, { platform: "olx", name: "Dezline" }, { platform: "olx", name: "Sanitex" },
   ], { onConflict: "platform,name", ignoreDuplicates: true }));
-  const addAsset = () => mutate(() => supabase.from("ad_assets").insert({ ...assetForm, external_id: assetForm.external_id.trim() || null, service: assetForm.service.trim() || null, margin_pct: Number(assetForm.margin_pct) || 55 }));
-  const addMetric = () => mutate(() => supabase.from("ad_metrics").upsert({
+  const addAsset = () => mutate((db) => db.from("ad_assets").insert({ ...assetForm, external_id: assetForm.external_id.trim() || null, service: assetForm.service.trim() || null, margin_pct: Number(assetForm.margin_pct) || 55 }));
+  const addMetric = () => mutate((db) => db.from("ad_metrics").upsert({
     ...metricForm, hour_slot: metricForm.hour_slot === "" ? -1 : Number(metricForm.hour_slot),
     ...Object.fromEntries(Object.entries(metricForm).filter(([key]) => !["asset_id", "metric_date", "hour_slot"].includes(key)).map(([key, value]) => [key, Number(value) || 0])),
   }, { onConflict: "asset_id,metric_date,hour_slot" }), ["ad_metrics"]);
-  const addPromotion = () => mutate(() => supabase.from("ad_promotions").insert({ ...promoForm, activated_hour: promoForm.activated_hour === "" ? null : Number(promoForm.activated_hour), cost: Number(promoForm.cost) || 0 }), ["ad_promotions"]);
+  const addPromotion = () => mutate((db) => db.from("ad_promotions").insert({ ...promoForm, activated_hour: promoForm.activated_hour === "" ? null : Number(promoForm.activated_hour), cost: Number(promoForm.cost) || 0 }), ["ad_promotions"]);
   const importCsv = async () => {
     let parsed;
     try { parsed = parseMetricsCsv(csv); } catch (error) { setNotice(error.message); return; }
@@ -69,7 +69,7 @@ export default function AdsIntelligence({ accounts = [], assets = [], metrics = 
         return { ...values, asset_id: asset.id, hour_slot: row.hour_slot == null ? -1 : row.hour_slot, source: "csv" };
       });
     } catch (error) { setNotice(error.message); return; }
-    await mutate(() => supabase.from("ad_metrics").upsert(payload, { onConflict: "asset_id,metric_date,hour_slot" }), ["ad_metrics"]);
+    await mutate((db) => db.from("ad_metrics").upsert(payload, { onConflict: "asset_id,metric_date,hour_slot" }), ["ad_metrics"]);
     setCsv("");
   };
 
