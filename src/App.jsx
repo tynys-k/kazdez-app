@@ -346,6 +346,10 @@ function Dashboard({ session, profile }) {
   const [teamRepFilter, setTeamRepFilter] = useState({ preset: "month" });
   const [mktChannels, setMktChannels] = useState([]);
   const [mktTopups, setMktTopups] = useState([]);
+  const [adAccounts, setAdAccounts] = useState([]);
+  const [adAssets, setAdAssets] = useState([]);
+  const [adMetrics, setAdMetrics] = useState([]);
+  const [adPromotions, setAdPromotions] = useState([]);
   const [opexView, setOpexView] = useState("accounts");
   const [marketingMonthOffset, setMarketingMonthOffset] = useState(0);
   const [scheduleDate, setScheduleDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -646,6 +650,10 @@ function Dashboard({ session, profile }) {
     { key: "lead_activities", when: () => canEditJobs, label: "История CRM", run: () => fetchAllRows("lead_activities", { column: "occurred_at", ascending: false }), set: setLeadActivities },
     { key: "mkt_channels", label: "Рекламные каналы", run: () => supabase.from("mkt_channels").select("*").order("sort"), set: setMktChannels },
     { key: "mkt_topups", label: "Расходы рекламы", run: () => supabase.from("mkt_topups").select("*").order("topup_date", { ascending: false }), set: setMktTopups },
+    { key: "ad_accounts", when: () => canAccess("tab.analytics"), label: "Рекламные аккаунты", run: () => supabase.from("ad_accounts").select("*").order("name"), set: setAdAccounts },
+    { key: "ad_assets", when: () => canAccess("tab.analytics"), label: "Объявления и кампании", run: () => supabase.from("ad_assets").select("*").order("name"), set: setAdAssets },
+    { key: "ad_metrics", when: () => canAccess("tab.analytics"), label: "Показатели рекламы", run: () => fetchAllRows("ad_metrics", { column: "metric_date", ascending: false }), set: setAdMetrics },
+    { key: "ad_promotions", when: () => canAccess("tab.analytics"), label: "Продвижения рекламы", run: () => fetchAllRows("ad_promotions", { column: "started_on", ascending: false }), set: setAdPromotions },
     { key: "tech_days_off", label: "Выходные", run: () => supabase.from("tech_days_off").select("*"), set: setDaysOff },
     { key: "client_followups", label: "Касания", run: () => supabase.from("client_followups").select("*").order("due_date", { ascending: true }), set: setFollowups },
     { key: "quality_checks", label: "Контроль качества", run: () => fetchAllRows("quality_checks", { column: "contacted_at", ascending: false }), set: setQualityChecks },
@@ -4634,6 +4642,12 @@ function Dashboard({ session, profile }) {
             channels={mktChannels}
             topups={mktTopups}
             settings={settings}
+            adAccounts={adAccounts}
+            adAssets={adAssets}
+            adMetrics={adMetrics}
+            adPromotions={adPromotions}
+            canEditAds={canManageCash}
+            onReloadAds={load}
             onOpenMarketing={() => { setOpexView("marketing"); setTab("opex"); }}
           />{additionalAnalytics}</>
         )}

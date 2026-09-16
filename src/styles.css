@@ -878,7 +878,7 @@ body{
 
 /* Отдельная аналитика: реальные заявки рядом с внешней сезонной моделью. */
 .kd-analytics{display:flex;flex-direction:column;gap:16px;}
-.kd-analytics-switch{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.kd-analytics-switch{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
 .kd-analytics-switch>button{display:flex;align-items:center;gap:12px;min-height:70px;padding:13px 16px;border:1px solid var(--line);border-radius:15px;background:var(--surface);color:var(--ink);text-align:left;font:inherit;cursor:pointer;box-shadow:var(--shadow-card);}
 .kd-analytics-switch>button>svg{flex:0 0 auto;color:var(--muted);}
 .kd-analytics-switch>button>span{display:flex;flex-direction:column;gap:3px;min-width:0;}
