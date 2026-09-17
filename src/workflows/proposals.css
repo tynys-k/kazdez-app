@@ -1,0 +1,104 @@
+/* Раздел КП: слева форма, справа страница документа.
+   Предпросмотр — это отдельный документ в iframe со своими стилями, и
+   тема приложения на него не влияет: лист бумаги всегда белый. */
+
+.proposals .pr-funnel{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;padding:0;overflow:hidden;background:var(--line);margin-bottom:14px;}
+.proposals .pr-funnel button{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:0;background:var(--surface);color:var(--ink);font:inherit;text-align:left;cursor:pointer;}
+.proposals .pr-funnel button:hover{background:var(--surface-sunk);}
+.proposals .pr-funnel span{color:var(--muted);font-size:12px;font-weight:700;}
+.proposals .pr-funnel strong{font-family:var(--font-mono);font-size:22px;line-height:1.1;}
+.proposals .pr-funnel small{color:var(--muted);font-size:11px;font-weight:600;}
+
+.proposals .pr-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;}
+.proposals .pr-chip,.proposals .kd-chip{padding:7px 14px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink-soft);font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+.proposals .kd-chip.on{border-color:var(--primary);background:var(--primary-tint);color:var(--primary-d);}
+.proposals .pr-search{display:flex;align-items:center;gap:7px;min-width:220px;padding:0 11px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);color:var(--muted);}
+.proposals .pr-search input{flex:1;min-width:0;min-height:40px;border:0;background:none;color:var(--ink);font:inherit;font-size:14px;}
+.proposals .pr-search input:focus-visible{outline:none;}
+
+/* список КП */
+.proposals .pr-row{display:flex;align-items:stretch;gap:12px;padding:0;}
+.proposals .pr-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;padding:13px 15px;border:0;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer;}
+.proposals .pr-row-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.proposals .pr-row-head strong{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:13px;}
+.proposals .pr-row-title{font-size:15px;font-weight:750;overflow:hidden;text-overflow:ellipsis;}
+.proposals .pr-row-side{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:6px;padding:13px 15px 13px 0;}
+.proposals .pr-row-side strong{font-family:var(--font-mono);font-size:16px;white-space:nowrap;}
+
+/* редактор */
+.proposals .pr-editor{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,520px);gap:16px;align-items:start;}
+.proposals .pr-form{display:flex;flex-direction:column;gap:14px;min-width:0;}
+.proposals .pr-group{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:14px 16px;}
+.proposals .pr-group label{display:flex;flex-direction:column;gap:6px;margin:10px 0 0;font-size:12px;font-weight:700;color:var(--muted);}
+.proposals .pr-group input,.proposals .pr-group select,.proposals .pr-group textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);color:var(--ink);font:inherit;font-size:14px;font-weight:500;}
+.proposals .pr-group input,.proposals .pr-group select{min-height:42px;}
+.proposals .pr-group textarea{resize:vertical;line-height:1.5;}
+.proposals .kd-formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px;}
+
+/* выбор оформления — две большие карточки, а не невнятный select */
+.proposals .pr-styles{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.proposals .pr-styles button{display:flex;flex-direction:column;gap:3px;padding:11px 13px;border:1.5px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);color:var(--ink);font:inherit;text-align:left;cursor:pointer;}
+.proposals .pr-styles button.on{border-color:var(--primary);background:var(--primary-tint);}
+.proposals .pr-styles strong{font-size:14px;}
+.proposals .pr-styles span{color:var(--muted);font-size:11.5px;font-weight:600;}
+
+.proposals .pr-matches{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.proposals .pr-matches button{display:flex;flex-direction:column;gap:2px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-sunk);color:var(--ink);font:inherit;text-align:left;cursor:pointer;}
+.proposals .pr-matches button:hover{border-color:var(--primary);}
+.proposals .pr-matches span{color:var(--muted);font-size:12px;font-weight:600;}
+
+/* строки стоимости */
+.proposals .pr-fromprice{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding-bottom:10px;border-bottom:1px solid var(--line);margin-bottom:10px;}
+.proposals .pr-fromprice select{flex:1;min-width:150px;}
+.proposals .pr-fromprice input{width:110px;}
+.proposals .pr-item{padding:10px 0;border-bottom:1px dashed var(--line);}
+.proposals .pr-item-name{font-weight:700 !important;}
+.proposals .pr-item-note{margin-top:6px;font-size:13px !important;}
+.proposals .pr-item-nums{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:7px;}
+.proposals .pr-item-nums select{flex:0 0 150px;}
+.proposals .pr-item-nums input{width:100px;}
+.proposals .pr-item-nums strong{margin-left:auto;font-family:var(--font-mono);font-size:14px;white-space:nowrap;}
+.proposals .pr-total{display:flex;justify-content:space-between;align-items:center;padding:11px 0 2px;}
+.proposals .pr-total span{color:var(--muted);font-size:13px;font-weight:700;}
+.proposals .pr-total strong{font-family:var(--font-mono);font-size:20px;}
+
+/* блоки документа */
+.proposals .pr-section{padding:10px 0;border-bottom:1px dashed var(--line);}
+.proposals .pr-section:last-child{border-bottom:0;}
+.proposals .pr-section.off{opacity:.55;}
+.proposals .pr-switch{display:flex;flex-direction:row !important;align-items:center;gap:9px;margin:0 !important;color:var(--ink) !important;font-size:14px !important;cursor:pointer;}
+.proposals .pr-switch input{width:auto !important;min-height:0 !important;margin:0;accent-color:var(--primary);}
+.proposals .pr-section textarea,.proposals .pr-section input{margin-top:8px;}
+.proposals .pr-section code{padding:1px 5px;border-radius:5px;background:var(--surface-sunk);font-family:var(--font-mono);font-size:11.5px;}
+
+/* Кнопки сохранения всегда на виду: форма длинная, и «Сохранить» внизу
+   после десяти блоков просто не находили. Полоса непрозрачная — на
+   просвет она наезжала на поля и читалась как ошибка вёрстки. */
+.proposals .pr-actions{position:sticky;bottom:0;margin:0;padding:12px 0;border-top:1px solid var(--line);background:var(--bg);}
+
+/* Предпросмотр: внутри iframe настоящий лист A4 (794×1123 px при 96 dpi).
+   Уменьшаем его transform-ом, а не шириной: страница должна остаться
+   ровно A4, иначе на экране и в печати получится разная вёрстка.
+   Масштаб «съедает» только картинку, поэтому лишнюю высоту и ширину
+   разметки убираем отрицательным отступом и обрезкой контейнера. */
+.proposals .pr-preview{--pr-scale:.63;position:sticky;top:12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-sunk);overflow:hidden;}
+.proposals .pr-preview-head{padding:9px 14px;border-bottom:1px solid var(--line);color:var(--muted);font-size:12px;font-weight:700;}
+.proposals .pr-preview iframe{
+  display:block;width:794px;height:1123px;border:0;background:#fff;
+  transform:scale(var(--pr-scale));transform-origin:top left;
+  margin-bottom:calc(1123px * var(--pr-scale) - 1123px);
+}
+
+@media(max-width:1180px){
+  .proposals .pr-editor{grid-template-columns:1fr;}
+  .proposals .pr-preview{position:static;--pr-scale:.58;}
+}
+@media(max-width:680px){
+  .proposals .pr-funnel{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .proposals .kd-formgrid{grid-template-columns:1fr;}
+  .proposals .pr-styles{grid-template-columns:1fr;}
+  .proposals .pr-row{flex-direction:column;}
+  .proposals .pr-row-side{flex-direction:row;align-items:center;justify-content:space-between;padding:0 15px 13px;}
+  .proposals .pr-preview{--pr-scale:.4;}
+  .proposals .pr-item-nums input,.proposals .pr-item-nums select{flex:1 1 100px;width:auto;}
+}
