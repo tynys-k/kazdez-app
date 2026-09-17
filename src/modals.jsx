@@ -3135,6 +3135,10 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
             <Field label="Телефон"><input defaultValue={settings.company_phone ?? ""} onBlur={(e) => onSaveSetting("company_phone", e.target.value.trim() || null)} placeholder="+7 700 000 00 00" /></Field>
           </div>
           <Field label="Адрес"><input defaultValue={settings.company_address ?? ""} onBlur={(e) => onSaveSetting("company_address", e.target.value.trim() || null)} placeholder="г. Алматы, ул. …, д. …" /></Field>
+          <div className="kd-grid2">
+            <Field label="E-mail"><input defaultValue={settings.company_email ?? ""} onBlur={(e) => onSaveSetting("company_email", e.target.value.trim() || null)} placeholder="sd.kazdez@mail.ru" /></Field>
+            <Field label="Сайт"><input defaultValue={settings.company_site ?? ""} onBlur={(e) => onSaveSetting("company_site", e.target.value.trim() || null)} placeholder="kazdez.kz" /></Field>
+          </div>
           <Field label="ФИО директора (для строки под подписью)"><input defaultValue={settings.company_director ?? ""} onBlur={(e) => onSaveSetting("company_director", e.target.value.trim() || null)} placeholder="Директор Тыныспаев К." /></Field>
 
           <div className="kd-section" style={{ marginTop: 6 }}>Печать и подпись</div>
@@ -3163,7 +3167,44 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
             </div>
           </div>
 
-          <div className="kd-muted">Эти данные печатаются в шапке гарантийного сертификата и акта выполненных работ. Сохраняется автоматически при выходе из поля.</div>
+          <div className="kd-muted">Эти данные печатаются в шапке гарантийного сертификата, акта выполненных работ и коммерческих предложений. Сохраняется автоматически при выходе из поля.</div>
+        </SettingsSection>
+
+        {/* Номера лицензий раньше жили только в готовых файлах КП: при
+            продлении лицензии старый номер разъезжался по новым КП, и
+            заказчик получал документ, который не проходит проверку.
+            Пустое поле здесь не страшно — КП подставит текущие значения
+            из справочника, но обновлять их надо в одном месте. */}
+        <SettingsSection title="Данные для КП" subtitle="Лицензии, СРО и подписи в коммерческих предложениях" open={openSection === "proposals"} onToggle={() => toggle("proposals")}>
+          <div className="kd-grid2">
+            <Field label="Короткое имя бренда"><input defaultValue={settings.company_brand ?? ""} onBlur={(e) => onSaveSetting("company_brand", e.target.value.trim() || null)} placeholder="KAZDEZ" /></Field>
+            <Field label="Название в шапке КП"><input defaultValue={settings.company_brand_line ?? ""} onBlur={(e) => onSaveSetting("company_brand_line", e.target.value.trim() || null)} placeholder="Служба дезинфекции KAZDEZ" /></Field>
+          </div>
+          <Field label="Налоговый режим (строка в подвале КП)"><input defaultValue={settings.company_tax_note ?? ""} onBlur={(e) => onSaveSetting("company_tax_note", e.target.value.trim() || null)} placeholder="СНР на основе упрощённой декларации (без НДС)" /></Field>
+
+          <div className="kd-section" style={{ marginTop: 6 }}>Лицензия на дезинфекцию, дезинсекцию и дератизацию</div>
+          <div className="kd-grid2">
+            <Field label="Номер и дата"><input defaultValue={settings.company_license_ddd ?? ""} onBlur={(e) => onSaveSetting("company_license_ddd", e.target.value.trim() || null)} placeholder="№ KZ30LAM00001599 от 14.04.2025 г." /></Field>
+            <Field label="Кем выдана"><input defaultValue={settings.company_license_ddd_issuer ?? ""} onBlur={(e) => onSaveSetting("company_license_ddd_issuer", e.target.value.trim() || null)} placeholder="Департамент СЭК г. Алматы КСЭК МЗ РК" /></Field>
+          </div>
+
+          <div className="kd-section" style={{ marginTop: 6 }}>Лицензия на обращение с ядами</div>
+          <div className="kd-grid2">
+            <Field label="Номер и дата"><input defaultValue={settings.company_license_poisons ?? ""} onBlur={(e) => onSaveSetting("company_license_poisons", e.target.value.trim() || null)} placeholder="№ 26000449 от 09.01.2026 г." /></Field>
+            <Field label="Кем выдана"><input defaultValue={settings.company_license_poisons_issuer ?? ""} onBlur={(e) => onSaveSetting("company_license_poisons_issuer", e.target.value.trim() || null)} placeholder="Комитет промышленности МПС РК" /></Field>
+          </div>
+
+          <div className="kd-section" style={{ marginTop: 6 }}>Лицензия на применение пестицидов</div>
+          <div className="kd-grid2">
+            <Field label="Номер и дата"><input defaultValue={settings.company_license_pesticides ?? ""} onBlur={(e) => onSaveSetting("company_license_pesticides", e.target.value.trim() || null)} placeholder="№ 26002168 от 23.01.2026 г." /></Field>
+            <Field label="Кем выдана"><input defaultValue={settings.company_license_pesticides_issuer ?? ""} onBlur={(e) => onSaveSetting("company_license_pesticides_issuer", e.target.value.trim() || null)} placeholder="Акимат г. Алматы" /></Field>
+          </div>
+
+          <div className="kd-grid2">
+            <Field label="Членство в СРО"><input defaultValue={settings.company_sro ?? ""} onBlur={(e) => onSaveSetting("company_sro", e.target.value.trim() || null)} placeholder="«Казахстанский Союз Санитарной Безопасности»" /></Field>
+            <Field label="География работ"><input defaultValue={settings.company_geography ?? ""} onBlur={(e) => onSaveSetting("company_geography", e.target.value.trim() || null)} placeholder="Алматы · Астана · Караганда · Кызылорда и области" /></Field>
+          </div>
+          <div className="kd-muted">Печать и подпись для КП берутся из раздела «Реквизиты компании». Пустые поля заполняются текущими данными компании автоматически.</div>
         </SettingsSection>
       </div>
     </ModalShell>

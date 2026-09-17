@@ -6,7 +6,7 @@ import SessionGate from "./SessionGate";
 import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2, BarChart3,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, Mail, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, Mail, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera, FileSignature,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -37,6 +37,7 @@ import ExecutivePulse from "./workflows/ExecutivePulse";
 import ReportPeriodBar from "./workflows/ReportPeriodBar";
 import MarketingMonthReport from "./workflows/MarketingMonthReport";
 import PersonalDebts from "./workflows/PersonalDebts";
+import Proposals from "./workflows/Proposals";
 import BankReconciliation from "./workflows/BankReconciliation";
 import FinanceAnalysis from "./workflows/FinanceAnalysis";
 import { payrollCarryover } from "./workflows/payrollCarryoverModel";
@@ -314,6 +315,7 @@ function Dashboard({ session, profile }) {
   const [legalContracts, setLegalContracts] = useState([]);
   const [selectedLegalId, setSelectedLegalId] = useState(null);
   function openLegalContract(contract) { setModal(null); setSelectedLegalId(contract.id); setTab("contracts"); }
+  const [proposals, setProposals] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [moves, setMoves] = useState([]);
   const [personalDebts, setPersonalDebts] = useState([]);
@@ -641,6 +643,7 @@ function Dashboard({ session, profile }) {
     { key: "bank_evidence", when: () => canManageCash, label: "Сверенные операции", run: () => fetchAllRows("bank_evidence", { column: "verified_at", ascending: false }), set: setBankEvidence },
     { key: "tender_deliveries", when: () => canAccess("tab.tenders") || canAccess("tab.stock"), label: "Препараты в тендерах", run: () => fetchAllRows("tender_deliveries", { column: "created_at", ascending: false }), set: setTenderDeliveries },
     { key: "tender_payments", when: () => canAccess("tab.tenders") || canAccess("tab.partners"), label: "Платежи тендеров", run: () => fetchAllRows("tender_payments", { column: "created_at", ascending: false }), set: setTenderPayments },
+    { key: "proposals", when: () => canAccess("tab.proposals"), label: "Коммерческие предложения", run: () => fetchAllRows("proposals", { column: "issue_date", ascending: false }), set: setProposals },
     { key: "tenders", label: "Тендеры", run: () => supabase.from("tenders").select("*").order("created_at", { ascending: false }), set: setTenders },
     { key: "tender_guarantees", label: "Обеспечения", run: () => supabase.from("tender_guarantees").select("*"), set: setTenderGuarantees },
     { key: "tender_services", label: "Работы по тендерам", run: () => supabase.from("tender_services").select("*").order("seq"), set: setTenderServices },
@@ -3489,6 +3492,9 @@ function Dashboard({ session, profile }) {
     { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : ""}` },
     { id: "repeats", icon: RefreshCw, label: `Повторные выезды${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
     { id: "retention", icon: ClipboardCheck, label: `Обзвон и качество${dueFollowups.length || qualityPending.length ? " · " + (dueFollowups.length + qualityPending.length) : ""}` },
+    // Счётчик считает КП, которые уже у клиента и ждут ответа: черновик
+    // и закрытое КП ничего не требуют, а ждущее — требует звонка.
+    { id: "proposals", icon: FileSignature, label: `КП${proposals.filter((p) => p.status === "sent").length ? " · " + proposals.filter((p) => p.status === "sent").length : ""}` },
     { id: "contracts", icon: FileText, label: "Договоры" },
     { id: "subscriptions", icon: Repeat2, label: `Абоненты${dueContracts.length ? " · " + dueContracts.length : ""}` },
     { id: "routes", icon: Route, label: "Маршруты" },
@@ -3521,7 +3527,7 @@ function Dashboard({ session, profile }) {
   // между «Результатами» и «Учётом», и приходилось вспоминать, в каком из них что лежит.
   const navGroups = [
     { label: "Ежедневная работа", ids: ["today", "jobs", "schedule", "routes", "tasks"] },
-    { label: "Клиенты и возвраты", ids: ["leads", "clients", "contracts", "retention", "subscriptions", "repeats"] },
+    { label: "Клиенты и возвраты", ids: ["leads", "proposals", "clients", "contracts", "retention", "subscriptions", "repeats"] },
     { label: "Деньги и аналитика", ids: ["finance", "analytics", "growth", "opex", "cash"] },
     { label: "Архив заявок", ids: ["done", "canceled"] },
     { label: "Команда и склад", ids: ["team", "payroll", "partners", "stock", "myequip"] },
@@ -4803,6 +4809,10 @@ function Dashboard({ session, profile }) {
           </div>
         )}
 
+        {!loading && tab === "proposals" && <Proposals proposals={proposals} clients={clients} clientContacts={clientContacts}
+          objects={objects} leads={leads} priceList={priceList} pestTypes={pestTypes} settings={settings} branches={branches}
+          canEdit={canEditJobs || canAccess("action.leads_edit")} isAdmin={isAdmin} userName={actorName}
+          onReload={() => load(["proposals"])} />}
         {!loading && tab === "contracts" && <ContractsRegister contracts={legalContracts} clients={clients} contacts={clientContacts} subscriptions={contracts} people={assignableProfiles} canEdit={canEditJobs || canEditDocs} selectedId={selectedLegalId} onSelect={setSelectedLegalId} onReload={() => load(["legal_contracts"])} onOpenClient={openClientCard} />}
         {!loading && tab === "subscriptions" && (
           <div className="kd-stage2">
