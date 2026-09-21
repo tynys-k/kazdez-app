@@ -23,7 +23,7 @@ import { AnalyticsTab } from "./analytics";
 import { canonicalPestName, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceKey, canonicalSourceName, canonicalSourceOptions, sourceNamesMatch } from "./sourceNormalization";
 import { groupLeadActivities, leadActivitySummary } from "./leadActivities";
-import { contractHistorySummary, subscriptionIntervalLabel } from "./subscriptionHistory";
+import { clientTypeLookup, contractDraftFromJob, contractHistorySummary, subscriptionCandidates, subscriptionIntervalLabel, subscriptionLookup } from "./subscriptionHistory";
 import { clientAddresses as collectClientAddresses, clientSummary, searchClients } from "./clientDirectory";
 import { ClientDetailsModal, ClientProfileModal } from "./clientModals";
 import StockRegister from "./StockRegister";
@@ -422,6 +422,8 @@ function Dashboard({ session, profile }) {
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [doneSortDir, setDoneSortDir] = useState("desc");
   const [doneBrandFilter, setDoneBrandFilter] = useState("all");
+  const [doneClientFilter, setDoneClientFilter] = useState("all");
+  const [showAllSubscriptionLeads, setShowAllSubscriptionLeads] = useState(false);
   const [expandedActiveId, setExpandedActiveId] = useState("");
   const [expandedDoneId, setExpandedDoneId] = useState("");
   const [expandedCanceledId, setExpandedCanceledId] = useState("");
@@ -3066,8 +3068,21 @@ function Dashboard({ session, profile }) {
   const activePageCount = Math.max(1, Math.ceil(sorted.length / jobPageSize));
   useEffect(() => { if (activeJobPage > activePageCount) setActiveJobPage(activePageCount); }, [activeJobPage, activePageCount]);
   const groups = groupByDate(sorted.slice((activeJobPage - 1) * jobPageSize, activeJobPage * jobPageSize));
+  // Юрлица и абоненты среди заявок: юрлиц сажаем на абонемент, разовые — частники.
+  const jobClientType = clientTypeLookup(clients);
+  const jobIsSubscribed = subscriptionLookup(contracts, clients);
+  const jobClient = (job) => (job?.client_id && clients.find((c) => String(c.id) === String(job.client_id))) || clientByPhone(job?.client_phone);
+  const openSubscriptionDraft = (job) => setModal({ kind: "contract", draft: contractDraftFromJob(job, jobClient(job), todayIso) });
+  const subscriptionLeads = tab === "subscriptions" ? subscriptionCandidates({ jobs, clients, contracts }) : [];
+  const doneJobClientLabel = (job) => (jobIsSubscribed(job) ? "Абонент" : jobClientType(job) === "company" ? "Юрлицо" : "");
   const doneFiltered = doneJobs
     .filter(matchSearch)
+    .filter((j) => {
+      if (doneClientFilter === "all") return true;
+      if (doneClientFilter === "subscriber") return jobIsSubscribed(j);
+      if (doneClientFilter === "company") return jobClientType(j) === "company" && !jobIsSubscribed(j);
+      return jobClientType(j) === "person" && !jobIsSubscribed(j);
+    })
     .filter((j) => dateInFilter(j.scheduled_date, doneDateFilter))
     .filter((j) => {
       if (doneBrandFilter === "all") return true;
@@ -4076,7 +4091,14 @@ function Dashboard({ session, profile }) {
                 <option value="Sanitex">Sanitex</option>
                 <option value="partner">Партнёрские</option>
               </select>
+              <select className="kd-techselect" value={doneClientFilter} onChange={(e) => { setDoneClientFilter(e.target.value); setExpandedDoneId(""); }}>
+                <option value="all">Все клиенты</option>
+                <option value="company">Юрлица без абонемента</option>
+                <option value="subscriber">Абоненты</option>
+                <option value="person">Частные (разовые)</option>
+              </select>
             </div>
+            {doneClientFilter === "company" && <div className="kd-muted" style={{ margin: "0 0 10px" }}>Юрлица, которые ещё не на абонементе. Открой заявку и нажми «Сделать абонентом» — договор заполнится из неё. Сводный список — во вкладке «Абоненты».</div>}
             <DateFilterBar filter={doneDateFilter} onChange={setDoneDateFilter} hide={["tomorrow"]} />
             {doneFiltered.length === 0 ? <div className="kd-empty">{doneJobs.length === 0 ? "Выполненных заявок пока нет." : "По этому поиску ничего не найдено."}</div> :
               doneGroups.map((g) => (
@@ -4084,7 +4106,7 @@ function Dashboard({ session, profile }) {
                   <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} compact={expandedDoneId !== j.id} onExpand={() => setExpandedDoneId(j.id)} onCollapse={() => setExpandedDoneId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} clientLabel={doneJobClientLabel(j)} onSubscribe={canEditJobs && !jobIsSubscribed(j) ? () => openSubscriptionDraft(j) : null} compact={expandedDoneId !== j.id} onExpand={() => setExpandedDoneId(j.id)} onCollapse={() => setExpandedDoneId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                       onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                       onCopyPublicLink={() => copyPublicJobLink(j)}
@@ -4851,6 +4873,19 @@ function Dashboard({ session, profile }) {
               </React.Fragment>;
             })}</div>
             <Pagination page={subscriptionPage} pageSize={jobPageSize} total={contracts.length} onPageChange={(page) => { setSelectedSubscriptionId(null); setSubscriptionPage(page); }} />
+            {canEditJobs && <section className="kd-subscription-leads">
+              <div className="kd-section">Юрлица без абонемента{subscriptionLeads.length ? ` · ${subscriptionLeads.length}` : ""}</div>
+              <div className="kd-muted" style={{ marginBottom: 10 }}>Организации, у которых уже были выполненные заявки, но нет договора. Юрлица должны быть на постоянке — нажми «Сделать абонентом», договор заполнится из последнего выезда. Если организации нет в списке, найди её заявку в «Выполненных» и нажми ту же кнопку.</div>
+              {subscriptionLeads.length === 0 && <div className="kd-empty">Все юрлица с выполненными заявками уже на абонементе.</div>}
+              <div className="ui-list">{(showAllSubscriptionLeads ? subscriptionLeads : subscriptionLeads.slice(0, 10)).map((lead) => (
+                <ListRow key={lead.key} title={lead.name} meta={addressPlain(lead.address) || lead.service || formatPhone(lead.phone)}
+                  status={<Badge tone="neutral">{lead.done} {lead.done === 1 ? "выезд" : lead.done < 5 ? "выезда" : "выездов"}</Badge>}
+                  aside={<><span>{formatMoney(lead.revenue)}</span><small>последний · {formatDate(lead.lastDate)}</small></>}
+                  actions={<button className="kd-btn primary sm" onClick={() => openSubscriptionDraft(lead.lastJob)}><Plus size={13} />Сделать абонентом</button>}
+                  onClick={() => setModal({ kind: "view", job: lead.lastJob })} />
+              ))}</div>
+              {subscriptionLeads.length > 10 && <button className="kd-btn ghost sm" style={{ marginTop: 10 }} onClick={() => setShowAllSubscriptionLeads((v) => !v)}>{showAllSubscriptionLeads ? "Свернуть" : `Показать все (${subscriptionLeads.length})`}</button>}
+            </section>}
           </div>
         )}
 
@@ -6668,7 +6703,7 @@ function Dashboard({ session, profile }) {
         onOpenContract={(contract) => setModal({ kind: "contractDetails", contract })}
         onOpenProof={(job) => job && openJobProof(job)} />}
       {modal?.kind === "contractDetails" && <ContractDetailsModal legalContract={legalContracts.find((c) => c.id === modal.contract.legal_contract_id)} contacts={clientContacts.filter((c) => c.client_id === modal.contract.client_id)} client={clients.find((c) => c.id === modal.contract.client_id)} onOpenClient={openClientCard} onOpenLegalContract={openLegalContract} contract={modal.contract} jobs={jobs} managerName={profileById(modal.contract?.manager_id)?.full_name || ""} techName={(id) => techById(id)?.full_name || profileById(id)?.full_name || ""} todayIso={todayIso} onClose={() => setModal(null)} onEdit={() => setModal({ kind: "contract", contract: modal.contract })} onCreateJob={() => createContractJob(modal.contract)} onOpenJob={(job) => setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job })} />}
-      {modal?.kind === "contract" && <ContractModal clients={clients} legalContracts={legalContracts} contract={modal.contract} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveContract} />}
+      {modal?.kind === "contract" && <ContractModal clients={clients} legalContracts={legalContracts} contract={modal.contract} draft={modal.draft} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveContract} />}
       {confirmState && (
         <ConfirmModal message={confirmState.message} danger={confirmState.danger} confirmLabel={confirmState.confirmLabel}
           onCancel={() => setConfirmState(null)}
