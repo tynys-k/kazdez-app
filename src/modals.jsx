@@ -5,7 +5,7 @@ import { readLocalDraft, useLocalDraft } from "./useLocalDraft";
 import { newJobDraftStorageKey, reportDraftStorageKey } from "./localDataScope";
 import { createReportRequestId } from "./reportSubmission";
 import { createFinancialRequestId } from "./financialPosting";
-import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake } from "lucide-react";
+import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake, Repeat2 } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
 import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, EMPLOYEE_JOB_TITLES, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, addressPlain, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
@@ -70,7 +70,7 @@ function PartnerOrigin({ name, compact = false }) {
   );
 }
 
-function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete }) {
+function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete, clientLabel, onSubscribe }) {
   const st = STATUS[job.status] || STATUS.new;
   const stageKey = jobWorkStage(job);
   const stage = WORK_STAGE[stageKey];
@@ -87,7 +87,7 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
     <button type="button" className={`kd-done-row kd-job-row ${job.status === "done" ? "done" : "active"}`} onClick={onExpand} aria-label={`Открыть заявку: ${job.pest || "без названия"}, ${addressPlain(job.address) || "адрес не указан"}`}>
       <span className="kd-job-row-main"><strong>{job.pest || "Заявка"}</strong><small>{addressPlain(job.address) || "Адрес не указан"}</small></span>
       <span data-label="Дата">{formatDate(job.scheduled_date)}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
-      <span data-label="Клиент">{formatPhone(job.client_phone)}</span>
+      <span data-label="Клиент">{clientLabel ? `${clientLabel} · ` : ""}{formatPhone(job.client_phone)}</span>
       <span data-label="Исполнитель">{rowAssignee}</span>
       <strong data-label="Сумма">{formatMoney(rowAmount)}</strong>
       <Badge tone={stageKey === "canceled" ? "danger" : stageKey === "done" ? "positive" : stageKey === "assigned" ? "warning" : "neutral"}>{stage.short}</Badge>
@@ -180,6 +180,7 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
         {isAdmin && !job.executor_partner_id && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onAssign}><UserPlus size={14} />{assignedName ? "Переназначить" : "Назначить"}</button>}
         {isAdmin && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onEdit}><Pencil size={14} />Изменить</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
+        {isAdmin && job.status === "done" && onSubscribe && <button className="kd-btn ghost" onClick={onSubscribe}><Repeat2 size={14} />Сделать абонентом</button>}
         {isAdmin && job.status === "canceled" && <button className="kd-btn primary" onClick={() => onRestore()}>Вернуть в работу</button>}
         {/* Деньги и решения, которые ждут ответа прямо сейчас, — всегда на виду */}
         {isAdmin && job.status === "done" && Number(job.report_transfer) > 0 && !job.transfer_paid && <button className="kd-btn primary sm" onClick={() => onTransferPaid()}>💳 Зачесть оплату ({fmt(job.report_transfer)})</button>}
@@ -4400,26 +4401,28 @@ function QualityModal({ job, check, history = [], jobs = [], people = [], defaul
   </ModalShell>;
 }
 
-function ContractModal({ contract, clients = [], legalContracts = [], people = [], onClose, onSave }) {
-  const [clientId, setClientId] = useState(contract?.client_id || clients.find((c) => samePhone(c.phone, contract?.phone))?.id || "");
-  const [legalId, setLegalId] = useState(contract?.legal_contract_id || "");
-  const [clientName, setClientName] = useState(contract?.client_name || "");
-  const [phone, setPhone] = useState(contract?.phone || "+7 ");
-  const [address, setAddress] = useState(contract?.address || "");
-  const [service, setService] = useState(contract?.service || "Дезинсекция");
-  const [price, setPrice] = useState(contract?.price ?? "");
-  const [intervalDays, setIntervalDays] = useState(contract?.interval_days ?? "30");
-  const [nextDate, setNextDate] = useState(contract?.next_service_date || new Date().toISOString().slice(0, 10));
-  const [managerId, setManagerId] = useState(contract?.manager_id || "");
-  const [note, setNote] = useState(contract?.note || "");
-  const [active, setActive] = useState(contract?.active !== false);
+function ContractModal({ contract, draft, clients = [], legalContracts = [], people = [], onClose, onSave }) {
+  // draft — предзаполнение из выполненной заявки юрлица; сохраняется как новый договор.
+  const src = contract || draft;
+  const [clientId, setClientId] = useState(src?.client_id || clients.find((c) => samePhone(c.phone, src?.phone))?.id || "");
+  const [legalId, setLegalId] = useState(src?.legal_contract_id || "");
+  const [clientName, setClientName] = useState(src?.client_name || "");
+  const [phone, setPhone] = useState(src?.phone || "+7 ");
+  const [address, setAddress] = useState(src?.address || "");
+  const [service, setService] = useState(src?.service || "Дезинсекция");
+  const [price, setPrice] = useState(src?.price ?? "");
+  const [intervalDays, setIntervalDays] = useState(src?.interval_days ?? "30");
+  const [nextDate, setNextDate] = useState(src?.next_service_date || new Date().toISOString().slice(0, 10));
+  const [managerId, setManagerId] = useState(src?.manager_id || "");
+  const [note, setNote] = useState(src?.note || "");
+  const [active, setActive] = useState(src?.active !== false);
   const [saving, setSaving] = useState(false);
   async function save() {
     setSaving(true);
     await onSave({ client_id: clientId || null, legal_contract_id: legalId || null, client_name: clientName.trim(), phone: phone.trim(), address: address.trim(), service: service.trim(), price: Number(price) || 0, interval_days: Number(intervalDays) || 30, next_service_date: nextDate, manager_id: managerId || null, note: note.trim() || null, active }, contract);
     setSaving(false);
   }
-  return <ModalShell title={contract ? "Абонентский договор" : "Новый абонент"} onClose={onClose} footer={<>
+  return <ModalShell title={contract ? "Абонентский договор" : draft ? "Сделать абонентом" : "Новый абонент"} onClose={onClose} footer={<>
     <button className="kd-btn ghost" onClick={onClose}>Отмена</button><button className="kd-btn primary" disabled={!clientName || !phone || !address || !nextDate || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
   </>}>
     <Field label="Клиент / контрагент из общей базы"><select value={clientId} onChange={(e) => { const c = clients.find((row) => row.id === e.target.value); setClientId(e.target.value); setLegalId(""); if (c) { setClientName(c.legal_name || c.name || ""); setPhone(c.phone || ""); } }}><option value="">Не привязан — выберите клиента</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.legal_name || c.name || c.phone} · {c.phone}</option>)}</select></Field>
