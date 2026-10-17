@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
+import { hourLabel, nowOnScale, scheduleDay } from "./scheduleTimeline";
 import { TREATMENT_METHODS, REPEAT_CAUSES, REPEAT_FAULTS, equipmentLabel, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, OBJECT_KINDS, addressKey, DISCOUNT_REASONS, describeChange, COMPANY_IMAGE_KEYS, EMPLOYEE_EVENTS, monthLabel, TRAINING_TOPICS, reviewRequestMsg, winbackMsg, waLink, TECH_DOC_KINDS, clientMemoFor, ADMIN_TAB_ORDER, AddressText, DEPOSIT_STATUS, DOC_STATUS, DRIVE_LINKS, DateFilterBar, DriveLinkCard, EQUIP_CATEGORIES, EQUIP_STATUS, EXPENSE_TYPES, GUARANTEE_KINDS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TAB_LABELS_SHORT, TASK_STATUS, TASK_TYPES, TENDER_STATUS, WEEKDAYS, addressPlain, buildMsg, chemUnit, copyText, dateInFilter, daysSince, effectivePermissions, fmt, fmtAmount, fmtTs, groupByDate, isoOf, isoToRu, jobTime, lineAmount, norm, parseIso, periodRange, phoneKey, pricePerBase, repeatLabel, timeRangeMin } from "./shared";
 import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
@@ -3072,6 +3073,20 @@ function Dashboard({ session, profile }) {
   const jobClientType = clientTypeLookup(clients);
   const jobIsSubscribed = subscriptionLookup(contracts, clients);
   const jobClient = (job) => (job?.client_id && clients.find((c) => String(c.id) === String(job.client_id))) || clientByPhone(job?.client_phone);
+  // Кнопки в шапке заявки, открытой из «Графика»: карточка клиента и, у выполненных, отчёт.
+  // Закрытие этих окон возвращает обратно к заявке.
+  const scheduleJobActions = (current) => {
+    const job = current.job;
+    const actions = [];
+    if (canAccess("tab.clients")) {
+      const client = jobClient(job);
+      actions.push(client
+        ? { key: "client", label: "Карточка клиента", icon: <Contact size={14} />, onClick: () => { loadClientEvents(); setModal({ kind: "clientDetails", client, back: current }); } }
+        : { key: "client", label: "Карточка клиента", icon: <Contact size={14} />, onClick: () => showToast("Карточка клиента по этому телефону не найдена") });
+    }
+    if (job.status === "done") actions.push({ key: "report", label: "Отчёт о проделанной работе", icon: <FileText size={14} />, className: "primary", onClick: () => setModal({ kind: "view", job, back: current }) });
+    return actions;
+  };
   const openSubscriptionDraft = (job) => setModal({ kind: "contract", draft: contractDraftFromJob(job, jobClient(job), todayIso) });
   const subscriptionLeads = tab === "subscriptions" ? subscriptionCandidates({ jobs, clients, contracts }) : [];
   const doneJobClientLabel = (job) => (jobIsSubscribed(job) ? "Абонент" : jobClientType(job) === "company" ? "Юрлицо" : "");
@@ -3982,15 +3997,25 @@ function Dashboard({ session, profile }) {
         )}
 
         {!loading && tab === "schedule" && (() => {
-          const DAY_START = 7 * 60, DAY_END = 23 * 60; // 07:00–23:00
-          const dayJobs = jobs.filter((j) => j.scheduled_date === scheduleDate && j.status !== "canceled");
+          // Окно 07:00–23:00 расширяется под ранние и ночные заявки (см. scheduleTimeline.js).
+          const day = scheduleDay(jobs, scheduleDate);
+          const { start: DAY_START, end: DAY_END } = day;
+          const dayJobs = [...day.items.map((x) => x.job), ...day.untimed];
           const offToday = daysOff.filter((d) => d.off_date === scheduleDate);
           const offFor = (techId) => offToday.find((d) => d.tech_id === techId);
           const cols = [...techs.map((t) => ({ id: t.id, name: t.full_name || "—" })), { id: null, name: "Не назначено" }];
           const shiftDay = (d) => { const x = parseIso(scheduleDate) || new Date(); x.setDate(x.getDate() + d); setScheduleDate(isoOf(x)); };
           const isToday = scheduleDate === new Date().toISOString().slice(0, 10);
-          const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-          const hours = []; for (let h = 7; h <= 23; h++) hours.push(h);
+          const nowLine = nowOnScale(scheduleDate, day);
+          const openScheduleJob = (j) => setModal({ kind: "edit", job: j, fromSchedule: true });
+          const timeLabel = (x) => `${x.job.scheduled_time || ""}${x.nextDay ? ` (${isoToRu(x.job.scheduled_date).slice(0, 5)})` : ""}`;
+          const mobileRow = (j, time) => (
+            <button type="button" key={j.id} className="kd-schedule-row" onClick={() => openScheduleJob(j)}>
+              <strong>{time}</strong>
+              <span><b>{addressPlain(j.address) || j.pest}</b><small>{j.pest} · {j.assigned_to ? personName(j.assigned_to) : "не назначено"}</small></span>
+              <ChevronRight size={16} />
+            </button>
+          );
           return (
             <>
               <div className="kd-tabbar kd-schedule-toolbar" style={{ marginBottom: 10 }}>
@@ -4005,15 +4030,11 @@ function Dashboard({ session, profile }) {
                 </div>
               </div>
               {offToday.length > 0 && <div className="kd-hint kd-schedule-off" style={{ marginBottom: 10 }}>🌴 Отдыхают: {offToday.map((d) => personName(d.tech_id)).join(", ")}</div>}
+              {day.nightOnPrevDay > 0 && <div className="kd-hint kd-schedule-night" style={{ marginBottom: 10 }}>🌙 Ночные заявки до 05:30 ({day.nightOnPrevDay}) показаны в графике предыдущего дня, после полуночи. <button type="button" className="kd-btn ghost sm" onClick={() => shiftDay(-1)}>Открыть</button></div>}
               <div className="kd-schedule-mobile">
                 {dayJobs.length === 0 && <div className="kd-empty">На этот день заявок нет.</div>}
-                {[...dayJobs].sort((a, b) => jobTime(a) - jobTime(b)).map((j) => (
-                  <button type="button" key={j.id} className="kd-schedule-row" onClick={() => setModal({ kind: "edit", job: j })}>
-                    <strong>{j.scheduled_time || "Без времени"}</strong>
-                    <span><b>{addressPlain(j.address) || j.pest}</b><small>{j.pest} · {j.assigned_to ? personName(j.assigned_to) : "не назначено"}</small></span>
-                    <ChevronRight size={16} />
-                  </button>
-                ))}
+                {day.items.map((x) => mobileRow(x.job, timeLabel(x)))}
+                {day.untimed.map((j) => mobileRow(j, "Без времени"))}
               </div>
               <div className="kd-timeline kd-schedule-desktop">
                 <div className="kd-tlgrid" style={{ gridTemplateColumns: `56px repeat(${cols.length}, minmax(230px, 1fr))` }}>
@@ -4040,32 +4061,31 @@ function Dashboard({ session, profile }) {
                     );
                   })}
                   <div className="kd-tlaxis" style={{ height: DAY_END - DAY_START }}>
-                    {hours.map((h) => <div key={h} className="kd-tlhour" style={{ top: h * 60 - DAY_START }}>{String(h).padStart(2, "0")}:00</div>)}
+                    {day.hours.map((h) => <div key={h} className={`kd-tlhour ${h >= 24 ? "next" : ""}`} style={{ top: h * 60 - DAY_START }} title={h >= 24 ? `Ночь на ${isoToRu(day.nextIso)}` : undefined}>{hourLabel(h)}</div>)}
                   </div>
                   {cols.map((c) => {
-                    const colJobs = dayJobs.filter((j) => (j.assigned_to || null) === c.id);
-                    const timed = colJobs.map((j) => ({ j, r: timeRangeMin(j.scheduled_time) })).filter((x) => x.r);
-                    const untimed = colJobs.filter((j) => !timeRangeMin(j.scheduled_time));
+                    const timed = day.items.filter((x) => (x.job.assigned_to || null) === c.id);
+                    const untimed = day.untimed.filter((j) => (j.assigned_to || null) === c.id);
                     const off = c.id ? offFor(c.id) : null;
                     return (
                       <div key={c.id || "none"} className={`kd-tlcol ${off ? "off" : ""}`} style={{ height: DAY_END - DAY_START }}>
-                        {isToday && nowMin >= DAY_START && nowMin <= DAY_END && <div className="kd-tlnow" style={{ top: nowMin - DAY_START }} />}
+                        {DAY_END > 24 * 60 && <div className="kd-tlmidnight" style={{ top: 24 * 60 - DAY_START }} />}
+                        {nowLine !== null && <div className="kd-tlnow" style={{ top: nowLine - DAY_START }} />}
                         {untimed.length > 0 && (
                           <div className="kd-tluntimed">
                             {untimed.map((j) => (
-                              <button key={j.id} className="kd-tlchip" onClick={() => setModal({ kind: "edit", job: j })}>⏱ {addressPlain(j.address) || j.pest}</button>
+                              <button key={j.id} className="kd-tlchip" onClick={() => openScheduleJob(j)}>⏱ {addressPlain(j.address) || j.pest}</button>
                             ))}
                           </div>
                         )}
-                        {timed.map(({ j, r }) => {
-                          const top = Math.max(0, r.from - DAY_START);
-                          const height = Math.max(46, Math.min(r.to, DAY_END) - Math.max(r.from, DAY_START));
+                        {timed.map((x) => {
+                          const j = x.job;
                           const st = STATUS[j.status] || STATUS.new;
                           return (
-                            <button key={j.id} className="kd-tlcard" style={{ top, height, borderLeftColor: st.color, background: st.bg }}
-                              onClick={() => setModal({ kind: "edit", job: j })}>
+                            <button key={j.id} className="kd-tlcard" style={{ top: x.from - DAY_START, height: Math.max(46, x.to - x.from), borderLeftColor: st.color, background: st.bg }}
+                              onClick={() => openScheduleJob(j)}>
                               <div className="kd-tladdr">{addressPlain(j.address)}</div>
-                              <div className="kd-tlsub">{j.scheduled_time || ""} · {j.pest}</div>
+                              <div className="kd-tlsub">{timeLabel(x)} · {j.pest}</div>
                             </button>
                           );
                         })}
@@ -6501,7 +6521,7 @@ function Dashboard({ session, profile }) {
       </div>
 
       {modal?.kind === "new" && <JobFormModal draftOwnerId={session.user.id} findBlocked={blockedClient} title="Новая заявка" submitLabel="Создать" partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} defaultGuarantee={defaultGuarantee} onClose={() => setModal(null)} onSave={createJob} />}
-      {modal?.kind === "edit" && <JobFormModal draftOwnerId={session.user.id} findBlocked={blockedClient} title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
+      {modal?.kind === "edit" && <JobFormModal draftOwnerId={session.user.id} findBlocked={blockedClient} title="Изменить заявку" submitLabel="Сохранить" keepStatus partners={partners} techs={techs} existingJobs={jobs} sources={sources} pestTypes={pestTypes} priceList={priceList} pestGuide={pestGuideObj} initial={jobToForm(modal.job)} headerActions={modal.fromSchedule ? scheduleJobActions(modal) : []} onClose={() => setModal(null)} onSave={(payload) => editJob(modal.job, payload)} />}
       {modal?.kind === "assign" && <AssignModal job={modal.job} techs={techs} onClose={() => setModal(null)} onSave={assignJob} assignInfo={(techId) => {
         const d = modal.job.scheduled_date;
         if (!d) return { off: false, night: false, count: 0, score: 50, reasons: ["дата ещё не задана"] };
@@ -6540,7 +6560,7 @@ function Dashboard({ session, profile }) {
         };
       })()} onClose={() => setModal(null)} onSave={submitReport} />}
       {modal?.kind === "reportSuccess" && <ReportSuccessModal onClose={() => setModal(null)} />}
-      {modal?.kind === "view" && <ViewModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} chemicalsUnavailable={reportChemsFailed} onClose={() => setModal(null)} />}
+      {modal?.kind === "view" && <ViewModal job={modal.job} partnerName={partnerNameOf(modal.job)} chemicals={chemicals} performedBy={profileById(modal.job.reported_by)?.full_name || techById(modal.job.assigned_to)?.full_name} chemicalsUnavailable={reportChemsFailed} onClose={() => setModal(modal.back || null)} />}
       {modal?.kind === "details" && <DetailsModal job={modal.job} header={brandHeaderOf(modal.job)} partnerName={partnerNameOf(modal.job)}
         siblings={visitsOfOrder(modal.job)} canAddVisit={canEditJobs}
         onAddVisit={(job) => setModal({ kind: "addVisit", job })}
@@ -6696,7 +6716,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "clientDetails" && <ClientDetailsModal regularClientThreshold={settings.regular_client_threshold} onBlock={(client) => setModal({ kind: "blockClient", client })} onOpenLegalContract={openLegalContract} qualityChecks={qualityEvents.length ? qualityEvents : qualityChecks} people={assignableProfiles} legalContracts={legalContracts} client={modal.client} jobs={jobs}
         contacts={clientContacts} addresses={clientAddresses} contracts={contracts} followups={followups}
         events={clientEvents} leads={leads} leadActivities={leadActivities} attachments={clientAttachments} jobProofs={jobProofs}
-        canEdit={canEditJobs} onClose={() => setModal(null)}
+        canEdit={canEditJobs} onClose={() => setModal(modal.back || null)}
         onEdit={() => setModal({ kind: "clientProfile", client: modal.client })}
         onAddNote={addClientDirectoryNote} onUpload={uploadClientAttachment} onOpenAttachment={openClientAttachment}
         onOpenJob={(job) => setModal(job.status === "done" ? { kind: "view", job } : canEditJobs ? { kind: "edit", job } : { kind: "details", job })}

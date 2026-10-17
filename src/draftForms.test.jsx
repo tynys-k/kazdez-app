@@ -124,6 +124,30 @@ describe("job form save recovery", () => {
     expect(button("Сохранить").disabled).toBe(false);
     expect(container.textContent).toContain("сервер мог принять запрос");
   });
+
+  it("shows header actions and asks before leaving unsaved edits", async () => {
+    const initial = jobToForm({ ...job, type: "Первичная", client_phone: "+77010000000", price_options: [{ label: "Стоимость", amount: 10000 }] });
+    const openClient = vi.fn(), openReport = vi.fn();
+    const actions = [{ key: "client", label: "Карточка клиента", onClick: openClient }, { key: "report", label: "Отчёт о проделанной работе", className: "primary", onClick: openReport }];
+    await act(async () => root.render(<JobFormModal draftOwnerId={ownerId} initial={initial} title="Изменить заявку" submitLabel="Сохранить" headerActions={actions} onSave={vi.fn()} onClose={vi.fn()} />));
+    expect(container.querySelector(".kd-modal-head .kd-modal-actions")).not.toBeNull();
+    await click("Карточка клиента");
+    expect(openClient).toHaveBeenCalledTimes(1);
+    await change(field("Адрес"), "Другой адрес");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await click("Отчёт о проделанной работе");
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(openReport).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    await click("Отчёт о проделанной работе");
+    expect(openReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders no header action bar without actions", async () => {
+    const initial = jobToForm({ ...job, type: "Первичная", client_phone: "+77010000000" });
+    await act(async () => root.render(<JobFormModal draftOwnerId={ownerId} initial={initial} title="Изменить заявку" submitLabel="Сохранить" onSave={vi.fn()} onClose={vi.fn()} />));
+    expect(container.querySelector(".kd-modal-actions")).toBeNull();
+  });
 });
 
 describe("lead work queue forms", () => {
