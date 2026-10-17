@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultPayrollPeriod, isPayrollMonth, paymentPeriod, payrollPaymentsFor, payrollPeriodLabel } from "./payrollPaymentModel";
+import { defaultPayrollPeriod, isPayrollMonth, paymentPeriod, payrollPaymentDeleteMessage, payrollPaymentsFor, payrollPeriodLabel } from "./payrollPaymentModel";
 
 const tech = "t1";
 const expenses = [
@@ -39,6 +39,12 @@ describe("payroll payment period", () => {
     expect(payrollPeriodLabel("2026-13")).toBe("");
     expect(isPayrollMonth("2026-01")).toBe(true);
     expect(isPayrollMonth("2026-1")).toBe(false);
+  });
+
+  it("explains what deleting a mistaken payment removes", () => {
+    const text = payrollPaymentDeleteMessage({ ...expenses[0], account_id: "kaspi-gold" }, { person: "Олжас", typeLabel: "Зарплата", accountName: "Kaspi Gold", amountText: "15 000 ₸", dateText: "01.10.2026" });
+    expect(text).toBe("Удалить выплату: Олжас · Зарплата за сентябрь 2026 · 15 000 ₸ · оплачено 01.10.2026? Расход по счёту «Kaspi Gold» тоже удалится, остаток счёта вернётся. Отменить удаление нельзя.");
+    expect(payrollPaymentDeleteMessage({ expense_date: "2026-09-09" }, { typeLabel: "Дорожные" })).toContain("Расхода по счёту у неё нет.");
   });
 
   it("defaults the form to the month open in the section", () => {

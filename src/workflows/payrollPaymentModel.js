@@ -31,6 +31,17 @@ export function payrollPaymentsFor(expenses, techId, { monthKey = "", inPeriod =
     && (monthKey ? paymentPeriod(e) === monthKey : inPeriod(e.expense_date)));
 }
 
+// Текст подтверждения удаления ошибочной выплаты: что именно удаляем и что
+// вместе с ней исчезнет расход по счёту.
+export function payrollPaymentDeleteMessage(expense, { person = "", typeLabel = "Выплата", accountName = "", amountText = "", dateText = "" } = {}) {
+  const period = payrollPeriodLabel(paymentPeriod(expense)).toLowerCase();
+  const what = [person, `${typeLabel}${period ? ` за ${period}` : ""}`, amountText, dateText ? `оплачено ${dateText}` : ""].filter(Boolean).join(" · ");
+  const cash = expense?.account_id
+    ? `Расход по счёту${accountName ? ` «${accountName}»` : ""} тоже удалится, остаток счёта вернётся.`
+    : "Расхода по счёту у неё нет.";
+  return `Удалить выплату: ${what}? ${cash} Отменить удаление нельзя.`;
+}
+
 // Месяц, который форма «Добавить выплату» предлагает по умолчанию: открытый в
 // разделе месяц, а без него — месяц сегодняшней даты.
 export function defaultPayrollPeriod(monthKey, today = new Date()) {

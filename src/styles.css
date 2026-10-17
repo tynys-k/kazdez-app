@@ -281,6 +281,8 @@ body{
 .kd-btn.primary:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;}
 .kd-btn.primary.danger{background:linear-gradient(180deg,#ff8a82,var(--rust));color:#180706;}
 .kd-btn.primary.danger:hover{filter:brightness(1.05);}
+/* Глобальный .danger ниже красит текст в rust с !important — на красной кнопке он сливался с фоном. */
+.kd-btn.primary.danger{color:var(--surface,#fff)!important;}
 .kd-btn.ghost{background:var(--surface-sunk);border-color:var(--line);color:var(--ink-soft);}
 .kd-btn.ghost:hover{border-color:rgba(52,211,153,.35);color:var(--ink);}
 .kd-btn.ghost.danger{color:var(--rust);}
