@@ -372,7 +372,8 @@ const REPEAT_POLICIES = [
 const repeatLabel = (code) => (REPEAT_POLICIES.find((p) => p.code === code) || {}).label || "";
 const DOC_TYPES = ["Договор", "Акт о дезработах", "Провести через фирму (АВР+ЭСФ)", "КП"];
 const DOC_STATUS = { todo: { label: "В работе", color: "#2563EB", bg: "#EAF1FE" }, done: { label: "Сделано", color: "#B45309", bg: "#FCF1E2" }, paid: { label: "Оплачено", color: "#0E7C66", bg: "#E4F3EE" } };
-const EXPENSE_TYPES = { salary: "Зарплата", travel: "Дорожные", other: "Другое" };
+// Виды выплат сотрудникам. Порядок — как в выпадающем списке формы выплаты.
+const EXPENSE_TYPES = { salary: "Зарплата", advance: "Аванс", bonus: "Премия", tax: "Налоги", travel: "Дорожные", other: "Другое" };
 const EQUIP_CATEGORIES = { equipment: "Оборудование", siz: "СИЗ", container: "Тара", other: "Другое" };
 const EQUIP_STATUS = { with_tech: { label: "У сотрудника", color: "#0E7C66", bg: "#E4F3EE" }, returned: { label: "Возврат на склад", color: "#6E7871", bg: "#F7F9F6" }, broken: { label: "Сломано", color: "#B3261E", bg: "#FBE7E5" }, lost: { label: "Утеряно", color: "#B3261E", bg: "#FBE7E5" }, transferred: { label: "Передано", color: "#B4650B", bg: "#FBEDD9" } };
 const DEPOSIT_STATUS = { pending: { label: "Ожидает", color: "#B4650B", bg: "#FBEDD9" }, confirmed: { label: "Подтверждено", color: "#0E7C66", bg: "#E4F3EE" }, rejected: { label: "Отклонено", color: "#B3261E", bg: "#FBE7E5" } };
