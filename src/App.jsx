@@ -48,7 +48,10 @@ import { ClientStatusBadges, RegularClientRule } from "./workflows/ClientStatus"
 import { Badge, DetailDrawer, ListRow, Pagination } from "./ui/primitives";
 import { formatDate, formatMoney, formatPhone } from "./ui/formatters";
 import { taskParticipant } from "./workflows/taskModel";
-import { qualityHistoryForPhone, qualityPendingJobs } from "./workflows/QualityHistory";
+import { qualityHistoryForPhone } from "./workflows/QualityHistory";
+import { CallQueue, JobCallPanel } from "./workflows/ClientCalls";
+import CallModal from "./workflows/CallModal";
+import { CALL_OUTCOMES, CLIENT_CALLS_MIGRATION, buildCallQueue, buildLaterJobIndex, callStageOf, callStateOf, callsForJob, liveCalls, outcomeLabel } from "./workflows/clientCallsModel";
 import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatList, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
 const MarketingPage = React.lazy(() => import("./MarketingPage"));
@@ -314,6 +317,9 @@ function Dashboard({ session, profile }) {
   const [supplierOffers, setSupplierOffers] = useState([]);
   const [payrollCarryovers, setPayrollCarryovers] = useState([]);
   const [qualityEvents, setQualityEvents] = useState([]);
+  const [clientCalls, setClientCalls] = useState([]);
+  const [callQueueView, setCallQueueView] = useState("after_primary");
+  const [callWindowDays, setCallWindowDays] = useState(60);
   const [legalContracts, setLegalContracts] = useState([]);
   const [selectedLegalId, setSelectedLegalId] = useState(null);
   function openLegalContract(contract) { setModal(null); setSelectedLegalId(contract.id); setTab("contracts"); }
@@ -665,6 +671,7 @@ function Dashboard({ session, profile }) {
     { key: "client_followups", label: "Касания", run: () => supabase.from("client_followups").select("*").order("due_date", { ascending: true }), set: setFollowups },
     { key: "quality_checks", label: "Контроль качества", run: () => fetchAllRows("quality_checks", { column: "contacted_at", ascending: false }), set: setQualityChecks },
     { key: "quality_check_events", when: () => canAccess("tab.retention") || canAccess("tab.clients"), label: "История контроля", run: () => fetchAllRows("quality_check_events", { column: "contacted_at", ascending: false }), set: setQualityEvents },
+    { key: "client_calls", when: () => canAccess("tab.retention") || canAccess("tab.clients") || canEditJobs, label: "Журнал обзвона", run: () => fetchAllRows("client_calls", { column: "created_at", ascending: false }), set: setClientCalls },
     { key: "payroll_carryovers", when: () => canAccess("tab.payroll"), label: "Переносы переплат", run: () => fetchAllRows("payroll_carryovers", { column: "created_at", ascending: false }), set: setPayrollCarryovers },
     { key: "legal_contracts", when: () => canAccess("tab.clients") || canAccess("tab.subscriptions") || canAccess("tab.docs"), label: "Договоры", run: () => fetchAllRows("legal_contracts", { column: "signed_on", ascending: false }), set: setLegalContracts },
     { key: "service_contracts", label: "Абоненты", run: () => fetchAllRows("service_contracts", { column: "next_service_date", ascending: true }), set: setContracts },
@@ -816,7 +823,7 @@ function Dashboard({ session, profile }) {
   // обслуживания по договору и справочники, которые пополняются на лету.
   const reloadJobs = () => load([
     "jobs", "job_proofs", "job_helpers", "job_discounts",
-    "client_followups", "quality_checks", "service_contracts", "job_equipment", "job_debts", "repeat_causes", "job_chem_details", "control_points", "control_checks",
+    "client_followups", "quality_checks", "client_calls", "service_contracts", "job_equipment", "job_debts", "repeat_causes", "job_chem_details", "control_points", "control_checks",
     "client_sources", "pest_types", "objects", "clients",
   ]);
   const reloadMoney = () => load(["accounts", "money_moves", "opex", "tech_expenses", "cash_deposits", "cash_adjustments"]);
@@ -2388,6 +2395,33 @@ function Dashboard({ session, profile }) {
     if (error) { showToast("Ошибка: " + error.message); return; }
     await logAction("Касание", `Завершено: ${item.phone} · ${result}`); showToast("Касание завершено"); reloadJobs();
   }
+  // Звонок клиенту после выезда. Итог и его побочный эффект (заявка уходит
+  // в «Повторные выезды») пишет одна функция базы — иначе запись в журнале
+  // и состояние заявки могли бы разойтись.
+  async function logClientCall(job, payload) {
+    const rpcName = "log_client_call_atomic";
+    const { error } = await supabase.rpc(rpcName, { p_job_id: job.id, p_call: payload });
+    if (error) {
+      return atomicReceiptRpcUnavailable(error, rpcName)
+        ? `Сначала примени миграцию ${CLIENT_CALLS_MIGRATION} в Supabase`
+        : error.message;
+    }
+    await logAction("Обзвон", `${job.client_phone} · ${outcomeLabel(payload.outcome, callStageOf(job))}${payload.note ? " — " + payload.note : ""}`);
+    setModal((current) => current?.back || null);
+    showToast(payload.outcome === "agreed" ? "Сохранено — заявка в «Повторных выездах»" : CALL_OUTCOMES[payload.outcome]?.closes ? "Сохранено, клиент убран из обзвона" : "Звонок сохранён");
+    reloadJobs();
+    return "";
+  }
+  function askDeleteClientCall(call) {
+    const revert = call.applied_repeat ? " Заявка вернётся из «Повторных выездов», если повторную ещё не создали." : "";
+    askConfirm(`Удалить запись «${outcomeLabel(call.outcome, call.stage)}»?${revert}`, async () => {
+      const { error } = await supabase.rpc("delete_client_call_atomic", { p_call_id: call.id });
+      if (error) { showToast("Ошибка: " + error.message); return; }
+      await logAction("Обзвон", `Удалена запись: ${call.client_phone} · ${outcomeLabel(call.outcome, call.stage)}`);
+      setClientCalls((items) => items.map((c) => (c.id === call.id ? { ...c, deleted_at: new Date().toISOString() } : c)));
+      showToast("Запись удалена"); reloadJobs();
+    }, { confirmLabel: "Да, удалить" });
+  }
   async function saveQualityCheck(job, payload) {
     const rpcName = "save_quality_check_atomic";
     const { error } = await supabase.rpc(rpcName, {
@@ -3241,7 +3275,20 @@ function Dashboard({ session, profile }) {
   const openFollowups = followups.filter((f) => f.status !== "done");
   const dueFollowups = openFollowups.filter((f) => f.due_date && f.due_date <= todayIso);
   const qualityByJob = (jobId) => qualityChecks.find((q) => String(q.job_id) === String(jobId));
-  const qualityPending = qualityPendingJobs(doneJobs, qualityChecks);
+  // Очередь обзвона после первичной и вторичной. Закрытые итогом звонка,
+  // отправленные на повтор и уже записанные на следующий выезд в неё не
+  // попадают; «не дозвонился» остаётся до ответа.
+  const callQueue = buildCallQueue(jobs, { calls: clientCalls, qualityChecks, today: todayIso, windowDays: callWindowDays });
+  const callQueueDue = callQueue.after_primary.length + callQueue.after_secondary.length;
+  const laterJobIndex = buildLaterJobIndex(jobs);
+  const qualityCheckByJob = new Map(qualityChecks.map((q) => [String(q.job_id), q]));
+  const jobCallState = (job) => callStateOf(job, { ownCalls: callsForJob(clientCalls, job.id), legacy: qualityCheckByJob.get(String(job.id)), laterIndex: laterJobIndex });
+  const canCallClients = canEditJobs || canAccess("tab.retention");
+  // Из карточки клиента звонок открывается поверх неё и возвращает обратно.
+  const openCall = (job) => setModal((current) => ({ kind: "call", job, back: current && current.kind !== "call" ? current : null }));
+  const callRatings = liveCalls(clientCalls).filter((c) => c.rating).map((c) => Number(c.rating));
+  const legacyRatings = qualityChecks.filter((q) => q.result !== "no_answer" && q.rating).map((q) => Number(q.rating));
+  const allRatings = [...callRatings, ...legacyRatings];
   const qualityProblems = qualityChecks.filter((q) => q.status === "problem" || q.result === "complaint");
   const overdueTransfers = doneJobs.filter((j) => Number(j.report_transfer) > 0 && !j.transfer_paid && daysSince(j.reported_at || j.scheduled_date) >= 3);
   const recentLowFeedback = publicFeedback.filter((f) => Number(f.rating) <= 3 && daysSince(f.created_at) <= 14);
@@ -3386,7 +3433,7 @@ function Dashboard({ session, profile }) {
     trainingAlerts.length ? { id: "training", label: "Пора перепроверить обучение", value: trainingAlerts.length, tab: "team", tone: "warning" } : null,
     isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
     isAdmin && dueFollowups.length ? { id: "client-followups", label: "Пора связаться с клиентами", value: dueFollowups.length, tab: "retention", tone: "warning" } : null,
-    isAdmin && qualityPending.length ? { id: "quality", label: "Ждут контроля качества", value: qualityPending.length, tab: "retention", tone: "warning" } : null,
+    isAdmin && callQueueDue ? { id: "quality", label: "Ждут звонка после выезда", value: callQueueDue, tab: "retention", tone: "warning" } : null,
     isAdmin && dueContracts.length ? { id: "contracts", label: "Пора создать плановые выезды", value: dueContracts.length, tab: "subscriptions", tone: "danger" } : null,
     isAdmin && overdueTransfers.length ? { id: "transfers", label: "Оплата просрочена более 3 дней", value: overdueTransfers.length, tab: "done", tone: "danger" } : null,
     isAdmin && qualityProblems.length ? { id: "complaints", label: "Есть проблемы по качеству", value: qualityProblems.length, tab: "retention", tone: "danger" } : null,
@@ -3534,7 +3581,7 @@ function Dashboard({ session, profile }) {
     { id: "clients", icon: Users, label: `Клиенты · ${clients.length}` },
     { id: "tenders", icon: Gavel, label: `Тендеры${tenderOverdue ? " · ⚠ " + tenderOverdue : ""}` },
     { id: "repeats", icon: RefreshCw, label: `Повторные выезды${jobs.filter((j) => j.repeat_state === "on_repeat").length ? " · " + jobs.filter((j) => j.repeat_state === "on_repeat").length : ""}` },
-    { id: "retention", icon: ClipboardCheck, label: `Обзвон и качество${dueFollowups.length || qualityPending.length ? " · " + (dueFollowups.length + qualityPending.length) : ""}` },
+    { id: "retention", icon: ClipboardCheck, label: `Обзвон и качество${dueFollowups.length || callQueueDue ? " · " + (dueFollowups.length + callQueueDue) : ""}` },
     // Счётчик считает КП, которые уже у клиента и ждут ответа: черновик
     // и закрытое КП ничего не требуют, а ждущее — требует звонка.
     { id: "proposals", icon: FileSignature, label: `КП${proposals.filter((p) => p.status === "sent").length ? " · " + proposals.filter((p) => p.status === "sent").length : ""}` },
@@ -4139,7 +4186,10 @@ function Dashboard({ session, profile }) {
                   <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} clientLabel={doneJobClientLabel(j)} onSubscribe={canEditJobs && !jobIsSubscribed(j) ? () => openSubscriptionDraft(j) : null} compact={expandedDoneId !== j.id} onExpand={() => setExpandedDoneId(j.id)} onCollapse={() => setExpandedDoneId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} clientLabel={doneJobClientLabel(j)}
+                      callPanel={expandedDoneId === j.id ? <JobCallPanel job={j} state={jobCallState(j)} people={allProfiles} userId={session.user.id} isAdmin={isAdmin} onCall={canCallClients ? () => openCall(j) : null} onDelete={canCallClients ? askDeleteClientCall : null} /> : null}
+                      onCall={canCallClients ? () => openCall(j) : null}
+                      onSubscribe={canEditJobs && !jobIsSubscribed(j) ? () => openSubscriptionDraft(j) : null} compact={expandedDoneId !== j.id} onExpand={() => setExpandedDoneId(j.id)} onCollapse={() => setExpandedDoneId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                       onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                       onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                       onCopyPublicLink={() => copyPublicJobLink(j)}
@@ -4717,10 +4767,15 @@ function Dashboard({ session, profile }) {
           <div className="kd-stage2">
             <div className="kd-kpigrid">
               <div className="kd-kpicard"><span>Касания на сегодня</span><strong className={dueFollowups.length ? "neg" : "pos"}>{dueFollowups.length}</strong><small>{openFollowups.length} всего открыто</small></div>
-              <div className="kd-kpicard"><span>Контроль качества</span><strong>{qualityPending.length}</strong><small>ожидают звонка</small></div>
-              <div className="kd-kpicard"><span>Средняя оценка</span><strong>{qualityChecks.filter((q) => q.result !== "no_answer" && q.rating).length ? (qualityChecks.filter((q) => q.result !== "no_answer").reduce((s, q) => s + (Number(q.rating) || 0), 0) / qualityChecks.filter((q) => q.result !== "no_answer" && q.rating).length).toFixed(1) : "—"}</strong><small>по ответившим клиентам</small></div>
+              <div className="kd-kpicard"><span>Обзвон после выездов</span><strong className={callQueueDue ? "neg" : "pos"}>{callQueueDue}</strong><small>{callQueue.after_primary.length} после первичной · {callQueue.after_secondary.length} после вторичной</small></div>
+              <div className="kd-kpicard"><span>Средняя оценка</span><strong>{allRatings.length ? (allRatings.reduce((sum, n) => sum + n, 0) / allRatings.length).toFixed(1) : "—"}</strong><small>по ответившим клиентам</small></div>
               <div className="kd-kpicard"><span>Допродажи</span><strong>{upsellCandidates.length}</strong><small>актуальных возможностей</small></div>
             </div>
+
+            <CallQueue queue={callQueue} view={callQueueView} onViewChange={setCallQueueView}
+              windowDays={callWindowDays} onWindowChange={setCallWindowDays} people={allProfiles}
+              onCall={canCallClients ? openCall : () => showToast("Нет прав на обзвон")}
+              onOpenJob={(j) => { loadClientEvents(); setModal({ kind: "history", job: j }); }} />
 
             <section className="kd-card">
               <div className="kd-stage2head"><div><div className="kd-title">Повторные касания</div><div className="kd-muted">Просроченные и запланированные звонки</div></div><CalendarClock size={20} /></div>
@@ -4830,12 +4885,9 @@ function Dashboard({ session, profile }) {
               {dormant.length > 40 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны первые 40 из {dormant.length} — по убыванию выручки.</div>}
             </section>
 
-            <div className="kd-stage2grid">
+            <div>
               <section className="kd-card"><div className="kd-stage2head"><div><div className="kd-title">Потерянные клиенты</div><div className="kd-muted">Отменённые заявки без запланированного возврата</div></div><UserRoundX size={20} /></div>
                 <div className="kd-compactlist">{canceledJobs.filter((j) => !openFollowups.some((f) => f.job_id === j.id && f.kind === "lost")).slice(0, 15).map((j) => <div key={j.id}><span><strong>{j.client_phone}</strong><small>{j.cancel_reason || "Причина не указана"} · {j.pest}</small></span><button className="kd-btn ghost sm" onClick={() => setModal({ kind: "followup", job: j, defaultKind: "lost" })}>Вернуть</button></div>)}</div>
-              </section>
-              <section className="kd-card"><div className="kd-stage2head"><div><div className="kd-title">Контроль качества</div><div className="kd-muted">После выполненной обработки</div></div><ClipboardCheck size={20} /></div>
-                <div className="kd-compactlist">{qualityPending.slice(0, 15).map((j) => <div key={j.id}><span><strong>{j.client_phone} · {j.pest}</strong><small>{isoToRu(j.scheduled_date)} · {addressPlain(j.address)}</small></span><button className="kd-btn primary sm" onClick={() => setModal({ kind: "quality", job: j })}>Проверить</button></div>)}</div>
               </section>
             </div>
 
@@ -6600,6 +6652,8 @@ function Dashboard({ session, profile }) {
         job={modal.job} jobs={jobs} followups={followups} qualityChecks={qualityChecks} contracts={contracts}
         events={clientEvents} feedback={publicFeedback} profiles={allProfiles} canPlanFollowup={canEditJobs} partnerNameOf={partnerNameOf}
         onAddNote={addClientNote} onCopyPublicLink={copyPublicJobLink}
+        calls={clientCalls} userId={session.user.id} isAdmin={isAdmin}
+        onCall={canCallClients ? openCall : null} onDeleteCall={canCallClients ? askDeleteClientCall : null}
         onPlanFollowup={(j) => setModal({ kind: "followup", job: j, defaultKind: "lost" })}
         onClose={() => setModal(null)}
         onOpen={(j) => setModal(j.status === "done" ? { kind: "view", job: j } : canEditJobs ? { kind: "edit", job: j } : { kind: "details", job: j })} />}
@@ -6732,6 +6786,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "doc" && <DocModal doc={modal.doc} partners={partners} onClose={() => setModal(null)} onSave={saveDoc} />}
       {modal?.kind === "economics" && <JobEconomicsModal job={modal.job} economics={jobEconomics(modal.job)} onClose={() => setModal(null)} onSave={(payload) => saveJobEconomics(modal.job, payload)} />}
       {modal?.kind === "followup" && <FollowupModal followup={modal.followup} job={modal.job} lead={modal.lead} defaultKind={modal.defaultKind || "lost"} people={allProfiles.filter((p) => p.role === "admin" || p.role === "manager")} onClose={() => setModal(null)} onSave={saveFollowup} />}
+      {modal?.kind === "call" && <CallModal job={modal.job} calls={callsForJob(clientCalls, modal.job.id)} people={allProfiles} userId={session.user.id} isAdmin={isAdmin} onClose={() => setModal(modal.back || null)} onSave={(payload) => logClientCall(modal.job, payload)} onDelete={askDeleteClientCall} />}
       {modal?.kind === "quality" && <QualityModal job={modal.job} check={qualityByJob(modal.job.id)} history={qualityHistoryForPhone(modal.job.client_phone, jobs, qualityEvents.length ? qualityEvents : qualityChecks)} jobs={jobs} people={assignableProfiles} defaultReviewUrl={settings.review_url || ""} onClose={() => setModal(null)} onSave={(payload) => saveQualityCheck(modal.job, payload)} />}
       {modal?.kind === "clientProfile" && <ClientProfileModal client={modal.client}
         contacts={clientContacts.filter((row) => String(row.client_id) === String(modal.client?.id))}
@@ -6740,6 +6795,8 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "clientDetails" && <ClientDetailsModal regularClientThreshold={settings.regular_client_threshold} onBlock={(client) => setModal({ kind: "blockClient", client })} onOpenLegalContract={openLegalContract} qualityChecks={qualityEvents.length ? qualityEvents : qualityChecks} people={assignableProfiles} legalContracts={legalContracts} client={modal.client} jobs={jobs}
         contacts={clientContacts} addresses={clientAddresses} contracts={contracts} followups={followups}
         events={clientEvents} leads={leads} leadActivities={leadActivities} attachments={clientAttachments} jobProofs={jobProofs}
+        calls={clientCalls} callPeople={allProfiles} userId={session.user.id} isAdmin={isAdmin}
+        onCall={canCallClients ? openCall : null} onDeleteCall={canCallClients ? askDeleteClientCall : null}
         canEdit={canEditJobs} onClose={() => setModal(modal.back || null)}
         onEdit={() => setModal({ kind: "clientProfile", client: modal.client })}
         onAddNote={addClientDirectoryNote} onUpload={uploadClientAttachment} onOpenAttachment={openClientAttachment}

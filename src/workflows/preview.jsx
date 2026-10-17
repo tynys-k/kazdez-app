@@ -20,6 +20,10 @@ import "../ui/design-tokens.css";
 import "../ui/primitives.css";
 import "../ui/legacy-bridge.css";
 import "./workflows.css";
+import { CallQueue, JobCallPanel } from "./ClientCalls";
+import CallModal from "./CallModal";
+import { buildCallQueue, callStateOf, callsForJob, callStageOf } from "./clientCallsModel";
+import { DateFilterBar } from "../shared";
 const people = [{ id: "demo-admin", full_name: "Администратор" }, { id: "demo-worker", full_name: "Аян" }, { id: "demo-observer", full_name: "Менеджер" }];
 const initialTasks = [
   { id: "demo-task-1", title: "Сверить остатки на Байзакова", description: "Пересчитать препараты и оформить акт ревизии. Сверить Кельт с журналом выдач.", status: "new", created_at: "2026-09-14T08:10:00+05:00", created_by: people[0].id, assignee_id: people[1].id, observer_ids: [people[2].id], due_date: "2026-09-16", due_time: "17:00", comment_policy: "participants" },
@@ -82,14 +86,39 @@ const previewProposals = [
   },
 ];
 const previewSettings = { company_name: "ТОО «Служба дезинфекции KAZDEZ»" };
+const isoAgo = (days) => { const d = new Date(); d.setDate(d.getDate() - days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const callJobs = [
+  { id: "call-1", pest: "Постельные клопы", type: "Первичная", brand: "KazDez", status: "done", work_stage: "done", scheduled_date: isoAgo(7), scheduled_time: "10:00", address: "ЖК Каргалы Сити, ул. Омарова, д. 7, кв. 54", client_phone: "+7 708 508 3756", contact_name: "Айгуль", price_options: [{ amount: 20000, label: "Стоимость" }], report_paid: 20000, reported_at: isoAgo(7) + "T12:00:00+05:00" },
+  { id: "call-2", pest: "Тараканы", type: "Первичная", brand: "KazDez", status: "done", work_stage: "done", scheduled_date: isoAgo(9), address: "ул. Сатпаева, д. 30/5", client_phone: "+7 701 501 7287", report_paid: 18000 },
+  { id: "call-3", pest: "Блохи", type: "Вторичная", brand: "KazDez", status: "done", work_stage: "done", scheduled_date: isoAgo(10), address: "ул. Доспанова, д. 55", client_phone: "+7 708 288 3463", report_paid: 15000 },
+  { id: "call-4", pest: "Мухи", type: "Первичная", brand: "KazDez", status: "done", work_stage: "done", scheduled_date: isoAgo(2), address: "ул. Байтерекова, д. 53", client_phone: "+7 702 407 8573", report_paid: 25000 },
+];
+const initialCalls = [
+  { id: "pc-1", job_id: "call-2", client_phone: "+7 701 501 7287", stage: "after_primary", outcome: "no_answer", created_by: "demo-admin", created_at: isoAgo(1) + "T11:00:00+05:00" },
+  { id: "pc-2", job_id: "call-2", client_phone: "+7 701 501 7287", stage: "after_primary", outcome: "note", note: "Просил звонить после 18:00", created_by: "demo-worker", created_at: isoAgo(1) + "T11:05:00+05:00" },
+];
+function CallsPreview() {
+  const [calls, setCalls] = useState(initialCalls), [callJob, setCallJob] = useState(null), [view, setView] = useState("after_primary"), [windowDays, setWindowDays] = useState(60), [expanded, setExpanded] = useState(""), [dateFilter, setDateFilter] = useState({ preset: "all" });
+  const queue = buildCallQueue(callJobs, { calls, today: isoAgo(0), windowDays });
+  const remove = (call) => setCalls((rows) => rows.map((c) => (c.id === call.id ? { ...c, deleted_at: new Date().toISOString() } : c)));
+  const save = async (payload) => { setCalls((rows) => [{ id: `pc-${rows.length + 1}`, job_id: callJob.id, client_phone: callJob.client_phone, stage: callStageOf(callJob), created_by: "demo-admin", created_at: new Date().toISOString(), ...payload }, ...rows]); setCallJob(null); return ""; };
+  return <section style={{ display: "grid", gap: 16 }}>
+    <DateFilterBar filter={dateFilter} onChange={setDateFilter} hide={["tomorrow"]} />
+    <CallQueue queue={queue} view={view} onViewChange={setView} windowDays={windowDays} onWindowChange={setWindowDays} people={people} onCall={setCallJob} onOpenJob={(j) => setExpanded(j.id)} />
+    <div className="kd-list">{callJobs.map((job) => <JobCard key={job.id} job={job} compact={expanded !== job.id} onExpand={() => setExpanded(job.id)} onCollapse={() => setExpanded("")} isAdmin assignedName="Олжас" onHistory={noop} onView={noop} onEdit={noop} onAssign={noop} onDelete={noop} onCall={() => setCallJob(job)}
+      callPanel={expanded === job.id ? <JobCallPanel job={job} state={callStateOf(job, { ownCalls: callsForJob(calls, job.id), jobs: callJobs })} people={people} userId="demo-admin" isAdmin onCall={() => setCallJob(job)} onDelete={remove} /> : null} />)}</div>
+    {callJob && <CallModal job={callJob} calls={callsForJob(calls, callJob.id)} people={people} userId="demo-admin" isAdmin onClose={() => setCallJob(null)} onSave={save} onDelete={remove} />}
+  </section>;
+}
 function ResponsivePreview() {
   const [width, setWidth] = useState(320);
   return <main><nav className="wf-toolbar">{[320, 768, 1024, 1440].map((size) => <button className="kd-btn ghost" key={size} onClick={() => setWidth(size)}>{size} px</button>)}</nav><iframe title="Проверка адаптивности" src="/workflow-preview.html" width={width} height="850" style={{ border: "1px solid var(--line)", display: "block", margin: "16px auto" }} /></main>;
 }
 function Preview() {
   const [page, setPage] = useState("Задачи"), [tasks, setTasks] = useState(initialTasks), [selected, setSelected] = useState(null), [expandedJob, setExpandedJob] = useState(""), [form, setForm] = useState({ object_kind: "commercial", object_details: { measurement: "fumigation", volume_method: "dimensions", length_m: 5, width_m: 4, height_m: 3 } });
-  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
+  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Обзвон", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
     {page === "Задачи" && <TaskBoard tasks={tasks} people={people} userId={people[0].id} canManage onCreate={noop} onEdit={noop} onRemove={noop} onStatus={async (task, status) => { setTasks(tasks.map((t) => t.id === task.id ? { ...t, status } : t)); return true; }} />}
+    {page === "Обзвон" && <CallsPreview />}
     {page === "Заявки" && <section><h2>Заявки</h2><p className="kd-muted">Нажмите на строку, чтобы увидеть детали и действия.</p><div className="kd-list">{previewJobs.map((job) => <JobCard key={job.id} job={job} compact={expandedJob !== job.id} onExpand={() => setExpandedJob(job.id)} onCollapse={() => setExpandedJob("")} isAdmin assignedName="Аян" onHistory={noop} onObject={noop} onProof={noop} onCopyPublicLink={noop} onReport={noop} onCancel={noop} onAssign={noop} onEdit={noop} onDelete={noop} />)}</div></section>}
     {page === "Склад" && <StockRegister warehouses={warehouses} warehouseMoves={moves} suppliers={suppliers} supplierOffers={offers} inventory={[chemical]} techs={people} techLedger={(id) => id === people[1].id ? [{ chem: chemical, received: 1000, consumed: 0, balance: 1000 }] : []} purchases={[]} handouts={[]} adjustments={[]} jobs={[]} sales={[]} equipment={[]} equipIssuedQty={() => 0} totalStockValue={102000} totalEquipValue={0} selectedId={chemical.id} onSelect={noop} canEditStock canManageTeam onStockIn={noop} onMovement={noop} onRemoveChem={noop} onAddEquipment={noop} onEditEquipment={noop} onRemoveEquipment={noop} techEquipment={() => []} onTransferEquipment={noop} onEquipStatus={noop} />}
     {page === "Договоры" && <ContractsRegister contracts={[{ id: "demo-contract", client_id: "demo-client", number: "Д-2026/15", signed_on: "2026-09-14", organization: "ТОО Тестовая организация", title: "Абонентское обслуживание", status: "active", amount: 180000 }]} clients={[{ id: "demo-client", name: "Тестовый клиент", phone: "+7 700 000 0000" }]} people={people} canEdit selectedId={selected} onSelect={setSelected} onReload={noop} onOpenClient={noop} />}
