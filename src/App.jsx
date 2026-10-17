@@ -34,7 +34,7 @@ import TenderDeliveries from "./workflows/TenderDeliveries";
 import { TenderRegister, TenderCollaboration, PartnerTenderLinks } from "./workflows/Tenders";
 import ContractsRegister from "./workflows/ContractsRegister";
 import PayrollCarryoverModal, { PayrollCarryoverHistory } from "./workflows/PayrollCarryover";
-import { defaultPayrollPeriod, paymentPeriod, payrollPaymentsFor, payrollPeriodLabel } from "./workflows/payrollPaymentModel";
+import { defaultPayrollPeriod, paymentPeriod, payrollPaymentDeleteMessage, payrollPaymentsFor, payrollPeriodLabel } from "./workflows/payrollPaymentModel";
 import ExecutivePulse from "./workflows/ExecutivePulse";
 import ReportPeriodBar from "./workflows/ReportPeriodBar";
 import MarketingMonthReport from "./workflows/MarketingMonthReport";
@@ -1931,7 +1931,8 @@ function Dashboard({ session, profile }) {
         : error.message;
       showToast("Ошибка: " + message); return;
     }
-    await logAction("Выплата", `Удалено: ${techById(e.tech_id)?.full_name || "?"} · ${fmt(e.amount)} ₸`);
+    const person = allProfiles.find((p) => p.id === e.tech_id);
+    await logAction("Выплата", `Удалено: ${person?.full_name || "?"} · ${EXPENSE_TYPES[e.type] || e.type} за ${payrollPeriodLabel(paymentPeriod(e)) || "период"} · ${fmt(e.amount)} ₸ · оплачено ${isoToRu(e.expense_date) || "—"}`);
     showToast("Удалено"); reloadMoney();
   }
   async function editTechProfile(tech, payload) {
@@ -5596,7 +5597,15 @@ function Dashboard({ session, profile }) {
                       {r.payments.map((e) => (
                         <div className="kd-row" key={e.id}>
                           <span><b style={{ fontWeight: 600 }}>{EXPENSE_TYPES[e.type] || e.type}{paymentPeriod(e) ? ` за ${payrollPeriodLabel(paymentPeriod(e)).toLowerCase()}` : ""}</b> · оплачено {isoToRu(e.expense_date)}{e.account_id ? ` · ${accountById(e.account_id)?.name || "счёт"}` : ""}{e.note ? ` · ${e.note}` : ""}</span>
-                          <strong>{fmt(e.amount)} ₸</strong>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <strong>{fmt(e.amount)} ₸</strong>
+                            {canManageCash && (
+                              <button className="kd-btn ghost danger sm" title="Удалить ошибочную выплату" aria-label="Удалить выплату"
+                                onClick={() => askConfirm(payrollPaymentDeleteMessage(e, { person: r.tech.full_name, typeLabel: EXPENSE_TYPES[e.type] || e.type, accountName: accountById(e.account_id)?.name, amountText: `${fmt(e.amount)} ₸`, dateText: isoToRu(e.expense_date) }), () => removeExpense(e), { confirmLabel: "Удалить выплату" })}>
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </span>
                         </div>
                       ))}
                     </details>
