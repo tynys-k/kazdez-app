@@ -297,7 +297,7 @@ function ReportSuccessModal({ onClose }) {
   );
 }
 
-function ModalShell({ title, onClose, children, footer, wide = false }) {
+function ModalShell({ title, onClose, children, footer, wide = false, headerActions = null }) {
   const dialogRef = useRef(null);
   const titleId = React.useId();
   useEffect(() => {
@@ -316,7 +316,7 @@ function ModalShell({ title, onClose, children, footer, wide = false }) {
   return (
     <div className="kd-overlay">
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={trapFocus} className={`kd-modal ${wide ? "wide" : ""}`} onClick={(e) => e.stopPropagation()}>
-        <div className="kd-modal-head"><h3 id={titleId}>{title}</h3><button className="kd-x" aria-label="Закрыть окно" onClick={onClose}><X size={16} /></button></div>
+        <div className="kd-modal-head"><h3 id={titleId}>{title}</h3>{headerActions && <div className="kd-modal-actions">{headerActions}</div>}<button className="kd-x" aria-label="Закрыть окно" onClick={onClose}><X size={16} /></button></div>
         <div className="kd-modal-body">{children}</div>
         {footer && <div className="kd-modal-foot">{footer}</div>}
       </div>
@@ -387,7 +387,7 @@ function jobToForm(job) {
 
 const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", pricing_mode: "quoted", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, guarantee_after_visit: 2, guarantee_terms: "", brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
 
-function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, findBlocked, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, onClose, onSave }) {
+function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, findBlocked, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, headerActions = [], onClose, onSave }) {
   const draftKey = newJobDraftStorageKey(draftOwnerId);
   const draftRef = useRef(undefined);
   if (draftRef.current === undefined) {
@@ -447,6 +447,13 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
     if (!dirty || window.confirm(message)) onClose();
   }
 
+  // Переход из формы в другое окно (карточка клиента, отчёт) — с тем же вопросом про несохранённые изменения.
+  function leaveTo(action) {
+    if (savingRef.current) return;
+    const dirty = JSON.stringify(f) !== initialSnapshot.current;
+    if (!dirty || window.confirm("Есть несохранённые изменения. Перейти без сохранения?")) action();
+  }
+
   function useClientData() {
     if (!latestClient) return;
     setF({ ...f, address: latestClient.address || f.address, contact_name: latestClient.contact_name || f.contact_name, source: canonicalSourceName(latestClient.source) || f.source });
@@ -492,7 +499,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
     finally { savingRef.current = false; setSaving(false); }
   }
   return (
-    <ModalShell title={title} onClose={requestClose} footer={<>
+    <ModalShell title={title} onClose={requestClose} headerActions={headerActions.length ? headerActions.map((a) => <button key={a.key} type="button" className={`kd-btn sm ${a.className || "ghost"}`} onClick={() => leaveTo(a.onClick)}>{a.icon}{a.label}</button>) : null} footer={<>
       <button className="kd-btn ghost" onClick={requestClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "Сохраняем…" : submitLabel}</button>
     </>}>

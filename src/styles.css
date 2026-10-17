@@ -466,6 +466,8 @@ body{
 .kd-tlhour{position:absolute;right:6px;transform:translateY(-7px);font-family:var(--font-mono);font-size:11px;color:var(--muted);font-weight:700;}
 .kd-tlcol{position:relative;border-right:1px solid var(--line-soft);background:repeating-linear-gradient(to bottom,transparent 0 59px,var(--line-soft) 59px 60px);}
 .kd-tlnow{position:absolute;left:0;right:0;height:2px;background:var(--rust);z-index:3;box-shadow:0 0 6px rgba(242,114,106,.6);}
+.kd-tlmidnight{position:absolute;left:0;right:0;border-top:2px dashed var(--line-hi);z-index:1;pointer-events:none;}
+.kd-tlhour.next{color:var(--ink-soft);}
 /* карточки таймлайна: фон приходит светлым инлайн-стилем (st.bg) —
    накрываем его тёмным слоем через inset box-shadow, чтобы светлый текст читался,
    при этом сохраняется лёгкий оттенок статуса и яркая цветная левая полоса */
@@ -560,6 +562,8 @@ body{
 .kd-modal{background:linear-gradient(180deg,var(--surface),var(--surface-sunk));border:1px solid var(--line-hi);border-radius:var(--radius-lg);width:100%;max-width:560px;margin:auto;box-shadow:var(--shadow-pop);}
 .kd-modal-head{display:flex;align-items:center;justify-content:space-between;padding:19px 22px;border-bottom:1px solid var(--line);}
 .kd-modal-head h3{margin:0;font-family:var(--font-display);font-weight:600;font-size:18px;letter-spacing:-.2px;}
+.kd-modal-actions{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto;margin-right:10px;}
+.kd-modal-actions .kd-btn{display:inline-flex;align-items:center;gap:6px;}
 .kd-x{border:none;background:var(--surface-sunk);width:32px;height:32px;border-radius:var(--radius-sm);cursor:pointer;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;transition:color .15s,background .15s;}
 .kd-x:hover{color:var(--rust);background:var(--rust-tint);}
 .kd-modal-body{padding:20px 22px;}
