@@ -6,7 +6,7 @@ import { newJobDraftStorageKey, reportDraftStorageKey } from "./localDataScope";
 import { createReportRequestId } from "./reportSubmission";
 import { createFinancialRequestId } from "./financialPosting";
 import { isPayrollMonth, paymentPeriod, payrollPeriodLabel } from "./workflows/payrollPaymentModel";
-import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake, Repeat2 } from "lucide-react";
+import { CheckCircle2, Trash2, Plus, MessageCircle, Pencil, UserPlus, X, ChevronRight, ChevronLeft, Info, Phone, MapPin, Camera, LocateFixed, Eraser, ShieldCheck, Handshake, Repeat2, PhoneCall } from "lucide-react";
 import { priceFor as calcPriceFor, paperworkMoney as calcPaperworkMoney } from "./calc";
 import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, METHOD_BY_EQUIPMENT, REPEAT_CAUSES, REPEAT_FAULTS, WORK_EQUIPMENT, PAPERWORK_SCHEMES, PAPERWORK_STEPS, SETTLE_METHODS, BLOCK_REASONS, OBJECT_KINDS, DISCOUNT_REASONS, EMPLOYEE_EVENTS, EMPLOYEE_JOB_TITLES, TRAINING_TOPICS, TECH_DOC_KINDS, AddressText, DOC_TYPES, EXPENSE_TYPES, samePhone, DRIVE_LINKS, EQUIP_CATEGORIES, GUARANTEE_KINDS, REPEAT_POLICIES, ROLE_DEFAULT_PERMISSIONS, ROLE_DEFINITIONS, STATUS, TAB_LABELS, TASK_TYPES, TENDER_STATUS, addressPlain, buildMsg, chemUnit, copyText, daysSince, fmt, fmtAmount, fmtTs, isoToRu, lineAmount, norm } from "./shared";
 import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
@@ -15,6 +15,8 @@ import { LEAD_ACTIVITY_KINDS, LEAD_ACTIVITY_OUTCOMES, leadActivityKindLabel, lea
 import { contractHistorySummary, contractVisitState, subscriptionIntervalLabel } from "./subscriptionHistory";
 import { PeoplePicker } from "./workflows/TaskWorkspace";
 import QualityHistory from "./workflows/QualityHistory";
+import { CallLog } from "./workflows/ClientCalls";
+import { callsForClient, outcomeLabel } from "./workflows/clientCallsModel";
 import JobObjectFields from "./workflows/JobObjectFields";
 import { ContractSummary } from "./workflows/ContractsRegister";
 import { objectPayload, objectDescription } from "./workflows/objectModel";
@@ -71,14 +73,17 @@ function PartnerOrigin({ name, compact = false }) {
   );
 }
 
-function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete, clientLabel, onSubscribe }) {
+function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete, clientLabel, onSubscribe, onCall, callPanel }) {
   const st = STATUS[job.status] || STATUS.new;
   const stageKey = jobWorkStage(job);
   const stage = WORK_STAGE[stageKey];
   const isPartnerJob = job.brand === "partner" || !!job.partner_id || !!job.partner_name;
   const visiblePartnerName = isPartnerJob ? (partnerName || job.partner_name || "Партнёр не указан") : "";
   const brandLabel = job.brand === "Sanitex" ? "Sanitex" : isPartnerJob ? "Партнёрская" : "KazDez";
-  const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5;
+  // Тег «пора связаться» гаснет, как только обзвон по заявке закрыт: панель
+  // обращений передаёт это через callPanel.props.state.
+  const callState = callPanel?.props?.state;
+  const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5 && !(callState && callState.closed);
   const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
   const mapUrl = yandexMapUrl(job.address);
   const whatsappUrl = roleWhatsappUrl(job, isAdmin);
@@ -121,7 +126,9 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
         {blocked && <span className="kd-lowtag" title={blocked.blocked_reason || ""}>клиент в чёрном списке</span>}
         {job.repeat_state === "on_repeat" && <span className="kd-repeattag">на повторе</span>}
         {job.repeat_state === "finished" && <span className="kd-muted">завершена</span>}
-        {needsFollowup && <span className="kd-followuptag">💬 пора связаться · {daysSince(job.reported_at)} дн. после первичной</span>}
+        {needsFollowup && (onCall
+          ? <button type="button" className="kd-followuptag" onClick={onCall}>💬 пора связаться · {daysSince(job.reported_at)} дн. после первичной{callState?.attempts ? ` · ${callState.attempts} без ответа` : ""}</button>
+          : <span className="kd-followuptag">💬 пора связаться · {daysSince(job.reported_at)} дн. после первичной</span>)}
       </div>
       <div className="kd-card-foot">
         {onObject && (
@@ -181,6 +188,7 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
         {isAdmin && !job.executor_partner_id && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onAssign}><UserPlus size={14} />{assignedName ? "Переназначить" : "Назначить"}</button>}
         {isAdmin && job.status !== "canceled" && <button className="kd-btn ghost" onClick={onEdit}><Pencil size={14} />Изменить</button>}
         {job.status === "done" && <button className="kd-btn ghost" onClick={onView}>Отчёт</button>}
+        {job.status === "done" && onCall && <button className="kd-btn ghost" onClick={onCall}><PhoneCall size={14} />Связаться</button>}
         {isAdmin && job.status === "done" && onSubscribe && <button className="kd-btn ghost" onClick={onSubscribe}><Repeat2 size={14} />Сделать абонентом</button>}
         {isAdmin && job.status === "canceled" && <button className="kd-btn primary" onClick={() => onRestore()}>Вернуть в работу</button>}
         {/* Деньги и решения, которые ждут ответа прямо сейчас, — всегда на виду */}
@@ -216,8 +224,9 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
   );
   // A drawer must never open without a way to close it. Older callers can still
   // render the regular card while their list is migrated to compact rows.
-  if (!onCollapse) return detail;
-  return <>{compactRow}<DetailDrawer open placement="center" title={job.pest || "Заявка"} onClose={onCollapse}>{detail}</DetailDrawer></>;
+  const body = callPanel ? <div className="kd-job-split">{detail}{callPanel}</div> : detail;
+  if (!onCollapse) return body;
+  return <>{compactRow}<DetailDrawer open placement="center" title={job.pest || "Заявка"} onClose={onCollapse}>{body}</DetailDrawer></>;
 }
 
 function RepeatCard({ job, onSaveNote, onCreate, onFinish, onUnset, repeatHint }) {
@@ -1204,7 +1213,7 @@ function ViewModal({ job, partnerName, chemicals, performedBy, chemicalsUnavaila
   );
 }
 
-function HistoryModal({ job, blockedInfo, onBlock, jobs, followups = [], qualityChecks = [], contracts = [], events = [], feedback = [], profiles = [], canPlanFollowup = false, partnerNameOf = () => "", onClose, onOpen, onAddNote, onPlanFollowup, onCopyPublicLink }) {
+function HistoryModal({ job, blockedInfo, onBlock, jobs, followups = [], qualityChecks = [], contracts = [], events = [], feedback = [], profiles = [], canPlanFollowup = false, partnerNameOf = () => "", calls = [], userId, isAdmin = false, onCall, onDeleteCall, onClose, onOpen, onAddNote, onPlanFollowup, onCopyPublicLink }) {
   const [view, setView] = useState("overview");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1225,6 +1234,8 @@ function HistoryModal({ job, blockedInfo, onBlock, jobs, followups = [], quality
   const clientQuality = qualityChecks.filter((q) => jobIds.has(String(q.job_id || "")));
   const clientContracts = contracts.filter((c) => samePhone(c.phone, job.client_phone));
   const clientFeedback = feedback.filter((f) => jobIds.has(String(f.job_id || "")));
+  const clientCallRows = callsForClient(calls, { clientId: job.client_id, phone: job.client_phone, jobIds });
+  const callJob = job.status === "done" ? job : list.find((j) => j.status === "done");
   const lastDone = list.find((j) => j.status === "done");
   const nextJob = [...list].filter((j) => j.status !== "done" && j.status !== "canceled").sort((a, b) => new Date(a.scheduled_date || "9999-12-31") - new Date(b.scheduled_date || "9999-12-31"))[0];
   const profileName = (id) => profiles.find((p) => p.id === id)?.full_name || "Сотрудник";
@@ -1244,6 +1255,7 @@ function HistoryModal({ job, blockedInfo, onBlock, jobs, followups = [], quality
     ...clientFollowups.map((f) => ({ id: `f-${f.id}`, at: eventTime(f.completed_at?.slice(0, 10) || f.due_date), type: "followup", title: f.status === "done" ? "Касание завершено" : "Запланировано касание", details: f.result || f.note || f.kind })),
     ...clientQuality.map((q) => ({ id: `q-${q.id}`, at: new Date(q.contacted_at || q.created_at), type: "quality", title: `Контроль качества${q.rating ? ` · ${q.rating}/5` : ""}`, details: q.note || q.result })),
     ...clientContracts.map((c) => ({ id: `c-${c.id}`, at: new Date(c.created_at), type: "contract", title: `Абонентский договор${c.active === false ? " закрыт" : " активен"}`, details: `${c.service || "Услуга"} · следующий выезд ${isoToRu(c.next_service_date) || "не задан"}` })),
+    ...clientCallRows.map((c) => ({ id: `call-${c.id}`, at: new Date(c.created_at), type: "call", title: `Звонок: ${outcomeLabel(c.outcome, c.stage)}${c.rating ? ` · ${c.rating}/5` : ""}`, details: [c.note, c.callback_on ? `перезвонить ${isoToRu(c.callback_on)}` : "", profileName(c.created_by)].filter(Boolean).join(" · ") })),
     ...clientFeedback.map((f) => ({ id: `pf-${f.id}`, at: new Date(f.created_at), type: "feedback", title: `Оценка клиента · ${f.rating}/5`, details: f.comment || "Без комментария" })),
   ].filter((item) => item.at && !Number.isNaN(item.at.getTime())).sort((a, b) => b.at - a.at);
 
@@ -1273,7 +1285,8 @@ function HistoryModal({ job, blockedInfo, onBlock, jobs, followups = [], quality
           {digits && <a className="kd-btn ghost sm" href={`tel:+${digits}`}><Phone size={14} />Позвонить</a>}
           {digits && <a className="kd-btn ghost sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={14} />WhatsApp</a>}
           {job.public_token && <button className="kd-btn ghost sm" onClick={() => onCopyPublicLink(job)}>Ссылка клиенту</button>}
-          {canPlanFollowup && <button className="kd-btn primary sm" onClick={() => onPlanFollowup(job)}><Plus size={14} />Касание</button>}
+          {onCall && callJob && <button className="kd-btn primary sm" onClick={() => onCall(callJob)}><PhoneCall size={14} />Связаться</button>}
+          {canPlanFollowup && <button className="kd-btn ghost sm" onClick={() => onPlanFollowup(job)}><Plus size={14} />Касание</button>}
         </div>
       </div>
       <PartnerOrigin name={partnerNameOf(job) || job.partner_name} />
@@ -1286,7 +1299,7 @@ function HistoryModal({ job, blockedInfo, onBlock, jobs, followups = [], quality
       </div>
 
       <div className="kd-client360-tabs">
-        {[{ id: "overview", label: "Обзор" }, { id: "timeline", label: `Хронология · ${timeline.length}` }, { id: "jobs", label: `Заявки · ${list.length}` }].map((item) => <button key={item.id} className={view === item.id ? "on" : ""} onClick={() => setView(item.id)}>{item.label}</button>)}
+        {[{ id: "overview", label: "Обзор" }, { id: "calls", label: `Обращения · ${clientCallRows.length}` }, { id: "timeline", label: `Хронология · ${timeline.length}` }, { id: "jobs", label: `Заявки · ${list.length}` }].map((item) => <button key={item.id} className={view === item.id ? "on" : ""} onClick={() => setView(item.id)}>{item.label}</button>)}
       </div>
 
       {view === "overview" && <div className="kd-client360-overview">
@@ -1295,6 +1308,7 @@ function HistoryModal({ job, blockedInfo, onBlock, jobs, followups = [], quality
         <div className="kd-client360-note"><div className="kd-section">Внутренняя заметка</div><textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что важно знать при следующем контакте…" /><button className="kd-btn primary sm" disabled={!note.trim() || saving} onClick={saveNote}>{saving ? "Сохраняем…" : "Добавить в хронологию"}</button></div>
       </div>}
 
+      {view === "calls" && <div className="kd-client360-panel"><div className="kd-section">Звонки и комментарии</div><CallLog calls={clientCallRows} people={profiles} jobs={list} userId={userId} isAdmin={isAdmin} onDelete={onDeleteCall} showJob empty="Клиенту ещё не звонили после выездов." /></div>}
       {view === "timeline" && <div className="kd-client-timeline">
         {timeline.length === 0 ? <div className="kd-empty">Событий пока нет.</div> : timeline.map((item) => <div className={`kd-client-event ${item.type}`} key={item.id}><span className="kd-client-event-dot" /><div><time>{fmtTs(item.at)}</time><strong>{item.title}</strong>{item.details && <p>{item.details}</p>}</div></div>)}
       </div>}

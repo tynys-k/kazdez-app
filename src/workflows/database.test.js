@@ -15,7 +15,7 @@ beforeAll(async () => {
   await db.exec(workflowFixture);
   for (const user of [admin, worker, observer, outsider]) { await db.query("insert into auth.users values($1)", [user]); await db.query("insert into profiles(id) values($1)", [user]); }
   await actor();
-  for (const name of ["2026-09-08_atomic_stock_receipts.sql", "2026-09-08_atomic_equipment_transfers.sql", "2026-09-09_fix_quality_check_job_id.sql", "2026-09-14_connected_workflows.sql", "2026-09-14_job_object_measurements.sql", "2026-09-14_client_relationships.sql", "2026-09-14_multiwarehouse.sql", "2026-09-14_employee_stock.sql", "2026-09-14_payroll_carryover.sql", "2026-09-14_tender_workflows.sql", "2026-09-14_tender_deliveries.sql"]) {
+  for (const name of ["2026-09-08_atomic_stock_receipts.sql", "2026-09-08_atomic_equipment_transfers.sql", "2026-09-09_fix_quality_check_job_id.sql", "2026-09-14_connected_workflows.sql", "2026-09-14_job_object_measurements.sql", "2026-09-14_client_relationships.sql", "2026-09-14_multiwarehouse.sql", "2026-09-14_employee_stock.sql", "2026-09-14_payroll_carryover.sql", "2026-09-14_tender_workflows.sql", "2026-09-14_tender_deliveries.sql", "2026-10-17_client_calls.sql"]) {
     try { await db.exec(fs.readFileSync(path.join(process.cwd(), "supabase", name), "utf8")); }
     catch (e) { throw new Error(`${name}: ${e.message}`); }
   }
@@ -46,6 +46,29 @@ describe("PostgreSQL workflow transactions", () => {
     expect(await scalar("select count(*)::int from quality_check_events where job_id=$1", [job])).toBe(2);
     expect(await scalar("select count(*)::int from quality_checks where job_id=$1", [job])).toBe(1);
     expect(await scalar("select rating from quality_checks where job_id=$1", [job])).toBeNull();
+  });
+  it("logs client calls, sends agreed clients to repeat and reverts it on delete", async () => {
+    await actor(); const job = await scalar("insert into jobs(client_phone,type,status) values('+77010000001','Первичная','done') returning id");
+    await db.query("select log_client_call_atomic($1,$2)", [job, { outcome: "no_answer", rating: 5 }]);
+    expect(await scalar("select rating from client_calls where job_id=$1", [job])).toBeNull();
+    expect(await scalar("select stage from client_calls where job_id=$1", [job])).toBe("after_primary");
+    await expect(db.query("select log_client_call_atomic($1,$2)", [job, { outcome: "declined" }])).rejects.toThrow("комментарий");
+    await expect(db.query("select log_client_call_atomic($1,$2)", [job, { outcome: "callback" }])).rejects.toThrow("перезвонить");
+    const agreed = await scalar("select log_client_call_atomic($1,$2)", [job, { outcome: "agreed", note: "Суббота после обеда", rating: 5 }]);
+    expect(await scalar("select repeat_state from jobs where id=$1", [job])).toBe("on_repeat");
+    expect(await scalar("select repeat_note from jobs where id=$1", [job])).toBe("Суббота после обеда");
+    await actor(worker, "tab.retention");
+    await expect(db.query("select delete_client_call_atomic($1)", [agreed])).rejects.toThrow("свою запись");
+    await actor();
+    await db.query("select delete_client_call_atomic($1)", [agreed]);
+    expect(await scalar("select repeat_state from jobs where id=$1", [job])).toBeNull();
+    expect(await scalar("select deleted_at is not null from client_calls where id=$1", [agreed])).toBe(true);
+    await expect(db.query("select delete_client_call_atomic($1)", [agreed])).rejects.toThrow("уже удалена");
+    await actor(outsider, "tab.tasks");
+    await expect(db.query("select log_client_call_atomic($1,$2)", [job, { outcome: "no_answer" }])).rejects.toThrow("Недостаточно прав");
+    await db.exec("set role authenticated");
+    try { await expect(db.query("insert into client_calls(job_id,outcome) values($1,'note')", [job])).rejects.toThrow(); }
+    finally { await db.exec("reset role"); await actor(); }
   });
   it("rejects an outsider assigned to a subtask and records changed fields", async () => {
     await actor(); const task = await scalar("insert into tasks(title,assignee_id) values('Сверка',$1) returning id", [worker]);
