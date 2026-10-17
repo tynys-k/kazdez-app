@@ -16,7 +16,7 @@ import * as calc from "./calc";
 import { ErrorsPanel, KnowledgeTab, MaterialsTab, TrashTab } from "./tabs";
 import { installGlobalErrorLogging, logClientError, setErrorActor } from "./errorLog";
 import { atomicReportRpcUnavailable, buildAtomicReportPayload } from "./reportSubmission";
-import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_CREATION_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_ORDER_VISITS_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, LEAD_ACTIVITY_TIMELINE_MIGRATION, LEAD_WORK_QUEUE_MIGRATION, QUALITY_CONTROL_JOB_ID_FIX_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
+import { ATOMIC_CASH_DEPOSITS_MIGRATION, ATOMIC_CHEMICAL_SALES_MIGRATION, ATOMIC_CONTRACT_VISITS_MIGRATION, ATOMIC_EQUIPMENT_TRANSFERS_MIGRATION, ATOMIC_GUARANTEE_DELETIONS_MIGRATION, ATOMIC_GUARANTEE_RETURNS_MIGRATION, ATOMIC_JOB_CREATION_MIGRATION, ATOMIC_JOB_RECEIPTS_MIGRATION, ATOMIC_LEAD_CONVERSION_MIGRATION, ATOMIC_MARKETING_SPEND_MIGRATION, ATOMIC_ORDER_VISITS_MIGRATION, ATOMIC_PARTNER_SETTLEMENTS_MIGRATION, ATOMIC_PAYROLL_MIGRATION, PAYROLL_PERIOD_MIGRATION, ATOMIC_QUALITY_CONTROL_MIGRATION, ATOMIC_RECEIPTS_MIGRATION, ATOMIC_SETTLEMENTS_MIGRATION, ATOMIC_STOCK_RECEIPTS_MIGRATION, LEAD_ACTIVITY_TIMELINE_MIGRATION, LEAD_WORK_QUEUE_MIGRATION, QUALITY_CONTROL_JOB_ID_FIX_MIGRATION, atomicReceiptRpcUnavailable } from "./financialPosting";
 import { clearUserLocalData, offlineActionsStorageKey, ownedOfflineActions } from "./localDataScope";
 import { documentFailureMessage, loadPdfDocuments, preloadPdfDocuments } from "./documentGeneration";
 import { yandexRouteUrl } from "./routePlanning";
@@ -34,6 +34,7 @@ import TenderDeliveries from "./workflows/TenderDeliveries";
 import { TenderRegister, TenderCollaboration, PartnerTenderLinks } from "./workflows/Tenders";
 import ContractsRegister from "./workflows/ContractsRegister";
 import PayrollCarryoverModal, { PayrollCarryoverHistory } from "./workflows/PayrollCarryover";
+import { defaultPayrollPeriod, paymentPeriod, payrollPaymentsFor, payrollPeriodLabel } from "./workflows/payrollPaymentModel";
 import ExecutivePulse from "./workflows/ExecutivePulse";
 import ReportPeriodBar from "./workflows/ReportPeriodBar";
 import MarketingMonthReport from "./workflows/MarketingMonthReport";
@@ -1906,16 +1907,18 @@ function Dashboard({ session, profile }) {
       p_account_id: payload.account_id,
       p_note: payload.note,
       p_expense_id: existing?.id || null,
+      p_period_month: payload.period_month || null,
     });
     if (error) {
       const message = atomicReceiptRpcUnavailable(error, rpcName)
-        ? `Безопасные выплаты ещё не включены. Выполни supabase/${ATOMIC_PAYROLL_MIGRATION} — выплата не была записана.`
+        ? `Выплаты с периодом ещё не включены. Выполни supabase/${PAYROLL_PERIOD_MIGRATION} — выплата не была записана.`
         : error.message;
       showToast("Ошибка: " + message); return message;
     }
     const amount = existing ? existing.amount : payload.amount;
     const type = existing ? existing.type : payload.type;
-    await logAction("Выплата", `${tech?.full_name || "?"} · ${EXPENSE_TYPES[type] || type} · ${fmt(amount)} ₸ → ${accountById(payload.account_id)?.name || "счёт"}`);
+    const person = tech || allProfiles.find((p) => p.id === payload.tech_id);
+    await logAction("Выплата", `${person?.full_name || "?"} · ${EXPENSE_TYPES[type] || type} за ${payrollPeriodLabel(payload.period_month) || "период"} · ${fmt(amount)} ₸ → ${accountById(payload.account_id)?.name || "счёт"}`);
     setModal(null); showToast("Выплата проведена"); reloadMoney(); return null;
   }
   async function removeExpense(e) {
@@ -2818,7 +2821,9 @@ function Dashboard({ session, profile }) {
     const absenceDays = payrollSalaryCounts ? calc.absenceDaysInMonth(t.id, daysOff, monthKey) : 0;
     const salaryCalc = calc.salaryForMonth({ salary: t.salary_monthly, schedule: t.work_schedule, absenceDays });
     const salary = payrollSalaryCounts ? salaryCalc.payable : 0;
-    const payments = expenses.filter((e) => e.tech_id === t.id && e.status === "paid" && inPeriodIso(e.expense_date));
+    // Выплата гасит начисление своего расчётного периода, а не месяца оплаты:
+    // зарплата за сентябрь, выданная 1 октября, засчитывается в сентябрь.
+    const payments = payrollPaymentsFor(expenses, t.id, { monthKey, inPeriod: inPeriodIso });
     const paid = payments.reduce((s, e) => s + (Number(e.amount) || 0), 0);
     // Выплаты, не дошедшие до кассы. Ищем по факту отсутствия движения, а не по
     // пустому счёту: так ловятся и старые записи без счёта, и те, где проводка
@@ -2833,6 +2838,13 @@ function Dashboard({ session, profile }) {
     accrued: a.accrued + r.accrued, paid: a.paid + r.paid, owed: a.owed + r.owed,
   }), { accrued: 0, paid: 0, owed: 0 });
   const payrollOwedCount = payrollRows.filter((r) => r.owed > 0).length;
+  // Форма выплаты по умолчанию предлагает открытый в разделе месяц. Подсказку
+  // «к выплате» даём только для него: другие месяцы здесь не пересчитаны.
+  const payrollMonthKey = payrollSalaryCounts ? isoOf(new Date(range.start)).slice(0, 7) : "";
+  const payrollDefaultPeriod = defaultPayrollPeriod(payrollMonthKey || (pMode === "week" ? isoOf(new Date(range.start)).slice(0, 7) : ""));
+  const payrollOwedFor = (techId, period) => (payrollMonthKey && period === payrollMonthKey
+    ? payrollRows.find((r) => r.tech.id === techId)?.owed ?? null
+    : null);
 
   const expensesInRange = expenses.filter((e) => {
     if (pMode === "all") return true;
@@ -5535,6 +5547,9 @@ function Dashboard({ session, profile }) {
                   <button className="kd-arrow" disabled={pOff >= 0} onClick={() => setPOff(pOff + 1)}><ChevronRight size={18} /></button>
                 </div>
               )}
+              {canManageCash && payrollPeople.length > 0 && (
+                <button className="kd-btn primary" style={{ marginLeft: "auto" }} onClick={() => setModal({ kind: "payrollPay" })}><Plus size={14} />Добавить выплату</button>
+              )}
             </div>
             <div className="kd-kpigrid" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
               <div className="kd-kpicard"><span>Начислено</span><strong>{fmt(payrollTotals.accrued)} ₸</strong><small>{payrollSalaryCounts ? "оклады + бонусы + дорожные" : "бонусы + дорожные (без окладов)"}</small></div>
@@ -5567,7 +5582,7 @@ function Dashboard({ session, profile }) {
                     <span data-l="Начислено">{fmt(r.accrued)}</span>
                     <span className="kd-muted" data-l="Выплачено">{fmt(r.paid)}</span>
                     <strong data-l="К выплате" style={{ color: r.owed > 0 ? "var(--amber)" : "var(--muted)" }}>{fmt(r.owed)} ₸{r.carryover.incoming > 0 && <small className="kd-muted"> · −{fmt(r.carryover.incoming)} переплата прошлых месяцев</small>}{r.carryover.outgoing > 0 && <small className="kd-muted"> · {fmt(r.carryover.outgoing)} перенесено вперёд</small>}</strong>
-                    <span>{canManageCash && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "payrollPay", tech: r.tech, owed: r.owed })}>Выплатить</button>}</span>
+                    <span>{canManageCash && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "payrollPay", tech: r.tech })}>Выплатить</button>}</span>
                   </div>
                   {r.unposted.length > 0 && (
                     <div className="kd-flag warn" style={{ margin: "0 0 8px", flexWrap: "wrap" }}>
@@ -5580,7 +5595,7 @@ function Dashboard({ session, profile }) {
                       <summary>Выплаты за период · {r.payments.length}</summary>
                       {r.payments.map((e) => (
                         <div className="kd-row" key={e.id}>
-                          <span>{isoToRu(e.expense_date)} · {EXPENSE_TYPES[e.type] || e.type}{e.account_id ? ` · ${accountById(e.account_id)?.name || "счёт"}` : ""}{e.note ? ` · ${e.note}` : ""}</span>
+                          <span><b style={{ fontWeight: 600 }}>{EXPENSE_TYPES[e.type] || e.type}{paymentPeriod(e) ? ` за ${payrollPeriodLabel(paymentPeriod(e)).toLowerCase()}` : ""}</b> · оплачено {isoToRu(e.expense_date)}{e.account_id ? ` · ${accountById(e.account_id)?.name || "счёт"}` : ""}{e.note ? ` · ${e.note}` : ""}</span>
                           <strong>{fmt(e.amount)} ₸</strong>
                         </div>
                       ))}
@@ -6654,7 +6669,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "training" && <TrainingModal person={modal.person} record={modal.record} onClose={() => setModal(null)} onSave={saveTraining} />}
       {modal?.kind === "techDoc" && <TechDocModal tech={modal.tech} doc={modal.doc} onClose={() => setModal(null)} onSave={saveTechDoc} />}
       {modal?.kind === "plan" && <PlanModal monthKey={modal.monthKey} label={modal.label} target={modal.target} onClose={() => setModal(null)} onSave={saveMonthlyPlan} />}
-      {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} owed={modal.owed} existing={modal.expense} accounts={accounts} onClose={() => setModal(null)} onSave={(payload, requestId) => postPayrollPayment(modal.tech, payload, modal.expense, requestId)} />}
+      {modal?.kind === "payrollPay" && <PayrollPayModal tech={modal.tech} people={payrollPeople} owed={modal.owed ?? null} owedFor={payrollOwedFor} defaultPeriod={payrollDefaultPeriod} existing={modal.expense} accounts={accounts} onClose={() => setModal(null)} onSave={(payload, requestId) => postPayrollPayment(modal.tech, payload, modal.expense, requestId)} />}
       {modal?.kind === "userAccess" && <UserAccessModal user={modal.user} onClose={() => setModal(null)} onSave={saveAdminUser} />}
       {modal?.kind === "equip" && <EquipModal item={modal.item} onClose={() => setModal(null)} onSave={saveEquipment} />}
       {modal?.kind === "issueEquip" && <IssueEquipModal tech={modal.tech} equipment={equipment} onClose={() => setModal(null)} onSave={issueEquipment} />}
