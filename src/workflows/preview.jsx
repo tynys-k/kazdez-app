@@ -11,7 +11,9 @@ import BankReconciliation from "./BankReconciliation";
 import FinanceAnalysis from "./FinanceAnalysis";
 import Proposals from "./Proposals";
 import { blankItem } from "../proposals";
-import { JobCard } from "../modals";
+import { JobCard, LeadModal, LeadStageSelectModal } from "../modals";
+import { DealSummary } from "./HunterDeal";
+import { nextStageHint } from "./hunterFunnelModel";
 import "../styles.css";
 // Токены и мост legacy-классов: без них макет рисуется без цветов и
 // радиусов, и проверка вёрстки ничего не значит — приложение грузит их
@@ -110,13 +112,24 @@ function CallsPreview() {
     {callJob && <CallModal job={callJob} calls={callsForJob(calls, callJob.id)} people={people} userId="demo-admin" isAdmin onClose={() => setCallJob(null)} onSave={save} onDelete={remove} />}
   </section>;
 }
+const dealStages = [["new", "Новый / Разведка"], ["lpr_found", "ЛПР найден"], ["kp_sent", "КП отправлено"], ["negotiation", "Переговоры"], ["contract", "Договор на согласовании"], ["first_service", "Первая обработка"], ["subscriber", "Абонент", true], ["lost", "Отказ", true, true], ["snoozed", "Отложено"]]
+  .map(([code, name, isFinal = false, isLost = false], i) => ({ id: "st-" + code, code, name, sort: (i + 1) * 10, is_final: isFinal, is_lost: isLost }));
+const previewDeal = { id: "deal-1", name: "Кафе «Дастархан»", client_type: "company", phone: "+7 727 300 1122", address: "Алматы, Абая 10", stage_id: "st-lpr_found", object_type: "catering", area_m2: 140, lpr_name: "Аскар Бекович", lpr_position: "Управляющий", lpr_phone: "+7 701 555 1234", pests: ["Тараканы"], next_action: "Уточнить периодичность", next_action_at: "2026-10-20T10:00:00+05:00" };
+function DealPreview() {
+  const [open, setOpen] = useState("");
+  return <section className="kd-card"><h2>{previewDeal.name}</h2><DealSummary lead={previewDeal} hint={nextStageHint(previewDeal, "lpr_found")} />
+    <div className="kd-actions"><button className="kd-btn ghost" onClick={() => setOpen("card")}>Карточка сделки</button><button className="kd-btn ghost" onClick={() => setOpen("stage")}>Сменить стадию</button></div>
+    {open === "card" && <LeadModal lead={previewDeal} stages={dealStages} sources={[]} owners={people} defaultOwnerId={people[0].id} pestOptions={previewPests.map((p) => p.name)} companies={previewClients} onClose={() => setOpen("")} onSave={noop} />}
+    {open === "stage" && <LeadStageSelectModal lead={previewDeal} stages={dealStages} initialStageId="st-kp_sent" onEditDeal={() => setOpen("card")} onClose={() => setOpen("")} onPick={noop} />}
+  </section>;
+}
 function ResponsivePreview() {
   const [width, setWidth] = useState(320);
   return <main><nav className="wf-toolbar">{[320, 768, 1024, 1440].map((size) => <button className="kd-btn ghost" key={size} onClick={() => setWidth(size)}>{size} px</button>)}</nav><iframe title="Проверка адаптивности" src="/workflow-preview.html" width={width} height="850" style={{ border: "1px solid var(--line)", display: "block", margin: "16px auto" }} /></main>;
 }
 function Preview() {
   const [page, setPage] = useState("Задачи"), [tasks, setTasks] = useState(initialTasks), [selected, setSelected] = useState(null), [expandedJob, setExpandedJob] = useState(""), [form, setForm] = useState({ object_kind: "commercial", object_details: { measurement: "fumigation", volume_method: "dimensions", length_m: 5, width_m: 4, height_m: 3 } });
-  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Обзвон", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
+  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Обзвон", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП", "Сделка"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
     {page === "Задачи" && <TaskBoard tasks={tasks} people={people} userId={people[0].id} canManage onCreate={noop} onEdit={noop} onRemove={noop} onStatus={async (task, status) => { setTasks(tasks.map((t) => t.id === task.id ? { ...t, status } : t)); return true; }} />}
     {page === "Обзвон" && <CallsPreview />}
     {page === "Заявки" && <section><h2>Заявки</h2><p className="kd-muted">Нажмите на строку, чтобы увидеть детали и действия.</p><div className="kd-list">{previewJobs.map((job) => <JobCard key={job.id} job={job} compact={expandedJob !== job.id} onExpand={() => setExpandedJob(job.id)} onCollapse={() => setExpandedJob("")} isAdmin assignedName="Аян" onHistory={noop} onObject={noop} onProof={noop} onCopyPublicLink={noop} onReport={noop} onCancel={noop} onAssign={noop} onEdit={noop} onDelete={noop} />)}</div></section>}
@@ -125,6 +138,7 @@ function Preview() {
     {page === "Тип объекта" && <section className="kd-card"><h2>Параметры объекта</h2><JobObjectFields form={form} onChange={setForm} /></section>}
     {page === "Выписки" && <BankReconciliation statements={previewBankStatements} transactions={previewBankRows} evidence={[]} accounts={previewAccounts} moves={previewMoney} manualExpenses={[]} categories={previewCategories} jobs={[]} qrAccountId="demo-kaspi" qrFeeRate={0.0095} accountBalanceAt={() => 341000} onReload={noop} />}
     {page === "Финансы" && <FinanceAnalysis moves={previewMoney} accounts={previewAccounts} categories={previewCategories} bankRows={previewBankRows} evidence={[]} jobs={[]} manualExpenses={[]} />}
+    {page === "Сделка" && <DealPreview />}
     {page === "КП" && <Proposals proposals={previewProposals} clients={previewClients} clientContacts={previewContacts}
       objects={previewObjects} leads={[]} priceList={previewPrices} pestTypes={previewPests} settings={previewSettings}
       branches={[{ id: "demo-br", code: "ALA", is_default: true }]} canEdit isAdmin userName="Менеджер" onReload={noop} />}

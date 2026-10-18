@@ -1561,7 +1561,8 @@ export function leadNextActionState(lead, now = new Date()) {
 // firstStageId — первая стадия воронки: лид в ней ещё никто не взял в работу.
 export function leadSlaStats(leads = [], { firstStageId = null, closedStageIds = [], reactionHours = 2, staleDays = 3, now = new Date() } = {}) {
   const closed = new Set(closedStageIds.map(String));
-  const open = leads.filter((l) => !l.converted_job_id && !closed.has(String(l.stage_id)));
+  // Заявка из лида сделку не закрывает: B2B-сделка ждёт «Абонента» — закрывает только стадия.
+  const open = leads.filter((l) => !closed.has(String(l.stage_id)));
   const rows = open.map((l) => ({ lead: l, hours: leadWaitingHours(l, now) }));
   const untouched = rows.filter((r) => r.hours !== null && firstStageId && String(r.lead.stage_id) === String(firstStageId));
   const actions = open.map((lead) => leadNextActionState(lead, now));

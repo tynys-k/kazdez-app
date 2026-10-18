@@ -51,6 +51,9 @@ import { taskParticipant } from "./workflows/taskModel";
 import { qualityHistoryForPhone } from "./workflows/QualityHistory";
 import { CallQueue, JobCallPanel } from "./workflows/ClientCalls";
 import CallModal from "./workflows/CallModal";
+import { HUNTER_FUNNEL_MIGRATION, lostReasonLabel, nextStageHint } from "./workflows/hunterFunnelModel";
+import { DealSummary } from "./workflows/HunterDeal";
+import { canonicalPestOptions } from "./pestNormalization";
 import { CALL_OUTCOMES, CLIENT_CALLS_MIGRATION, buildCallQueue, buildLaterJobIndex, callStageOf, callStateOf, callsForJob, liveCalls, outcomeLabel } from "./workflows/clientCallsModel";
 import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatList, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -2230,8 +2233,9 @@ function Dashboard({ session, profile }) {
       ? await supabase.from("leads").update({ ...row, updated_at: new Date().toISOString() }).eq("id", existing.id)
       : await supabase.from("leads").insert({ ...row, created_by: session.user.id });
     if (res.error) {
+      const funnelMissing = /object_type|area_m2|lpr_|keeper_id|snooze_|expected_mrr|company_id/i.test(res.error.message || "");
       const schemaMissing = /next_action|owner_id|lost_reason|schema cache/i.test(res.error.message || "");
-      showToast(schemaMissing ? `Сначала выполни supabase/${LEAD_WORK_QUEUE_MIGRATION} — лид не был изменён.` : "Ошибка: " + res.error.message);
+      showToast(funnelMissing ? `Сначала выполни supabase/${HUNTER_FUNNEL_MIGRATION} — сделка не была изменена.` : schemaMissing ? `Сначала выполни supabase/${LEAD_WORK_QUEUE_MIGRATION} — лид не был изменён.` : "Ошибка: " + res.error.message);
       return false;
     }
     await logAction("CRM", `Лид ${existing ? "изменён" : "создан"}: ${payload.name || payload.phone || "без имени"}`);
@@ -2262,8 +2266,9 @@ function Dashboard({ session, profile }) {
   async function setLeadStage(lead, stageId, workflow = {}) {
     const { error } = await supabase.from("leads").update({ stage_id: stageId, ...workflow, updated_at: new Date().toISOString() }).eq("id", lead.id);
     if (error) {
+      const funnelMissing = /snooze_/i.test(error.message || "");
       const schemaMissing = /next_action|lost_reason|schema cache/i.test(error.message || "");
-      const message = schemaMissing ? `Сначала выполни supabase/${LEAD_WORK_QUEUE_MIGRATION}.` : error.message;
+      const message = funnelMissing ? `Сначала выполни supabase/${HUNTER_FUNNEL_MIGRATION}.` : schemaMissing ? `Сначала выполни supabase/${LEAD_WORK_QUEUE_MIGRATION}.` : error.message;
       showToast("Ошибка: " + message); return message;
     }
     const stName = leadStages.find((s) => s.id === stageId)?.name || "";
@@ -3176,7 +3181,7 @@ function Dashboard({ session, profile }) {
   const activeTenders = tenders.filter((t) => t.status !== "closed" && t.status !== "lost").length;
   const leadStageById = (id) => leadStages.find((s) => s.id === id);
   const closedLeadStageIds = leadStages.filter((stage) => stage.is_final || stage.is_lost).map((stage) => stage.id);
-  const activeLeads = leads.filter((l) => { const st = leadStageById(l.stage_id); return !l.converted_job_id && !(st && (st.is_lost || st.is_final)); }).length;
+  const activeLeads = leads.filter((l) => { const st = leadStageById(l.stage_id); return !(st && (st.is_lost || st.is_final)); }).length;
   const servicesOf = (tid) => tenderServices.filter((s) => s.tender_id === tid).sort((a, b) => a.seq - b.seq);
   const guaranteesOf = (tid) => tenderGuarantees.filter((g) => g.tender_id === tid);
   const visibleTasks = canManageTasks ? tasks : tasks.filter((t) => taskParticipant(t, session.user.id));
@@ -3374,14 +3379,19 @@ function Dashboard({ session, profile }) {
   const leadTimeline = (leadId) => leadActivityMap.get(String(leadId)) || [];
   const leadIsClosed = (lead) => {
     const stage = leadStageById(lead?.stage_id);
-    return !!lead?.converted_job_id || !!stage?.is_final || !!stage?.is_lost;
+    return !!stage?.is_final || !!stage?.is_lost;
   };
+  // То, что живёт вне карточки сделки: есть ли КП в реестре и выполнена ли первая обработка.
+  const leadFunnelCtx = (lead) => ({
+    hasProposal: proposals.some((p) => String(p.lead_id) === String(lead?.id)),
+    jobDone: !!lead?.converted_job_id && jobs.some((j) => String(j.id) === String(lead.converted_job_id) && j.status === "done"),
+  });
+  const leadCompanies = clients.filter((c) => c.client_type === "company").sort((a, b) => String(a.legal_name || a.name || "").localeCompare(String(b.legal_name || b.name || ""), "ru"));
   const filteredLeadList = calc.filterAndSortLeads(leads, {
     search: leadSearch, sort: leadSort, freshness: leadFreshness,
     ownerId: leadOwnerFilter, source: leadSourceFilter, clientType: leadClientTypeFilter,
   });
   const leadMatchesCurrentView = (lead) => {
-    if (lead.converted_job_id) return false;
     const stage = leadStageById(lead.stage_id);
     if (!stage || (leadStageFilter !== "all" && String(stage.id) !== String(leadStageFilter))) return false;
     if (leadQueueFilter === "all") return leadStageFilter !== "all" || (!stage.is_final && !stage.is_lost);
@@ -4402,13 +4412,13 @@ function Dashboard({ session, profile }) {
               <div className="kd-datechips" style={{ marginBottom: 6 }}>
                 <button className={`kd-datechip ${leadStageFilter === "all" ? "on" : ""}`} onClick={() => { setLeadStageFilter("all"); setLeadQueueFilter("all"); }}>Все стадии</button>
                 {[...leadStages].sort((a, b) => a.sort - b.sort).map((st) => {
-                  const cnt = filteredLeadList.filter((l) => l.stage_id === st.id && !l.converted_job_id).length;
+                  const cnt = filteredLeadList.filter((l) => l.stage_id === st.id).length;
                   return <button key={st.id} className={`kd-datechip ${leadStageFilter === st.id ? "on" : ""}`} onClick={() => { setLeadStageFilter(st.id); setLeadQueueFilter("all"); }}>{st.name}{cnt ? ` · ${cnt}` : ""}</button>;
                 })}
               </div>
             )}
             {[...leadStages].sort((a, b) => a.sort - b.sort).filter((st) => leadStageFilter === "all" || st.id === leadStageFilter).map((st) => {
-              const stageLeads = filteredLeadList.filter((l) => l.stage_id === st.id && !l.converted_job_id)
+              const stageLeads = filteredLeadList.filter((l) => l.stage_id === st.id)
                 .filter((lead) => leadQueueFilter === "all"
                   ? leadStageFilter !== "all" || (!st.is_final && !st.is_lost)
                   : !st.is_final && !st.is_lost && calc.leadNextActionState(lead).kind === leadQueueFilter);
@@ -4455,7 +4465,8 @@ function Dashboard({ session, profile }) {
                             <span><strong>{l.next_action || labels.missing}</strong><small>{l.next_action_at ? `${labels[action.kind]} · ${fmtTs(l.next_action_at)}` : "Назначь действие и срок"}{l.owner_id ? ` · ${profileById(l.owner_id)?.full_name || "ответственный"}` : " · ответственный не указан"}</small></span>
                           </div>;
                         })()}
-                        {st.is_lost && <div className="kd-notebox">Причина отказа: {l.lost_reason || "не указана"}</div>}
+                        <DealSummary lead={l} hint={l.client_type === "company" ? nextStageHint(l, st.code, leadFunnelCtx(l)) : null} />
+                        {st.is_lost && <div className="kd-notebox">Причина отказа: {lostReasonLabel(l.lost_reason) || "не указана"}</div>}
                         {(() => {
                           const lastAt = lastContact?.occurred_at || lastContact?.created_at || l.created_at;
                           const d = daysSince(lastAt);
@@ -4482,7 +4493,7 @@ function Dashboard({ session, profile }) {
                           {digits && <a className="kd-btn wa sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={13} />WhatsApp</a>}
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadHistory", lead: l })}><History size={13} />История · {timeline.length}</button>
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l })}>Сменить стадию</button>
-                          <button className="kd-btn ghost sm" onClick={() => askConfirm(`Создать заявку из клиента «${l.name || l.phone || "?"}»? Перенесём телефон, адрес и источник.`, () => convertLeadToJob(l), { danger: false, confirmLabel: "Да, создать" })}><Plus size={13} />Заявка</button>
+                          {!l.converted_job_id && <button className="kd-btn ghost sm" onClick={() => askConfirm(`Создать заявку из клиента «${l.name || l.phone || "?"}»? Перенесём телефон, адрес и источник${l.client_type === "company" ? ", сделка встанет на «Первую обработку»" : ""}.`, () => convertLeadToJob(l), { danger: false, confirmLabel: "Да, создать" })}><Plus size={13} />Заявка</button>}
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "lead", lead: l })}><Pencil size={13} /></button>
                           <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить клиента «${l.name || l.phone || "?"}» из воронки?`, () => removeLead(l))}><Trash2 size={13} /></button>
                         </div>
@@ -6764,7 +6775,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal people={allProfiles} tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
-      {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} owners={leadOwners} defaultOwnerId={session.user.id} onClose={() => setModal(null)} onSave={saveLead} />}
+      {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} owners={leadOwners} defaultOwnerId={session.user.id} pestOptions={canonicalPestOptions(pestTypes)} companies={leadCompanies} funnelCtx={leadFunnelCtx(modal.lead)} onClose={() => setModal(null)} onSave={saveLead} />}
       {modal?.kind === "leadActivity" && <LeadActivityModal lead={modal.lead} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : actorName} defaultKind={modal.defaultKind || "call"} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onSave={(payload) => recordLeadActivity(modal.lead, payload)} />}
       {modal?.kind === "leadHistory" && <LeadHistoryModal lead={modal.lead} stageName={leadStageById(modal.lead?.stage_id)?.name} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : ""} activities={leadTimeline(modal.lead?.id)} profileName={(id) => profileById(id)?.full_name || ""} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onAddContact={() => setModal({ kind: "leadActivity", lead: modal.lead })} onAddNote={() => setModal({ kind: "leadActivity", lead: modal.lead, defaultKind: "note" })} />}
       {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}
@@ -6775,7 +6786,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "techExtras" && <TechExtrasModal job={modal.job} techs={techs} helpers={jobHelpers.filter((h) => String(h.job_id) === String(modal.job.id))} techName={techById(modal.job.assigned_to)?.full_name} onClose={() => setModal(null)} onSave={(bonus, travel, helpers) => saveTechExtras(modal.job, bonus, travel, helpers)} />}
       {modal?.kind === "requestEdit" && <RequestEditModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => requestReportEdit(modal.job, reason)} />}
       {modal?.kind === "executorDone" && <ExecutorDoneModal job={modal.job} partnerName={partnerById(modal.job.executor_partner_id)?.name} accounts={accounts} defaultAccountId={settings.cash_account_id || ""} onClose={() => setModal(null)} onConfirm={(amount, settlement, accId, date) => markExecutorDone(modal.job, amount, settlement, accId, date)} />}
-      {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} initialStageId={modal.initialStageId} onClose={() => setModal(null)} onPick={(sid, workflow) => setLeadStage(modal.lead, sid, workflow)} />}
+      {modal?.kind === "leadStageSelect" && <LeadStageSelectModal lead={modal.lead} stages={leadStages} initialStageId={modal.initialStageId} funnelCtx={leadFunnelCtx(modal.lead)} onEditDeal={() => setModal({ kind: "lead", lead: modal.lead })} onClose={() => setModal(null)} onPick={(sid, workflow) => setLeadStage(modal.lead, sid, workflow)} />}
       {modal?.kind === "guarantee" && <GuaranteeModal tenderId={modal.tenderId} onClose={() => setModal(null)} onSave={saveGuarantee} />}
       {modal?.kind === "payGuarantee" && <PayGuaranteeModal g={modal.g} accounts={accounts} onClose={() => setModal(null)} onConfirm={(accId, date) => markGuaranteePaid(modal.g, accId, date)} />}
       {modal?.kind === "returnGuarantee" && <ReturnGuaranteeModal g={modal.g} remaining={modal.remaining} accounts={accounts} onClose={() => setModal(null)} onConfirm={(amount, date, accId, note, requestId) => addGuaranteeReturn(modal.g, amount, date, accId, note, requestId)} />}

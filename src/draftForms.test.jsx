@@ -152,8 +152,9 @@ describe("job form save recovery", () => {
 
 describe("lead work queue forms", () => {
   const stages = [
-    { id: "new", name: "Новый", sort: 10, is_final: false, is_lost: false },
-    { id: "lost", name: "Отказ", sort: 20, is_final: true, is_lost: true },
+    { id: "new", code: "new", name: "Новый", sort: 10, is_final: false, is_lost: false },
+    { id: "lpr", code: "lpr_found", name: "ЛПР найден", sort: 20, is_final: false, is_lost: false },
+    { id: "lost", code: "lost", name: "Отказ", sort: 80, is_final: true, is_lost: true },
   ];
 
   it("saves a new lead only with a concrete future action", async () => {
@@ -171,9 +172,32 @@ describe("lead work queue forms", () => {
     const onPick = vi.fn().mockResolvedValue(null);
     await act(async () => root.render(<LeadStageSelectModal lead={{ id: "lead", name: "Клиент", stage_id: "new", next_action: "Позвонить" }} stages={stages} initialStageId="lost" onPick={onPick} onClose={vi.fn()} />));
     expect(button("Сохранить стадию").disabled).toBe(true);
-    await change(field("Почему клиент отказался"), "Выбрал конкурента");
+    await change(field("Причина отказа"), "competitor");
     await click("Сохранить стадию");
-    expect(onPick).toHaveBeenCalledWith("lost", { next_action: null, next_action_at: null, lost_reason: "Выбрал конкурента" });
+    expect(onPick).toHaveBeenCalledWith("lost", { next_action: null, next_action_at: null, lost_reason: "competitor" });
+  });
+
+  it("не пускает сделку юрлица вперёд, пока не заполнены поля стадии", async () => {
+    const onEditDeal = vi.fn();
+    await act(async () => root.render(<LeadStageSelectModal lead={{ id: "lead", name: "Кафе", client_type: "company", stage_id: "new" }} stages={stages} initialStageId="lpr" onPick={vi.fn()} onEditDeal={onEditDeal} onClose={vi.fn()} />));
+    expect(button("Сохранить стадию").disabled).toBe(true);
+    expect(container.textContent).toContain("Чтобы перевести на «ЛПР найден», заполни: тип объекта, адрес объекта, площадь, м²");
+    await click("Заполнить карточку сделки");
+    expect(onEditDeal).toHaveBeenCalled();
+  });
+
+  it("сохраняет поля сделки юрлица вместе с карточкой", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    await act(async () => root.render(<LeadModal stages={stages} sources={[]} owners={[{ id: "manager", full_name: "Менеджер" }]} defaultOwnerId="manager" onSave={onSave} onClose={vi.fn()} />));
+    await click("Юрлицо");
+    await change(field("Вывеска / название объекта"), "Кафе");
+    await change(field("Стадия"), "lpr");
+    expect(button("Сохранить").disabled).toBe(true);
+    await change(field("Тип объекта"), "catering");
+    await change(field("Площадь, м² (оценочно)"), "120");
+    await change(field("Адрес"), "Абая 1");
+    await click("Сохранить");
+    expect(onSave.mock.calls[0][0]).toMatchObject({ client_type: "company", stage_id: "lpr", object_type: "catering", area_m2: 120, pests: [], lpr_name: null });
   });
 
   it("records what happened, what the client said and the next promise", async () => {
