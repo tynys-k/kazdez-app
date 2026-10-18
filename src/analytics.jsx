@@ -214,7 +214,7 @@ function ExternalAnalytics({ jobs, channels, topups, settings, onOpenMarketing }
   </div>;
 }
 
-export function AnalyticsTab({ jobs, channels, topups, settings, adAccounts = [], adAssets = [], adMetrics = [], adPromotions = [], canEditAds = false, onReloadAds, onOpenMarketing }) {
+export function AnalyticsTab({ jobs, channels, topups, settings, adAccounts = [], adAssets = [], adMetrics = [], adPromotions = [], adSnapshots = [], canEditAds = false, onReloadAds, onOpenMarketing }) {
   const [view, setView] = useState("internal");
   return <div className="kd-analytics">
     <div className="kd-analytics-switch" role="tablist" aria-label="Источник аналитики">
@@ -224,6 +224,6 @@ export function AnalyticsTab({ jobs, channels, topups, settings, adAccounts = []
     </div>
     {view === "internal" && <InternalAnalytics jobs={jobs} />}
     {view === "external" && <ExternalAnalytics jobs={jobs} channels={channels} topups={topups} settings={settings} onOpenMarketing={onOpenMarketing} />}
-    {view === "ads" && <AdsIntelligence accounts={adAccounts} assets={adAssets} metrics={adMetrics} promotions={adPromotions} settings={settings} canEdit={canEditAds} onReload={onReloadAds} />}
+    {view === "ads" && <AdsIntelligence accounts={adAccounts} assets={adAssets} metrics={adMetrics} promotions={adPromotions} snapshots={adSnapshots} settings={settings} canEdit={canEditAds} onReload={onReloadAds} />}
   </div>;
 }
