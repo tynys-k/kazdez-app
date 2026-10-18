@@ -10,6 +10,7 @@ import JobObjectFields from "./JobObjectFields";
 import BankReconciliation from "./BankReconciliation";
 import FinanceAnalysis from "./FinanceAnalysis";
 import Proposals from "./Proposals";
+import AdsIntelligence from "./AdsIntelligence";
 import { blankItem } from "../proposals";
 import { JobCard, LeadModal, LeadStageSelectModal } from "../modals";
 import { DealSummary } from "./HunterDeal";
@@ -112,6 +113,26 @@ function CallsPreview() {
     {callJob && <CallModal job={callJob} calls={callsForJob(calls, callJob.id)} people={people} userId="demo-admin" isAdmin onClose={() => setCallJob(null)} onSave={save} onDelete={remove} />}
   </section>;
 }
+const ym = new Date().toISOString().slice(0, 7);
+const previewAdAccounts = [{ id: "acc-kd", platform: "olx", name: "Бренд KazDez" }, { id: "acc-dz", platform: "olx", name: "Dezline" }];
+const previewAdAssets = [
+  { id: "ad-1", account_id: "acc-kd", name: "Дезинсекция: тараканы, клопы — фото с бригадой", landing_url: "https://www.olx.kz/d/obyavlenie/dezinsektsiya-IDn5Kx7.html", external_id: "n5Kx7" },
+  { id: "ad-2", account_id: "acc-kd", name: "Уничтожение клопов — фото кровати" },
+  { id: "ad-3", account_id: "acc-dz", name: "Дератизация — мыши, крысы" },
+  { id: "ad-4", account_id: "acc-dz", name: "Обработка от клещей участка" },
+  { id: "ad-5", account_id: "acc-kd", name: "Старое объявление", is_active: false },
+];
+const previewAdSnapshots = [
+  ["ad-1", "01", 1200, 40, 70], ["ad-1", "08", 1350, 44, 79], ["ad-1", "15", 1600, 52, 91],
+  ["ad-2", "01", 500, 10, 20], ["ad-2", "15", 520, 10, 20],
+  ["ad-3", "01", 300, 5, 9], ["ad-3", "15", 420, 9, 16],
+].map(([asset_id, d, views, favorites, phone_views]) => ({ id: asset_id + d, asset_id, snapshot_date: ym + "-" + d, views, favorites, phone_views }));
+const previewAdPromotions = [
+  { id: "pr-1", asset_id: "ad-1", promotion_type: "top_30", started_on: ym + "-01", ended_on: ym + "-30", activated_hour: 8, cost: 5000 },
+  { id: "pr-2", asset_id: "ad-1", promotion_type: "lift_7", started_on: ym + "-04", ended_on: ym + "-10", activated_hour: 13, cost: 2750 },
+  { id: "pr-3", asset_id: "ad-2", promotion_type: "top_7", started_on: ym + "-02", ended_on: ym + "-08", activated_hour: 9, cost: 3000 },
+];
+const previewAdMetrics = [{ id: "m-1", asset_id: "ad-1", metric_date: ym + "-10", hour_slot: 12, views: 24, favorites: 0, phone_views: 7 }];
 const dealStages = [["new", "Новый / Разведка"], ["lpr_found", "ЛПР найден"], ["kp_sent", "КП отправлено"], ["negotiation", "Переговоры"], ["contract", "Договор на согласовании"], ["first_service", "Первая обработка"], ["subscriber", "Абонент", true], ["lost", "Отказ", true, true], ["snoozed", "Отложено"]]
   .map(([code, name, isFinal = false, isLost = false], i) => ({ id: "st-" + code, code, name, sort: (i + 1) * 10, is_final: isFinal, is_lost: isLost }));
 const previewDeal = { id: "deal-1", name: "Кафе «Дастархан»", client_type: "company", phone: "+7 727 300 1122", address: "Алматы, Абая 10", stage_id: "st-lpr_found", object_type: "catering", area_m2: 140, lpr_name: "Аскар Бекович", lpr_position: "Управляющий", lpr_phone: "+7 701 555 1234", pests: ["Тараканы"], next_action: "Уточнить периодичность", next_action_at: "2026-10-20T10:00:00+05:00" };
@@ -129,7 +150,7 @@ function ResponsivePreview() {
 }
 function Preview() {
   const [page, setPage] = useState("Задачи"), [tasks, setTasks] = useState(initialTasks), [selected, setSelected] = useState(null), [expandedJob, setExpandedJob] = useState(""), [form, setForm] = useState({ object_kind: "commercial", object_details: { measurement: "fumigation", volume_method: "dimensions", length_m: 5, width_m: 4, height_m: 3 } });
-  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Обзвон", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП", "Сделка"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
+  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Обзвон", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП", "Реклама", "Сделка"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
     {page === "Задачи" && <TaskBoard tasks={tasks} people={people} userId={people[0].id} canManage onCreate={noop} onEdit={noop} onRemove={noop} onStatus={async (task, status) => { setTasks(tasks.map((t) => t.id === task.id ? { ...t, status } : t)); return true; }} />}
     {page === "Обзвон" && <CallsPreview />}
     {page === "Заявки" && <section><h2>Заявки</h2><p className="kd-muted">Нажмите на строку, чтобы увидеть детали и действия.</p><div className="kd-list">{previewJobs.map((job) => <JobCard key={job.id} job={job} compact={expandedJob !== job.id} onExpand={() => setExpandedJob(job.id)} onCollapse={() => setExpandedJob("")} isAdmin assignedName="Аян" onHistory={noop} onObject={noop} onProof={noop} onCopyPublicLink={noop} onReport={noop} onCancel={noop} onAssign={noop} onEdit={noop} onDelete={noop} />)}</div></section>}
@@ -138,6 +159,7 @@ function Preview() {
     {page === "Тип объекта" && <section className="kd-card"><h2>Параметры объекта</h2><JobObjectFields form={form} onChange={setForm} /></section>}
     {page === "Выписки" && <BankReconciliation statements={previewBankStatements} transactions={previewBankRows} evidence={[]} accounts={previewAccounts} moves={previewMoney} manualExpenses={[]} categories={previewCategories} jobs={[]} qrAccountId="demo-kaspi" qrFeeRate={0.0095} accountBalanceAt={() => 341000} onReload={noop} />}
     {page === "Финансы" && <FinanceAnalysis moves={previewMoney} accounts={previewAccounts} categories={previewCategories} bankRows={previewBankRows} evidence={[]} jobs={[]} manualExpenses={[]} />}
+    {page === "Реклама" && <AdsIntelligence accounts={previewAdAccounts} assets={previewAdAssets} snapshots={previewAdSnapshots} promotions={previewAdPromotions} metrics={previewAdMetrics} canEdit />}
     {page === "Сделка" && <DealPreview />}
     {page === "КП" && <Proposals proposals={previewProposals} clients={previewClients} clientContacts={previewContacts}
       objects={previewObjects} leads={[]} priceList={previewPrices} pestTypes={previewPests} settings={previewSettings}

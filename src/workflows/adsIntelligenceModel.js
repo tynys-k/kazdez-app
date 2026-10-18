@@ -111,7 +111,7 @@ export function recommendationFor(row, { targetProfitReturn = 2, minEvidenceSpen
   return { action: "hold", tone: "warn", label: "Оставить минимум", reason: "Результат пограничный: не масштабировать до следующего замера." };
 }
 
-function allocateCapped(items, amount, capShare = 0.35) {
+export function allocateCapped(items, amount, capShare = 0.35) {
   if (!items.length || amount <= 0) return new Map();
   const result = new Map(items.map((item) => [item.id, 0]));
   let remaining = amount;

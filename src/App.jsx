@@ -363,6 +363,7 @@ function Dashboard({ session, profile }) {
   const [adAssets, setAdAssets] = useState([]);
   const [adMetrics, setAdMetrics] = useState([]);
   const [adPromotions, setAdPromotions] = useState([]);
+  const [adSnapshots, setAdSnapshots] = useState([]);
   const [opexView, setOpexView] = useState("accounts");
   const [marketingMonthOffset, setMarketingMonthOffset] = useState(0);
   const [scheduleDate, setScheduleDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -670,6 +671,7 @@ function Dashboard({ session, profile }) {
     { key: "ad_assets", when: () => canAccess("tab.analytics"), label: "Объявления и кампании", run: () => supabase.from("ad_assets").select("*").order("name"), set: setAdAssets },
     { key: "ad_metrics", when: () => canAccess("tab.analytics"), label: "Показатели рекламы", run: () => fetchAllRows("ad_metrics", { column: "metric_date", ascending: false }), set: setAdMetrics },
     { key: "ad_promotions", when: () => canAccess("tab.analytics"), label: "Продвижения рекламы", run: () => fetchAllRows("ad_promotions", { column: "started_on", ascending: false }), set: setAdPromotions },
+    { key: "ad_snapshots", when: () => canAccess("tab.analytics"), label: "Снимки счётчиков OLX", run: () => fetchAllRows("ad_snapshots", { column: "snapshot_date", ascending: false }), set: setAdSnapshots },
     { key: "tech_days_off", label: "Выходные", run: () => supabase.from("tech_days_off").select("*"), set: setDaysOff },
     { key: "client_followups", label: "Касания", run: () => supabase.from("client_followups").select("*").order("due_date", { ascending: true }), set: setFollowups },
     { key: "quality_checks", label: "Контроль качества", run: () => fetchAllRows("quality_checks", { column: "contacted_at", ascending: false }), set: setQualityChecks },
@@ -4768,6 +4770,7 @@ function Dashboard({ session, profile }) {
             adAssets={adAssets}
             adMetrics={adMetrics}
             adPromotions={adPromotions}
+            adSnapshots={adSnapshots}
             canEditAds={canManageCash}
             onReloadAds={load}
             onOpenMarketing={() => { setOpexView("marketing"); setTab("opex"); }}
