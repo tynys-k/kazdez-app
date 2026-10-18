@@ -12,6 +12,8 @@ import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, MET
 import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceName, canonicalSourceOptions } from "./sourceNormalization";
 import { LEAD_ACTIVITY_KINDS, LEAD_ACTIVITY_OUTCOMES, leadActivityKindLabel, leadActivityOutcomeLabel } from "./leadActivities";
+import { DealFields, ExitFields, MissingHint, dealFormFrom, dealPayload } from "./workflows/HunterDeal";
+import { stageTransition } from "./workflows/hunterFunnelModel";
 import { contractHistorySummary, contractVisitState, subscriptionIntervalLabel } from "./subscriptionHistory";
 import { PeoplePicker } from "./workflows/TaskWorkspace";
 import QualityHistory from "./workflows/QualityHistory";
@@ -3040,15 +3042,15 @@ function SettingsModal({ settings, sources, pestTypes, expCats, priceList = [], 
         </SettingsSection>
 
         <SettingsSection title="Стадии воронки" subtitle={`${leadStages.length} стадий · CRM «Клиенты»`} open={openSection === "leadstages"} onToggle={() => toggle("leadstages")}>
-          <div className="kd-muted" style={{ marginBottom: 10 }}>Этапы, по которым клиент движется в воронке. Двигай порядок стрелками. Физлица обычно пропускают «КП выдано» и «Договор».</div>
+          <div className="kd-muted" style={{ marginBottom: 10 }}>Стадии воронки Хантера закреплены: у юрлиц переход вперёд требует заполненных полей сделки. Свои стадии добавляются в конец — их можно двигать и удалять.</div>
           {[...leadStages].sort((a, b) => a.sort - b.sort).map((st, i, arr) => (
             <div key={st.id} className="kd-orderrow">
               <span className="kd-ordernum">{i + 1}</span>
-              <span className="kd-ordername">{st.name}{st.is_lost ? " ✕" : ""}</span>
+              <span className="kd-ordername">{st.name}{st.is_lost ? " ✕" : ""}{st.code && <span className="kd-muted" style={{ marginLeft: 6, fontSize: 11 }}>системная</span>}</span>
               <div className="kd-orderbtns">
-                <button className="kd-btn ghost sm" disabled={i === 0} onClick={() => onMoveLeadStage(st, -1)}><ChevronRight size={16} style={{ transform: "rotate(-90deg)" }} /></button>
-                <button className="kd-btn ghost sm" disabled={i === arr.length - 1} onClick={() => onMoveLeadStage(st, 1)}><ChevronRight size={16} style={{ transform: "rotate(90deg)" }} /></button>
-                <button className="kd-btn ghost danger sm" onClick={() => onRemoveLeadStage(st)}><Trash2 size={13} /></button>
+                <button className="kd-btn ghost sm" disabled={i === 0 || !!st.code || !!arr[i - 1]?.code} onClick={() => onMoveLeadStage(st, -1)}><ChevronRight size={16} style={{ transform: "rotate(-90deg)" }} /></button>
+                <button className="kd-btn ghost sm" disabled={i === arr.length - 1 || !!st.code} onClick={() => onMoveLeadStage(st, 1)}><ChevronRight size={16} style={{ transform: "rotate(90deg)" }} /></button>
+                {!st.code && <button className="kd-btn ghost danger sm" onClick={() => onRemoveLeadStage(st)}><Trash2 size={13} /></button>}
               </div>
             </div>
           ))}
@@ -3762,7 +3764,7 @@ function localDateTimeIso(value) {
   return date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
-function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, onClose, onSave }) {
+function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, pestOptions = [], companies = [], funnelCtx = {}, onClose, onSave }) {
   const [name, setName] = useState(lead?.name || "");
   const [clientType, setClientType] = useState(lead?.client_type || "person");
   const [phone, setPhone] = useState(lead?.phone || "+7 ");
@@ -3775,30 +3777,39 @@ function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, onClose
   const [nextActionAt, setNextActionAt] = useState(localDateTimeInput(lead?.next_action_at, 1));
   const [lostReason, setLostReason] = useState(lead?.lost_reason || "");
   const [ownerId, setOwnerId] = useState(lead?.owner_id || defaultOwnerId || owners[0]?.id || "");
+  const [deal, setDeal] = useState(() => dealFormFrom(lead));
   const [saving, setSaving] = useState(false);
   const sourceOptions = canonicalSourceOptions(sources, source);
   const selectedStage = stages.find((stage) => String(stage.id) === String(stageId));
+  const stageCode = selectedStage?.code || "";
+  const fromCode = stages.find((stage) => String(stage.id) === String(lead?.stage_id))?.code || (lead ? "" : "new");
   const isLost = !!selectedStage?.is_lost;
-  const isClosed = !!lead?.converted_job_id || !!selectedStage?.is_final;
+  const isSnoozed = stageCode === "snoozed";
+  const isClosed = !!selectedStage?.is_final;
   const actionDate = nextActionAt ? new Date(nextActionAt) : null;
   const futureAction = actionDate && Number.isFinite(actionDate.getTime()) && actionDate.getTime() > Date.now();
-  const ok = !!(name.trim() || (phone.trim() && phone.trim() !== "+7"))
-    && (isLost ? !!lostReason.trim() : isClosed ? true : !!nextAction.trim() && !!futureAction);
+  const transition = stageTransition({ ...deal, client_type: clientType, address, kp_url: kpUrl, lost_reason: lostReason }, fromCode, stageCode, funnelCtx);
+  const ok = !!(name.trim() || (phone.trim() && phone.trim() !== "+7")) && transition.ok
+    && (isLost ? !!lostReason.trim() : isClosed || isSnoozed ? true : !!nextAction.trim() && !!futureAction);
   async function save() {
     setSaving(true);
+    // «Отложено»: срок возврата ставит сервер из даты возврата.
+    const plan = isClosed || isLost ? { next_action: null, next_action_at: null }
+      : isSnoozed ? { next_action: lead?.next_action || null, next_action_at: lead?.next_action_at || null }
+      : { next_action: nextAction.trim(), next_action_at: localDateTimeIso(nextActionAt) };
     await onSave({
       name: name.trim() || null, client_type: clientType, phone: phone.trim() || null,
       address: address.trim() || null, source: canonicalSourceName(source) || null,
       stage_id: stageId || null, kp_url: kpUrl.trim() || null, note: note.trim() || null,
-      next_action: isClosed || isLost ? null : nextAction.trim(),
-      next_action_at: isClosed || isLost ? null : localDateTimeIso(nextActionAt),
+      ...plan,
       lost_reason: isLost ? lostReason.trim() : null,
       owner_id: ownerId || null,
+      ...dealPayload(deal),
     }, lead);
     setSaving(false);
   }
   return (
-    <ModalShell title={lead ? "Клиент" : "Новый клиент"} onClose={onClose} footer={<>
+    <ModalShell title={lead ? (clientType === "company" ? "Сделка" : "Клиент") : (clientType === "company" ? "Новая сделка" : "Новый клиент")} onClose={onClose} footer={<>
       <button className="kd-btn ghost" onClick={onClose}>Отмена</button>
       <button className="kd-btn primary" disabled={!ok || saving} onClick={save}>{saving ? "…" : "Сохранить"}</button>
     </>}>
@@ -3806,7 +3817,7 @@ function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, onClose
         <button className={`kd-segbtn ${clientType === "person" ? "on" : ""}`} onClick={() => setClientType("person")}>Физлицо</button>
         <button className={`kd-segbtn ${clientType === "company" ? "on" : ""}`} onClick={() => setClientType("company")}>Юрлицо</button>
       </div>
-      <Field label={clientType === "company" ? "Название организации" : "Имя клиента"}><input value={name} onChange={(e) => setName(e.target.value)} placeholder={clientType === "company" ? "ТОО ..." : "Иван"} /></Field>
+      <Field label={clientType === "company" ? "Вывеска / название объекта" : "Имя клиента"}><input value={name} onChange={(e) => setName(e.target.value)} placeholder={clientType === "company" ? "Кафе «Дастархан»" : "Иван"} /></Field>
       <div className="kd-grid2">
         <Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 ..." /></Field>
         <Field label="Стадия"><select value={stageId} onChange={(e) => setStageId(e.target.value)}>{[...stages].sort((a, b) => a.sort - b.sort).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
@@ -3815,9 +3826,10 @@ function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, onClose
       <Field label="Источник">{sourceOptions.length > 0
         ? <select value={source} onChange={(e) => setSource(e.target.value)}><option value="">Не указан</option>{sourceOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>
         : <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="OLX / Instagram / рекомендация" />}</Field>
-      {owners.length > 0 && <Field label="Ответственный менеджер"><select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>{owners.map((person) => <option key={person.id} value={person.id}>{person.full_name || "Без имени"}</option>)}</select></Field>}
-      {isLost ? (
-        <Field label="Почему клиент отказался"><textarea className="kd-textarea" value={lostReason} onChange={(e) => setLostReason(e.target.value)} placeholder="Например: дорого, выбрал конкурента, передумал" /></Field>
+      {owners.length > 0 && <Field label={clientType === "company" ? "Хантер (ведёт сделку)" : "Ответственный менеджер"}><select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>{owners.map((person) => <option key={person.id} value={person.id}>{person.full_name || "Без имени"}</option>)}</select></Field>}
+      {clientType === "company" && <DealFields form={deal} onChange={(patch) => setDeal((prev) => ({ ...prev, ...patch }))} stageCode={stageCode} Field={Field} pestOptions={pestOptions} companies={companies} keepers={owners} />}
+      {isLost || isSnoozed ? (
+        <ExitFields stageCode={stageCode} lostReason={lostReason} onLostReason={setLostReason} form={deal} onChange={(patch) => setDeal((prev) => ({ ...prev, ...patch }))} Field={Field} />
       ) : isClosed ? (
         <div className="kd-hint" style={{ marginBottom: 12 }}>Лид закрыт — следующий контакт назначать не нужно.</div>
       ) : (
@@ -3828,6 +3840,7 @@ function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, onClose
       )}
       <Field label="Ссылка на файл КП (Google Диск)"><input value={kpUrl} onChange={(e) => setKpUrl(e.target.value)} placeholder="https://drive.google.com/... (файл этого клиента)" /></Field>
       <Field label="Постоянная заметка в карточке"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Важная информация, которая всегда должна быть на виду" /></Field>
+      <MissingHint stageName={selectedStage?.name} missing={transition.missing} />
     </ModalShell>
   );
 }
@@ -3920,18 +3933,24 @@ function LeadHistoryModal({ lead, stageName, ownerName, activities = [], profile
   );
 }
 
-function LeadStageSelectModal({ lead, stages, initialStageId, onClose, onPick }) {
+function LeadStageSelectModal({ lead, stages, initialStageId, funnelCtx = {}, onClose, onPick, onEditDeal }) {
   const [stageId, setStageId] = useState(initialStageId || lead.stage_id || "");
   const [nextAction, setNextAction] = useState(lead?.next_action || "Позвонить клиенту");
   const currentDue = lead?.next_action_at && new Date(lead.next_action_at).getTime() > Date.now() ? lead.next_action_at : null;
   const [nextActionAt, setNextActionAt] = useState(localDateTimeInput(currentDue, 24));
   const [lostReason, setLostReason] = useState(lead?.lost_reason || "");
+  const [snooze, setSnooze] = useState({ snooze_until: lead?.snooze_until || "", snooze_reason: lead?.snooze_reason || "" });
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
   const selected = stages.find((stage) => String(stage.id) === String(stageId));
-  const needsPlan = selected && !selected.is_final && !selected.is_lost;
+  const fromCode = stages.find((stage) => String(stage.id) === String(lead.stage_id))?.code || "";
+  const isSnoozed = selected?.code === "snoozed";
+  const needsPlan = selected && !selected.is_final && !selected.is_lost && !isSnoozed;
   const due = nextActionAt ? new Date(nextActionAt) : null;
-  const ok = !!selected && (selected.is_lost ? !!lostReason.trim() : !needsPlan || (!!nextAction.trim() && due && Number.isFinite(due.getTime()) && due.getTime() > Date.now()));
+  const transition = stageTransition({ ...lead, lost_reason: lostReason, ...snooze }, fromCode, selected?.code, funnelCtx);
+  // Поля карточки здесь не заполнить — только причина отказа и дата возврата.
+  const cardMissing = transition.missing.filter((item) => !["lost_reason", "snooze_until", "snooze_reason"].includes(item.key));
+  const ok = !!selected && transition.ok && (selected.is_lost ? !!lostReason.trim() : !needsPlan || (!!nextAction.trim() && due && Number.isFinite(due.getTime()) && due.getTime() > Date.now()));
   async function save() {
     if (!ok || saving) return;
     setSaving(true); setProblem("");
@@ -3939,6 +3958,7 @@ function LeadStageSelectModal({ lead, stages, initialStageId, onClose, onPick })
       next_action: needsPlan ? nextAction.trim() : null,
       next_action_at: needsPlan ? localDateTimeIso(nextActionAt) : null,
       lost_reason: selected.is_lost ? lostReason.trim() : null,
+      ...(isSnoozed ? { snooze_until: snooze.snooze_until || null, snooze_reason: snooze.snooze_reason.trim() || null } : {}),
     });
     if (error) setProblem(error);
     setSaving(false);
@@ -3951,10 +3971,18 @@ function LeadStageSelectModal({ lead, stages, initialStageId, onClose, onPick })
       <div className="kd-muted" style={{ marginBottom: 12 }}>{lead.name || lead.phone || "Клиент"} — выбери стадию:</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {[...stages].sort((a, b) => a.sort - b.sort).map((s) => (
-          <button key={s.id} className={`kd-btn ${String(stageId) === String(s.id) ? "primary" : "ghost"}`} style={{ justifyContent: "flex-start" }} onClick={() => setStageId(s.id)}>{s.name}{String(stageId) === String(s.id) ? " ✓" : ""}</button>
+          <button key={s.id} className={`kd-btn ${String(stageId) === String(s.id) ? "primary" : "ghost"}`} style={{ justifyContent: "flex-start" }} onClick={() => setStageId(s.id)}>{s.name}{String(stageId) === String(s.id) ? " ✓" : ""}{(() => {
+            const gaps = stageTransition(lead, fromCode, s.code, funnelCtx).missing.filter((item) => !["lost_reason", "snooze_until", "snooze_reason"].includes(item.key)).length;
+            return gaps ? <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.75 }}>не хватает: {gaps}</span> : null;
+          })()}</button>
         ))}
       </div>
-      {selected?.is_lost && <Field label="Почему клиент отказался"><textarea className="kd-textarea" value={lostReason} onChange={(e) => setLostReason(e.target.value)} placeholder="Без причины отказ не закрываем" /></Field>}
+      {(selected?.is_lost || isSnoozed) && <div style={{ marginTop: 12 }}><ExitFields stageCode={selected.is_lost ? "lost" : "snoozed"} lostReason={lostReason} onLostReason={setLostReason} form={snooze} onChange={(patch) => setSnooze((prev) => ({ ...prev, ...patch }))} Field={Field} /></div>}
+      {isSnoozed && <div className="kd-muted">В дату возврата сделка сама вернётся в очередь.</div>}
+      {cardMissing.length > 0 && <>
+        <MissingHint stageName={selected?.name} missing={cardMissing} />
+        {onEditDeal && <button className="kd-btn ghost sm" style={{ marginTop: 8 }} onClick={onEditDeal}><Pencil size={13} />Заполнить карточку сделки</button>}
+      </>}
       {needsPlan && <div className="kd-grid2" style={{ marginTop: 12 }}>
         <Field label="Следующий шаг"><input value={nextAction} onChange={(e) => setNextAction(e.target.value)} /></Field>
         <Field label="Когда сделать"><input type="datetime-local" min={localDateTimeInput(null)} value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} /></Field>

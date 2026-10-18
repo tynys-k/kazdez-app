@@ -558,12 +558,16 @@ describe("ожидание лида", () => {
     expect(s.open).toBe(2);
   });
 
-  it("сконвертированный лид больше не ждёт", () => {
-    const s = leadSlaStats([
-      lead({ updated_at: hoursAgo(99), converted_job_id: "j1" }),
+  it("сделка с заявкой остаётся в очереди, пока её не закрыла стадия", () => {
+    const active = leadSlaStats([
+      lead({ stage_id: "s6", updated_at: hoursAgo(99), converted_job_id: "j1" }),
     ], { firstStageId: "s1", now });
-    expect(s.open).toBe(0);
-    expect(s.lateReaction).toBe(0);
+    expect(active.open).toBe(1);
+    expect(active.lateReaction).toBe(0);
+    const closed = leadSlaStats([
+      lead({ stage_id: "s7", updated_at: hoursAgo(99), converted_job_id: "j1" }),
+    ], { firstStageId: "s1", closedStageIds: ["s7"], now });
+    expect(closed.open).toBe(0);
   });
 
   it("взятый в работу и забытый попадает в «зависшие», а не в «не отвечено»", () => {
