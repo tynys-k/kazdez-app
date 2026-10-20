@@ -54,6 +54,7 @@ import CallModal from "./workflows/CallModal";
 import { HUNTER_FUNNEL_MIGRATION, lostReasonLabel, nextStageHint } from "./workflows/hunterFunnelModel";
 import { DealSummary } from "./workflows/HunterDeal";
 import { canonicalPestOptions } from "./pestNormalization";
+import { JOB_DEBT_MIGRATION, debtJobs, jobDebtState } from "./workflows/jobDebtModel";
 import { CALL_OUTCOMES, CLIENT_CALLS_MIGRATION, buildCallQueue, buildLaterJobIndex, callStageOf, callStateOf, callsForJob, liveCalls, outcomeLabel } from "./workflows/clientCallsModel";
 import { AddVisitModal, BranchModal, ContractDetailsModal, ControlPointModal, RepeatCauseModal, DebtPayModal, ChemSaleModal, ChemSalePayModal, SettleModal, PaperworkModal, BlockClientModal, ObjectModal, PeopleEventModal, PlanModal, TrainingModal, TechDocModal, AccountModal, AddChemModal, AssignModal, CancelJobModal, CashRevisionModal, ConfirmDepositModal, ConfirmModal, ContractModal, DayOffModal, DepositModal, DetailsModal, DocModal, EquipModal, ExecutorDoneModal, FollowupModal, GuaranteeModal, HandoutModal, HistoryModal, InventoryMovementModal, IssueEquipModal, JobCard, JobEconomicsModal, JobFormModal, JobSettlementModal, LeadActivityModal, LeadHistoryModal, LeadModal, LeadStageSelectModal, MktChannelModal, MktTopupModal, MoveModal, OffCalendarModal, OpexModal, PartnerJobsModal, PartnerModal, PayrollPayModal, PayGuaranteeModal, ProofModal, QualityModal, RejectDepositModal, RepeatList, ReportEquipModal, ReportModal, ReportSuccessModal, RequestEditModal, ReturnGuaranteeModal, SettingsModal, StockInModal, TaskModal, TechEditModal, TechExtrasModal, TenderModal, TransferEquipModal, TransferPayModal, UserAccessModal, ViewModal, jobToForm } from "./modals";
 
@@ -1512,7 +1513,12 @@ function Dashboard({ session, profile }) {
       patch = { ...patch, object_id: await ensureObject({ ...job, ...payload }) };
     }
     const { error } = await supabase.from("jobs").update(patch).eq("id", job.id);
-    if (error) { showToast("Ошибка: " + error.message); return false; }
+    if (error) {
+      showToast(/debt_(mode|due_on)/.test(error.message || "")
+        ? `Сначала примени миграцию ${JOB_DEBT_MIGRATION} в Supabase — заявка не была изменена`
+        : "Ошибка: " + error.message);
+      return false;
+    }
     await ensureCatalog("client_sources", sources, payload.source);
     await ensureCatalog("pest_types", pestTypes, payload.pest);
     await logAction("Редактирование", `${payload.pest || job.pest} · ${payload.address || job.address}`);
@@ -3116,13 +3122,21 @@ function Dashboard({ session, profile }) {
     if (qDigits && phoneDigits.includes(qDigits)) return true;
     return norm(j.address).includes(q) || norm(j.pest).includes(q) || norm(j.client_phone).includes(q);
   }
-  const statusMatched = statusFilter === "all" ? activeJobs : activeJobs.filter((j) => j.status === statusFilter);
+  // «Долги» собирают и выполненные заявки с открытым долгом, и ещё не
+  // выполненные с отметкой «в долг» — порядок задаёт срок оплаты, а не дата выезда.
+  const debtList = debtJobs(jobs, debts);
+  const debtOfJob = (j) => jobDebtState(j, debts);
+  const showDebts = statusFilter === "debts";
+  const statusMatched = showDebts ? debtList.map((x) => x.job) : statusFilter === "all" ? activeJobs : activeJobs.filter((j) => j.status === statusFilter);
   const filteredActive = statusMatched.filter(matchSearch).filter((j) => dateInFilter(j.scheduled_date, jobsDateFilter));
-  const sorted = [...filteredActive].sort((a, b) => jobTime(a) - jobTime(b));
+  const sorted = showDebts ? filteredActive : [...filteredActive].sort((a, b) => jobTime(a) - jobTime(b));
   const jobPageSize = 25;
   const activePageCount = Math.max(1, Math.ceil(sorted.length / jobPageSize));
   useEffect(() => { if (activeJobPage > activePageCount) setActiveJobPage(activePageCount); }, [activeJobPage, activePageCount]);
-  const groups = groupByDate(sorted.slice((activeJobPage - 1) * jobPageSize, activeJobPage * jobPageSize));
+  const activePageJobs = sorted.slice((activeJobPage - 1) * jobPageSize, activeJobPage * jobPageSize);
+  const groups = showDebts
+    ? (activePageJobs.length ? [{ key: "debts", label: "Оплата в долг", past: false, jobs: activePageJobs }] : [])
+    : groupByDate(activePageJobs);
   // Юрлица и абоненты среди заявок: юрлиц сажаем на абонемент, разовые — частники.
   const jobClientType = clientTypeLookup(clients);
   const jobIsSubscribed = subscriptionLookup(contracts, clients);
@@ -4021,19 +4035,22 @@ function Dashboard({ session, profile }) {
           <>
             {canEditJobs && (
               <div className="kd-seg" style={{ marginBottom: 14 }}>
-                {[{ id: "all", label: "Все" }, { id: "new", label: "Новые" }, { id: "assigned", label: "Назначены" }].map((s) => (
-                  <button key={s.id} className={`kd-segbtn ${statusFilter === s.id ? "on" : ""}`} onClick={() => setStatusFilter(s.id)}>{s.label}</button>
+                {[{ id: "all", label: "Все" }, { id: "new", label: "Новые" }, { id: "assigned", label: "Назначены" }, { id: "debts", label: "Долги", count: debtList.length }].map((s) => (
+                  <button key={s.id} className={`kd-segbtn ${statusFilter === s.id ? "on" : ""}`} onClick={() => { setStatusFilter(s.id); setActiveJobPage(1); }}>{s.label}{s.count > 0 && <span className="kd-segcount">{s.count}</span>}</button>
                 ))}
               </div>
             )}
             <DateFilterBar filter={jobsDateFilter} onChange={setJobsDateFilter} />
-            {filteredActive.length === 0 ? <div className="kd-empty">{activeJobs.length === 0 ? "Активных заявок нет — все выполнены. Загляни во вкладку «Выполненные»." : "По этому фильтру ничего не найдено."}</div> :
+            {showDebts && debtList.length > 0 && <div className="kd-muted" style={{ marginBottom: 10 }}>
+              Ожидается: {debtList.filter((x) => x.debt.kind === "expected").length} · открытых долгов: {debtList.filter((x) => x.debt.kind === "open").length} на {fmt(debtList.reduce((s, x) => s + (x.debt.kind === "open" ? x.debt.amount : 0), 0))} ₸
+            </div>}
+            {filteredActive.length === 0 ? <div className="kd-empty">{showDebts ? (debtList.length === 0 ? "Заявок в долг нет. Отметку «Оплата в долг» ставят в форме заявки." : "По этому фильтру ничего не найдено.") : activeJobs.length === 0 ? "Активных заявок нет — все выполнены. Загляни во вкладку «Выполненные»." : "По этому фильтру ничего не найдено."}</div> :
               groups.map((g) => (
                 <div key={g.key} className="kd-group">
                   <div className={`kd-datehead ${g.past ? "past" : ""}`}><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} compact={expandedActiveId !== j.id} onExpand={() => setExpandedActiveId(j.id)} onCollapse={() => setExpandedActiveId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
+                      <JobCard key={j.id} job={j} debt={debtOfJob(j)} onDebtPay={canManageCash ? () => { const d = debtOfJob(j); if (d?.rows?.[0]) setModal({ kind: "debtPay", debt: d.rows[0], job: j }); } : null} compact={expandedActiveId !== j.id} onExpand={() => setExpandedActiveId(j.id)} onCollapse={() => setExpandedActiveId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
                         onCopy={() => copyText(buildMsg(j, brandHeaderOf(j)), () => showToast("Текст скопирован"))}
                         onProof={() => openJobProof(j)} proofComplete={proofIsComplete(j.id)}
                         onCopyPublicLink={() => copyPublicJobLink(j)}
@@ -4198,7 +4215,7 @@ function Dashboard({ session, profile }) {
                   <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} clientLabel={doneJobClientLabel(j)}
+                      <JobCard key={j.id} job={j} debt={debtOfJob(j)} clientLabel={doneJobClientLabel(j)}
                       callPanel={expandedDoneId === j.id ? <JobCallPanel job={j} state={jobCallState(j)} people={allProfiles} userId={session.user.id} isAdmin={isAdmin} onCall={canCallClients ? () => openCall(j) : null} onDelete={canCallClients ? askDeleteClientCall : null} /> : null}
                       onCall={canCallClients ? () => openCall(j) : null}
                       onSubscribe={canEditJobs && !jobIsSubscribed(j) ? () => openSubscriptionDraft(j) : null} compact={expandedDoneId !== j.id} onExpand={() => setExpandedDoneId(j.id)} onCollapse={() => setExpandedDoneId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}

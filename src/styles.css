@@ -940,3 +940,13 @@ body{
   :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea){font-size:16px}
   .kd-globalsearch input{font-size:16px}
 }
+
+/* Заявки «в долг»: красная полоса слева и метка, чтобы админ видел их в общем списке. */
+.kd-debttag{display:inline-block;font-size:12px;font-weight:800;color:var(--rust);background:var(--rust-tint);border:1px solid rgba(242,114,106,.32);border-radius:8px;padding:5px 9px;}
+.kd-debttag.paid{color:var(--muted);background:var(--surface-sunk);border-color:var(--line);}
+.kd-job-row-main .kd-debttag{align-self:flex-start;max-width:100%;margin-top:3px;padding:2px 7px;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kd-done-row.debt{position:relative;border-color:rgba(242,114,106,.45);background:linear-gradient(90deg,var(--rust-tint),var(--surface) 55%);}
+.kd-done-row.debt::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:4px;background:var(--rust);}
+.kd-card.debt{border-color:rgba(242,114,106,.45);}
+.kd-card.debt::before{content:"";position:absolute;left:0;top:16px;bottom:16px;width:3px;border-radius:4px;background:var(--rust);box-shadow:0 0 12px 0 var(--rust);opacity:1;}
+.kd-segbtn .kd-segcount{margin-left:6px;padding:1px 7px;border-radius:999px;background:var(--rust-tint);color:var(--rust);font-size:11px;font-weight:800;}
