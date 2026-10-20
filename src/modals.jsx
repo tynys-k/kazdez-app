@@ -20,6 +20,7 @@ import QualityHistory from "./workflows/QualityHistory";
 import { CallLog } from "./workflows/ClientCalls";
 import { callsForClient, outcomeLabel } from "./workflows/clientCallsModel";
 import JobObjectFields from "./workflows/JobObjectFields";
+import { DEBT_MODES, debtModeLabel } from "./workflows/jobDebtModel";
 import { ContractSummary } from "./workflows/ContractsRegister";
 import { objectPayload, objectDescription } from "./workflows/objectModel";
 import { Badge, Button, DetailDrawer, EmptyState, ListRow, Pagination, Textarea } from "./ui/primitives";
@@ -75,8 +76,13 @@ function PartnerOrigin({ name, compact = false }) {
   );
 }
 
-function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete, clientLabel, onSubscribe, onCall, callPanel }) {
+function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete, clientLabel, onSubscribe, onCall, callPanel, debt, onDebtPay }) {
   const st = STATUS[job.status] || STATUS.new;
+  // Заявки «в долг» админ должен отличать от остальных с первого взгляда.
+  const debtTag = debt?.kind === "open" ? `долг ${fmt(debt.amount)} ₸${debt.dueOn ? ` · до ${isoToRu(debt.dueOn)}` : ""}`
+    : debt?.kind === "paid" ? "долг погашен"
+    : job.debt_mode ? `${debtModeLabel(job.debt_mode)}${job.debt_due_on ? ` · до ${isoToRu(job.debt_due_on)}` : ""}` : "";
+  const debtTone = debt?.kind === "paid" ? "" : debtTag ? "debt" : "";
   const stageKey = jobWorkStage(job);
   const stage = WORK_STAGE[stageKey];
   const isPartnerJob = job.brand === "partner" || !!job.partner_id || !!job.partner_name;
@@ -92,8 +98,8 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
   const rowAmount = job.report_paid ?? job.price_options?.[0]?.amount;
   const rowAssignee = assignedName || executorName || "Не назначен";
   const compactRow = (
-    <button type="button" className={`kd-done-row kd-job-row ${job.status === "done" ? "done" : "active"}`} onClick={onExpand} aria-label={`Открыть заявку: ${job.pest || "без названия"}, ${addressPlain(job.address) || "адрес не указан"}`}>
-      <span className="kd-job-row-main"><strong>{job.pest || "Заявка"}</strong><small>{addressPlain(job.address) || "Адрес не указан"}</small></span>
+    <button type="button" className={`kd-done-row kd-job-row ${job.status === "done" ? "done" : "active"} ${debtTone}`} onClick={onExpand} aria-label={`Открыть заявку: ${job.pest || "без названия"}, ${addressPlain(job.address) || "адрес не указан"}`}>
+      <span className="kd-job-row-main"><strong>{job.pest || "Заявка"}</strong><small>{addressPlain(job.address) || "Адрес не указан"}</small>{debtTag && <span className={`kd-debttag ${debtTone ? "" : "paid"}`}>{debtTag}</span>}</span>
       <span data-label="Дата">{formatDate(job.scheduled_date)}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
       <span data-label="Клиент">{clientLabel ? `${clientLabel} · ` : ""}{formatPhone(job.client_phone)}</span>
       <span data-label="Исполнитель">{rowAssignee}</span>
@@ -104,7 +110,7 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
   );
   if (compact) return compactRow;
   const detail = (
-    <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""}`}>
+    <div className={`kd-card ${job.status === "done" ? "done" : ""} ${needsFollowup ? "low" : ""} ${debtTone}`}>
       <div className="kd-card-head"><div className="kd-pest">{job.pest}</div><div className="kd-cardbadges">{onCollapse && <button type="button" className="kd-btn ghost sm" onClick={onCollapse}>Свернуть</button>}<span className="kd-badge" style={{ color: stage.color, background: stage.bg }}>{stage.short}</span>{stageKey !== job.status && <span className="kd-badge subtle" style={{ color: st.color, background: st.bg }}>{st.label}</span>}</div></div>
       <div className="kd-meta">
         <span className="kd-brandtag">{brandLabel}</span>
@@ -121,6 +127,8 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
       <div className="kd-addr"><AddressText text={job.address} /></div>
       {job.note && <div className="kd-notebox">📝 {job.note}</div>}
       <div className="kd-prices">
+        {debtTag && <span className={`kd-debttag ${debtTone ? "" : "paid"}`}>{debtTag}</span>}
+        {debt?.kind === "open" && onDebtPay && <button type="button" className="kd-btn primary sm" onClick={onDebtPay}>Рассчитался</button>}
         {job.pricing_mode === "on_site_estimate" && <span className="kd-doctag">Оценка на месте{job.assessment_completed_at ? ` · ${fmt(job.assessed_amount)} ₸` : ""}</span>}
         {(job.price_options || []).map((p, i) => (<span className="kd-price" key={i}>{fmt(p.amount)} ₸{p.label ? <em> · {p.label}</em> : null}</span>))}
         {job.source && <span className="kd-srctag">{job.source}</span>}
@@ -392,12 +400,13 @@ function jobToForm(job) {
     p2label: po[1]?.label || "Без запаха", p2amount: po[1]?.amount ?? "",
     client_phone: job.client_phone || "+7 ", contact_name: job.contact_name || "", extra_contacts: Array.isArray(job.extra_contacts) ? job.extra_contacts : [], guarantee_months: job.guarantee_months ?? 6, guarantee_after_visit: job.guarantee_after_visit ?? 2, guarantee_terms: job.guarantee_terms || "",
     pricing_mode: job.pricing_mode || "quoted",
+    debt_mode: job.debt_mode || "", debt_due_on: job.debt_due_on || "",
     brand: job.brand || "KazDez", partner_id: job.partner_id || "", partner_share: job.partner_share ?? "",
     note: job.note || "", assigned_to: job.assigned_to || "", executor_kind: job.executor_partner_id ? "partner" : "tech", executor_partner_id: job.executor_partner_id || "", executor_share_pct: job.executor_share_pct ?? "", joint_work: !!job.joint_work, joint_supplier: job.joint_supplier || "us", joint_cost_share: job.joint_cost_share ?? "", partner_comp: job.partner_comp ?? "",
   };
 }
 
-const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", pricing_mode: "quoted", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, guarantee_after_visit: 2, guarantee_terms: "", brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
+const emptyJobForm = (defaultGuarantee) => ({ type: "Первичная", scheduled_date: "", time_from: "", time_to: "", address: "", floor: "", area: "", source: "", pest: "", p1label: "Стоимость", p1amount: "", p2label: "Без запаха", p2amount: "", pricing_mode: "quoted", debt_mode: "", debt_due_on: "", client_phone: "+7 ", contact_name: "", extra_contacts: [], guarantee_months: defaultGuarantee, guarantee_after_visit: 2, guarantee_terms: "", brand: "KazDez", partner_id: "", partner_share: "", note: "", assigned_to: "", executor_kind: "tech", executor_partner_id: "", executor_share_pct: "", joint_work: false, joint_supplier: "us", joint_cost_share: "", partner_comp: "" });
 
 function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, findBlocked, partners = [], techs = [], existingJobs = [], sources = [], pestTypes = [], pestGuide = {}, priceList = [], defaultGuarantee = 6, headerActions = [], onClose, onSave }) {
   const draftKey = newJobDraftStorageKey(draftOwnerId);
@@ -496,7 +505,7 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
       if (!isOnSiteEstimate && f.p2amount) price_options.push({ label: f.p2label, amount: Number(f.p2amount) });
       const scheduled_time = f.time_from ? (f.time_to ? `${f.time_from}–${f.time_to}` : f.time_from) : "";
       const isPartner = f.brand === "partner";
-      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: canonicalSourceName(f.source), pest: canonicalPestName(f.pest), price_options, pricing_mode: f.pricing_mode || "quoted", client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months), guarantee_after_visit: Number(f.guarantee_after_visit), guarantee_terms: f.guarantee_terms?.trim() || null, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
+      const payload = { type: f.type, scheduled_date: f.scheduled_date || null, scheduled_time, address: f.address, floor: f.floor, area: f.area ? Number(f.area) : null, source: canonicalSourceName(f.source), pest: canonicalPestName(f.pest), price_options, pricing_mode: f.pricing_mode || "quoted", debt_mode: f.debt_mode || null, debt_due_on: f.debt_mode && f.debt_due_on ? f.debt_due_on : null, client_phone: f.client_phone, contact_name: (f.contact_name || "").trim() || null, extra_contacts: (f.extra_contacts || []).filter((c) => (c.phone || "").trim()), guarantee_months: Number(f.guarantee_months), guarantee_after_visit: Number(f.guarantee_after_visit), guarantee_terms: f.guarantee_terms?.trim() || null, brand: f.brand, partner_id: isPartner ? (f.partner_id || null) : null, partner_share: isPartner ? (Number(f.partner_share) || 0) : null, note: f.note || null, joint_work: isPartner && !!f.joint_work, joint_supplier: isPartner && f.joint_work ? f.joint_supplier : "us", joint_cost_share: isPartner && f.joint_work && f.joint_supplier === "us" ? (Number(f.joint_cost_share) || 0) : null, partner_comp: isPartner && f.partner_comp ? (Number(f.partner_comp) || 0) : null,
         executor_partner_id: f.executor_kind === "partner" ? (f.executor_partner_id || null) : null,
         executor_share_pct: f.executor_kind === "partner" ? (Number(f.executor_share_pct) || 0) : null };
       if (f.executor_kind !== "partner") payload.assigned_to = f.assigned_to || null;
@@ -643,6 +652,16 @@ function JobFormModal({ initial, title, submitLabel, keepStatus, draftOwnerId, f
           <Field label="Цена 2 — сумма (₸)"><input value={f.p2amount} onChange={set("p2amount")} inputMode="numeric" placeholder="20000" /></Field>
         </div>)}
       {priceHint}
+      <label className="kd-check" style={{ marginBottom: 10 }}>
+        <input type="checkbox" checked={!!f.debt_mode} onChange={(e) => setF({ ...f, debt_mode: e.target.checked ? "advance" : "", debt_due_on: e.target.checked ? f.debt_due_on : "" })} />
+        <span><strong>Оплата в долг</strong><small style={{ display: "block", marginTop: 2 }}>Клиент заплатит позже. Заявка будет подсвечена в списке и попадёт во вкладку «Долги».</small></span>
+      </label>
+      {f.debt_mode && <>
+        <div className="kd-seg" style={{ width: "100%", marginBottom: 12 }}>
+          {Object.entries(DEBT_MODES).map(([code, m]) => <button key={code} type="button" className={`kd-segbtn ${f.debt_mode === code ? "on" : ""}`} onClick={() => setF({ ...f, debt_mode: code })}>{m.label}</button>)}
+        </div>
+        <Field label="Обещал оплатить до (необязательно)"><input type="date" value={f.debt_due_on || ""} onChange={set("debt_due_on")} /></Field>
+      </>}
       {formMode === "expanded" && <>
       <datalist id="kd-contact-roles">{["Муж", "Жена", "Сестра", "Брат", "Коллега", "Директор", "Диспетчер", "Охранник", "Бухгалтер", "Администратор", "Сосед"].map((r) => <option key={r} value={r} />)}</datalist>
       {(f.extra_contacts || []).map((c, i) => (
@@ -793,11 +812,12 @@ function ReportModal({ job, partnerName, chemicals, primaryReport, draftOwnerId,
   const [checks, setChecks] = useState(draft.checks || {});
   const setCheck = (pointId, patch) => setChecks((prev) => ({ ...prev, [pointId]: { ...prev[pointId], ...patch } }));
   const [moreEquip, setMoreEquip] = useState(() => (draft.equipment || []).some((c) => !WORK_EQUIPMENT.find((e) => e.code === c)?.common));
-  const [discountReason, setDiscountReason] = useState(draft.discountReason || "");
+  // Если об оплате в долг договорились при оформлении, причина недоплаты уже известна.
+  const [discountReason, setDiscountReason] = useState(draft.discountReason || (job.debt_mode ? "debt" : ""));
   const [discountNote, setDiscountNote] = useState(draft.discountNote || "");
   // Долг — это не скидка: скидку дали, долг обещали вернуть. Поэтому у него
   // спрашивается срок, и дальше он живёт в дебиторке, а не в отчёте о скидках.
-  const [debtDue, setDebtDue] = useState(draft.debtDue || "");
+  const [debtDue, setDebtDue] = useState(draft.debtDue || job.debt_due_on || "");
   const total = (Number(cash) || 0) + (Number(qr) || 0) + (Number(transfer) || 0);
   // Прайсовая цена зафиксирована при оформлении заявки. Если её нет — сравнивать
   // не с чем, и мешать сдать отчёт мы не имеем права.
