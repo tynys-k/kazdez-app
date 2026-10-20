@@ -30,6 +30,8 @@ import { buildCallQueue, buildLaterJobIndex, callStateOf, callsForJob, callStage
 import { RepeatPendingList, RepeatTriageBar } from "./RepeatTriage";
 import { buildRepeatTriage } from "./repeatTriageModel";
 import { DateFilterBar } from "../shared";
+import Pulse from "./Pulse";
+import { b2bFunnel, cashRunway, decisionQueue, monthProgress, planFact } from "./pulseModel";
 const people = [{ id: "demo-admin", full_name: "Администратор" }, { id: "demo-worker", full_name: "Аян" }, { id: "demo-observer", full_name: "Менеджер" }];
 const initialTasks = [
   { id: "demo-task-1", title: "Сверить остатки на Байзакова", description: "Пересчитать препараты и оформить акт ревизии. Сверить Кельт с журналом выдач.", status: "new", created_at: "2026-09-14T08:10:00+05:00", created_by: people[0].id, assignee_id: people[1].id, observer_ids: [people[2].id], due_date: "2026-09-16", due_time: "17:00", comment_policy: "participants" },
@@ -169,13 +171,51 @@ function DealPreview() {
     {open === "stage" && <LeadStageSelectModal lead={previewDeal} stages={dealStages} initialStageId="st-kp_sent" onEditDeal={() => setOpen("card")} onClose={() => setOpen("")} onPick={noop} />}
   </section>;
 }
+const pulseToday = new Date();
+const pulseIso = (days) => { const d = new Date(pulseToday); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+const pulseLeads = [
+  { id: "pl-1", name: "Кафе «Дастархан»", client_type: "company", stage_id: "st-kp_sent", expected_mrr: 45000, stage_changed_at: pulseIso(-21) },
+  { id: "pl-2", name: "Склад «Алатау»", client_type: "company", stage_id: "st-negotiation", quoted_price: 80000, stage_changed_at: pulseIso(-3) },
+  { id: "pl-3", name: "Детсад №12", client_type: "company", stage_id: "st-contract", expected_mrr: 30000, stage_changed_at: pulseIso(-16) },
+  { id: "pl-4", name: "ТЦ «Мега»", client_type: "company", stage_id: "st-lpr_found", stage_changed_at: pulseIso(-2) },
+  { id: "pl-5", name: "Пекарня", client_type: "company", stage_id: "st-subscriber", contract_signed_at: pulseIso(-4) },
+];
+const pulseContracts = [
+  { id: "pc-1", price: 30000, interval_days: 30, next_service_date: pulseIso(5), created_at: pulseIso(-4) },
+  { id: "pc-2", price: 120000, interval_days: 90, next_service_date: pulseIso(18), created_at: pulseIso(-200) },
+  { id: "pc-3", price: 25000, interval_days: 14, next_service_date: pulseIso(-1), created_at: pulseIso(-90) },
+];
+const pulseAlerts = [
+  { id: "debts", label: "Просроченные долги клиентов", value: "184 000 ₸", tab: "opex", tone: "danger" },
+  { id: "overdue-jobs", label: "Просроченные заявки", value: 3, tab: "jobs", tone: "danger" },
+  { id: "stockorder", label: "Пора заказывать препараты", value: 2, tab: "stock", tone: "warning" },
+  { id: "contracts", label: "Пора создать плановые выезды", value: 1, tab: "subscriptions", tone: "danger" },
+];
+function PulsePreview() {
+  const [decisions, setDecisions] = useState([{ alert_key: "overdue-jobs", status: "open", owner_id: people[1].id, due_on: pulseIso(-1), task_id: "demo-task-1" }, { alert_key: "stockorder", status: "open", snoozed_until: pulseIso(5), note: "Ждём поставщика" }]);
+  const [target, setTarget] = useState({ revenue: 4200000, profit: 900000, jobs: 110, new_subscribers: 4, mrr: 250000 });
+  const day = pulseToday.getDate();
+  const funnel = b2bFunnel({ leads: pulseLeads, stages: dealStages, contracts: pulseContracts, today: pulseToday });
+  const decide = async (alert, action, { ownerId, due, until, note } = {}) => {
+    setDecisions((rows) => [...rows.filter((d) => d.alert_key !== alert.id), ...(action === "close" ? [] : [{ alert_key: alert.id, status: "open", owner_id: ownerId, due_on: due, snoozed_until: until, note }])]);
+    return null;
+  };
+  return <Pulse monthLabel={new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(pulseToday)} elapsedShare={monthProgress(pulseToday).share}
+    plan={planFact({ target, today: pulseToday, fact: { revenue: 125000 * day, profit: 21000 * day, jobs: Math.round(3.1 * day), new_subscribers: funnel.mrr.newThisMonth, mrr: funnel.mrr.current } })} target={target}
+    runway={cashRunway({ today: pulseToday, startBalance: 1450000, receivables: 210000, debts: [{ amount: 184000, due_on: pulseIso(-6) }, { amount: 60000, due_on: pulseIso(12) }, { amount: 15000 }],
+      plannedJobs: [{ scheduled_date: pulseIso(1), quoted_price: 45000 }, { scheduled_date: pulseIso(2), price_options: [{ amount: 30000 }] }, { scheduled_date: pulseIso(9), quoted_price: 220000 }],
+      contracts: pulseContracts, completionRate: 0.87, directCostShare: 0.38, payrollOwed: 940000, monthlyOpex: 1100000, monthlySalaries: 1500000, monthlyMarketing: 350000 })}
+    assumptions={{ completionRate: 0.87, directCostShare: 0.38, monthlyOpex: 1100000 }} funnel={funnel}
+    queue={decisionQueue({ alerts: pulseAlerts, decisions, tasks: initialTasks, profiles: people, today: pulseToday })} people={people} ready
+    onSaveTargets={async (values) => { setTarget(values); return null; }} onDecide={decide} onNavigate={noop} onOpenLead={noop} onOpenAlert={noop} />;
+}
 function ResponsivePreview() {
   const [width, setWidth] = useState(320);
   return <main><nav className="wf-toolbar">{[320, 768, 1024, 1440].map((size) => <button className="kd-btn ghost" key={size} onClick={() => setWidth(size)}>{size} px</button>)}</nav><iframe title="Проверка адаптивности" src="/workflow-preview.html" width={width} height="850" style={{ border: "1px solid var(--line)", display: "block", margin: "16px auto" }} /></main>;
 }
 function Preview() {
   const [page, setPage] = useState("Задачи"), [tasks, setTasks] = useState(initialTasks), [selected, setSelected] = useState(null), [expandedJob, setExpandedJob] = useState(""), [jobFormOpen, setJobFormOpen] = useState(false), [form, setForm] = useState({ object_kind: "commercial", object_details: { measurement: "fumigation", volume_method: "dimensions", length_m: 5, width_m: 4, height_m: 3 } });
-  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Обзвон", "Повтор", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП", "Реклама", "Сделка"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
+  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Обзвон", "Повтор", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП", "Реклама", "Сделка", "Пульс"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
     {page === "Задачи" && <TaskBoard tasks={tasks} people={people} userId={people[0].id} canManage onCreate={noop} onEdit={noop} onRemove={noop} onStatus={async (task, status) => { setTasks(tasks.map((t) => t.id === task.id ? { ...t, status } : t)); return true; }} />}
     {page === "Обзвон" && <CallsPreview />}
     {page === "Повтор" && <RepeatPreview />}
@@ -187,6 +227,7 @@ function Preview() {
     {page === "Финансы" && <FinanceAnalysis moves={previewMoney} accounts={previewAccounts} categories={previewCategories} bankRows={previewBankRows} evidence={[]} jobs={[]} manualExpenses={[]} />}
     {page === "Реклама" && <AdsIntelligence accounts={previewAdAccounts} assets={previewAdAssets} snapshots={previewAdSnapshots} promotions={previewAdPromotions} metrics={previewAdMetrics} canEdit />}
     {page === "Сделка" && <DealPreview />}
+    {page === "Пульс" && <PulsePreview />}
     {page === "КП" && <Proposals proposals={previewProposals} clients={previewClients} clientContacts={previewContacts}
       objects={previewObjects} leads={[]} priceList={previewPrices} pestTypes={previewPests} settings={previewSettings}
       branches={[{ id: "demo-br", code: "ALA", is_default: true }]} canEdit isAdmin userName="Менеджер" onReload={noop} />}
