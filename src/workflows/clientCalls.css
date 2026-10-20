@@ -76,3 +76,21 @@ button.kd-followuptag{border:none;cursor:pointer;font:inherit;font-size:12px;fon
 button.kd-followuptag:hover{filter:brightness(.96);text-decoration:underline}
 /* Карточка с колонкой обращений шире обычной, чтобы колонка не сжимала заявку. */
 .ui-drawer--center:has(.kd-job-split){width:min(78rem,100%)}
+
+/* Журнал «Обзвонили» */
+.kd-calljr-filters{display:flex;flex-direction:column;gap:8px;margin:0 0 10px;padding:10px;border:1px solid var(--line-soft);border-radius:var(--radius-sm);background:var(--surface-sunk)}
+.kd-calljr-chips{display:flex;gap:6px;flex-wrap:wrap}
+.kd-calljr-chips button{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);font:inherit;font-weight:650;font-size:12.5px;padding:5px 10px;border-radius:999px;cursor:pointer;min-height:32px}
+.kd-calljr-chips button b{font-size:11px;color:var(--muted)}
+.kd-calljr-chips button.on{border-color:var(--primary);background:var(--primary-tint);color:var(--primary-d)}
+.kd-calljr-chips button.on b{color:var(--primary-d)}
+.kd-calljr-author{align-self:flex-start;width:auto!important;min-height:32px;font-size:12.5px}
+.kd-calljr-row{border-bottom:1px solid var(--line-soft)}
+.kd-calljr-row.open{background:var(--surface-sunk);border-radius:var(--radius-sm)}
+.kd-calljr-row .kd-call-log{padding:0 10px 8px 14px}
+.kd-calljr-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 3px}
+.kd-calljr-badges{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width: 640px){
+  .kd-calljr-head{flex-direction:column;align-items:stretch}
+  .kd-calljr-badges{justify-content:flex-start}
+}

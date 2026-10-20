@@ -142,7 +142,10 @@ export function buildCallQueue(jobs, { calls = [], qualityChecks = [], today, wi
     const state = callStateOf(job, { ownCalls: callsByJob.get(String(job.id)) || [], legacy: legacyByJob.get(String(job.id)), laterIndex });
     if (state.closed) continue;
     if (state.dueOn > todayIso && !state.calls.length) { result.upcoming += 1; continue; }
-    const item = { job, ...state, nextOn: state.callbackOn || state.dueOn };
+    // После «не дозвонился» следующая попытка — не раньше завтрашнего дня,
+    // иначе только что набранный клиент снова встаёт первым в списке.
+    const retryOn = state.last?.outcome === "no_answer" ? addDaysIso(state.last.created_at, 1) : "";
+    const item = { job, ...state, retryOn, nextOn: state.callbackOn || (retryOn > state.dueOn ? retryOn : state.dueOn) };
     if (state.callbackOn && state.callbackOn > todayIso) result.later.push(item);
     else result[stage].push(item);
   }
@@ -157,3 +160,55 @@ export const daysSinceIso = (iso, today = new Date()) => {
   const d = new Date(`${isoDay(iso)}T00:00:00`);
   return Number.isNaN(d.getTime()) ? 0 : Math.max(0, Math.floor((+today - +d) / DAY));
 };
+
+// Итог по заявке для журнала «Обзвонили»: закрывающий звонок важнее
+// последующих комментариев, иначе — последний звонок по существу.
+export const RESULT_FILTERS = [
+  ["all", "Все"],
+  ["agreed", "Посадили / на повтор"],
+  ["all_good", "Всё хорошо"],
+  ["declined", "Отказ"],
+  ["complaint", "Претензия"],
+  ["unreachable", "Недоступен"],
+  ["pending", "Не дозвонились"],
+];
+
+export function resultOf(calls) {
+  const closing = calls.find((c) => CALL_OUTCOMES[c.outcome]?.closes);
+  if (closing) return closing.outcome;
+  const decisive = calls.find((c) => c.outcome !== "note");
+  return decisive ? "pending" : "note";
+}
+
+// Журнал обзвона, сгруппированный по заявке: кому звонили, что ответили и
+// все комментарии. sinceIso отсекает заявки, по которым не звонили с этой даты.
+export function buildCallJournal(jobs, calls, { sinceIso = "", stage = "all", result = "all", authorId = "" } = {}) {
+  const jobById = new Map(jobs.map((j) => [String(j.id), j]));
+  const byJob = new Map();
+  for (const c of liveCalls(calls).sort(newestFirst)) {
+    const key = String(c.job_id);
+    if (!byJob.has(key)) byJob.set(key, []);
+    byJob.get(key).push(c);
+  }
+  const all = [];
+  for (const [jobId, own] of byJob) {
+    const job = jobById.get(jobId) || null;
+    const entryStage = own[0].stage || callStageOf(job);
+    const lastAt = String(own[0].created_at || "");
+    if (sinceIso && lastAt.slice(0, 10) < sinceIso) continue;
+    if (authorId && !own.some((c) => String(c.created_by) === String(authorId))) continue;
+    const rating = own.find((c) => c.rating)?.rating || null;
+    all.push({ jobId, job, phone: job?.client_phone || own[0].client_phone, stage: entryStage, calls: own, result: resultOf(own), rating, lastAt });
+  }
+  const counts = { stage: { all: 0, after_primary: 0, after_secondary: 0 }, result: Object.fromEntries(RESULT_FILTERS.map(([id]) => [id, 0])) };
+  const items = [];
+  for (const e of all) {
+    const stageOk = stage === "all" || e.stage === stage;
+    const resultOk = result === "all" || e.result === result;
+    if (resultOk) { counts.stage.all += 1; if (e.stage in counts.stage) counts.stage[e.stage] += 1; }
+    if (stageOk) { counts.result.all += 1; if (e.result in counts.result) counts.result[e.result] += 1; }
+    if (stageOk && resultOk) items.push(e);
+  }
+  items.sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+  return { items, counts };
+}

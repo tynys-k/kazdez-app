@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCallQueue, callStageOf, callStateOf, callsForClient, outcomeLabel } from "./clientCallsModel";
+import { buildCallJournal, buildCallQueue, callStageOf, callStateOf, callsForClient, outcomeLabel } from "./clientCallsModel";
 
 const today = "2026-10-17";
 const job = (over = {}) => ({ id: over.id || "j1", status: "done", type: "Первичная", scheduled_date: "2026-10-05", client_phone: "+7 701 000 00 01", ...over });
@@ -80,5 +80,41 @@ describe("client call helpers", () => {
 
   it("explains why a job left the queue", () => {
     expect(callStateOf(job({ repeat_state: "finished" })).closedBy).toBe("repeat");
+  });
+});
+
+describe("call retry order", () => {
+  it("puts a client just dialled without answer after untouched ones", () => {
+    const q = buildCallQueue([job(), job({ id: "j2", client_phone: "+77010000002", scheduled_date: "2026-10-08" })], { today, calls: [call({ created_at: "2026-10-17T09:00:00Z" })] });
+    expect(q.after_primary.map((i) => i.job.id)).toEqual(["j2", "j1"]);
+    expect(q.after_primary[1].retryOn).toBe("2026-10-18");
+  });
+});
+
+describe("call journal", () => {
+  const jobs = [job(), job({ id: "j2", type: "Вторичная", client_phone: "+77010000002" }), job({ id: "j3", client_phone: "+77010000003" })];
+  const calls = [
+    call({ id: "a", job_id: "j1", stage: "after_primary", outcome: "no_answer", created_at: "2026-10-12T10:00:00Z", created_by: "u1" }),
+    call({ id: "b", job_id: "j1", stage: "after_primary", outcome: "agreed", rating: 5, note: "ждёт вторичную", created_at: "2026-10-13T10:00:00Z", created_by: "u2" }),
+    call({ id: "c", job_id: "j1", stage: "after_primary", outcome: "note", note: "уточнил время", created_at: "2026-10-14T10:00:00Z", created_by: "u2" }),
+    call({ id: "d", job_id: "j2", stage: "after_secondary", outcome: "complaint", note: "тараканы вернулись", created_at: "2026-10-15T10:00:00Z", created_by: "u1" }),
+    call({ id: "e", job_id: "j3", stage: "after_primary", outcome: "no_answer", created_at: "2026-08-01T10:00:00Z", created_by: "u1" }),
+    call({ id: "f", job_id: "j3", stage: "after_primary", outcome: "all_good", created_at: "2026-08-02T10:00:00Z", deleted_at: "2026-08-03T10:00:00Z" }),
+  ];
+
+  it("groups calls by job with the closing outcome as the result", () => {
+    const { items } = buildCallJournal(jobs, calls);
+    expect(items.map((e) => [e.jobId, e.result, e.calls.length])).toEqual([["j2", "complaint", 1], ["j1", "agreed", 3], ["j3", "pending", 1]]);
+    expect(items[1].rating).toBe(5);
+  });
+
+  it("filters by stage, result, author and period with counts per chip", () => {
+    expect(buildCallJournal(jobs, calls, { stage: "after_primary" }).items.map((e) => e.jobId)).toEqual(["j1", "j3"]);
+    expect(buildCallJournal(jobs, calls, { result: "pending" }).items.map((e) => e.jobId)).toEqual(["j3"]);
+    expect(buildCallJournal(jobs, calls, { authorId: "u2" }).items.map((e) => e.jobId)).toEqual(["j1"]);
+    const recent = buildCallJournal(jobs, calls, { sinceIso: "2026-10-01", stage: "after_primary" });
+    expect(recent.items.map((e) => e.jobId)).toEqual(["j1"]);
+    expect(recent.counts.stage).toEqual({ all: 2, after_primary: 1, after_secondary: 1 });
+    expect(recent.counts.result.agreed).toBe(1);
   });
 });
