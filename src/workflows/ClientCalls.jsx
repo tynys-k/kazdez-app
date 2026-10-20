@@ -1,9 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
 import { MessageCircle, Phone, PhoneCall, Trash2 } from "lucide-react";
 import { Badge } from "../ui/primitives";
 import { formatPhone } from "../ui/formatters";
 import { addressPlain, fmtTs, isoToRu, waLink } from "../shared";
-import { CALL_OUTCOMES, CALL_STAGES, CLOSED_BY_LABELS, daysSinceIso, outcomeLabel } from "./clientCallsModel";
+import { CALL_OUTCOMES, CALL_STAGES, CLOSED_BY_LABELS, RESULT_FILTERS, addDaysIso, buildCallJournal, daysSinceIso, outcomeLabel } from "./clientCallsModel";
 import "./clientCalls.css";
 
 export const canDeleteCall = (call, { userId, isAdmin }) => !!call && (isAdmin || String(call.created_by) === String(userId));
@@ -103,7 +103,9 @@ function QueueRow({ item, people, onCall, onOpenJob }) {
         {item.callbackOn
           ? <Badge tone="info">перезвонить {isoToRu(item.callbackOn)}</Badge>
           : item.attempts
-            ? <Badge tone="warning">{item.attempts} {plural(item.attempts, "попытка", "попытки", "попыток")} · не ответил</Badge>
+            ? <Badge tone={item.attempts >= 3 ? "danger" : "warning"} title={item.attempts >= 3 ? "Можно закрыть как «Не выходит на связь»" : undefined}>
+                {item.attempts} {plural(item.attempts, "попытка", "попытки", "попыток")} · не ответил{item.retryOn && new Date(`${item.retryOn}T00:00:00`) > new Date() ? " · набирали сегодня" : ""}
+              </Badge>
             : <Badge tone={overdueDays > 3 ? "danger" : "neutral"}>{overdueDays ? `ждёт ${overdueDays} дн.` : "сегодня"}</Badge>}
         <div className="kd-callq-actions">
           {wa && <a className="kd-btn wa sm" href={wa} target="_blank" rel="noreferrer" aria-label="WhatsApp"><MessageCircle size={14} /></a>}
@@ -115,20 +117,117 @@ function QueueRow({ item, people, onCall, onOpenJob }) {
   );
 }
 
-const WINDOWS = [["30", "30 дн."], ["60", "60 дн."], ["90", "90 дн."], ["0", "Все"]];
+// Итог заявки в журнале «Обзвонили».
+function resultBadge(entry) {
+  if (entry.result === "pending") {
+    const last = entry.calls.find((c) => c.outcome !== "note");
+    if (last?.outcome === "callback") return <Badge tone="info">перезвонить {isoToRu(last.callback_on)}</Badge>;
+    const attempts = entry.calls.filter((c) => c.outcome === "no_answer").length;
+    return <Badge tone="warning">не дозвонились · {attempts} {plural(attempts, "попытка", "попытки", "попыток")}</Badge>;
+  }
+  if (entry.result === "note") return <Badge tone="neutral">только комментарий</Badge>;
+  const tone = CALL_OUTCOMES[entry.result]?.tone;
+  return <Badge tone={tone === "positive" || tone === "danger" ? tone : "neutral"}>{outcomeLabel(entry.result, entry.stage)}</Badge>;
+}
+
+function JournalRow({ entry, people, jobs, userId, isAdmin, onDelete, onCall, onOpenJob }) {
+  const [open, setOpen] = useState(false);
+  const { job } = entry;
+  const lastNote = entry.calls.find((c) => c.note)?.note;
+  return (
+    <div className={`kd-calljr-row ${open ? "open" : ""}`}>
+      <div className="kd-calljr-head">
+        <button type="button" className="kd-callq-main" onClick={() => job && onOpenJob?.(job)}>
+          <strong>{job?.contact_name ? `${job.contact_name} · ` : ""}{formatPhone(entry.phone)}</strong>
+          {job && <span>{job.pest || job.type} · {addressPlain(job.address) || "адрес не указан"}</span>}
+          <small>
+            {CALL_STAGES[entry.stage]?.label || "Обзвон"}
+            {job ? ` · ${job.type} ${isoToRu(job.scheduled_date)}` : ""}
+            {` · последний звонок ${fmtTs(entry.lastAt)}`}
+          </small>
+          {!open && lastNote && <small className="kd-callq-note">«{lastNote}»</small>}
+        </button>
+        <div className="kd-callq-side">
+          <div className="kd-calljr-badges">
+            {resultBadge(entry)}
+            {entry.rating && <Badge tone={entry.rating >= 4 ? "positive" : entry.rating <= 3 ? "danger" : "neutral"}>{entry.rating}/5</Badge>}
+          </div>
+          <div className="kd-callq-actions">
+            <button type="button" className="kd-btn ghost sm" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+              {open ? "Свернуть" : `Все записи · ${entry.calls.length}`}
+            </button>
+            {job && <button type="button" className="kd-btn ghost sm" onClick={() => onCall(job)}><PhoneCall size={14} />Связаться</button>}
+          </div>
+        </div>
+      </div>
+      {open && <CallLog calls={entry.calls} people={people} jobs={jobs} userId={userId} isAdmin={isAdmin} onDelete={onDelete} />}
+    </div>
+  );
+}
+
+function journalSince(windowDays) {
+  if (!windowDays) return "";
+  const now = new Date();
+  return addDaysIso(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`, -windowDays);
+}
+
+const JOURNAL_STAGES =[["all", "Все этапы"], ["after_primary", "После первичной"], ["after_secondary", "После вторичной"]];
+
+// «Согласился» после первичной — посадили на вторичную, после вторичной — нужен повтор.
+const resultFilterLabel = (id, label, stage) => (id !== "agreed" ? label : stage === "after_primary" ? "Посадили на вторичную" : stage === "after_secondary" ? "Нужен повтор" : label);
+
+function CallJournal({ jobs, calls, people, windowDays, userId, isAdmin, onDelete, onCall, onOpenJob }) {
+  const [stage, setStage] = useState("all");
+  const [result, setResult] = useState("all");
+  const [authorId, setAuthorId] = useState("");
+  const sinceIso = journalSince(windowDays);
+  const { items, counts } = buildCallJournal(jobs, calls, { sinceIso, stage, result, authorId });
+  const authorIds = new Set(calls.filter((c) => !c.deleted_at).map((c) => String(c.created_by)));
+  const authors = people.filter((p) => authorIds.has(String(p.id)));
+  return (
+    <>
+      <div className="kd-calljr-filters">
+        <div className="kd-calljr-chips" role="group" aria-label="Этап">
+          {JOURNAL_STAGES.map(([id, label]) => (
+            <button key={id} type="button" className={stage === id ? "on" : ""} aria-pressed={stage === id} onClick={() => setStage(id)}>{label}<b>{counts.stage[id]}</b></button>
+          ))}
+        </div>
+        <div className="kd-calljr-chips" role="group" aria-label="Ответ клиента">
+          {RESULT_FILTERS.map(([id, label]) => (
+            <button key={id} type="button" className={result === id ? "on" : ""} aria-pressed={result === id} onClick={() => setResult(id)}>{resultFilterLabel(id, label, stage)}<b>{counts.result[id]}</b></button>
+          ))}
+        </div>
+        {authors.length > 1 && (
+          <select className="kd-calljr-author" value={authorId} onChange={(e) => setAuthorId(e.target.value)} aria-label="Кто звонил">
+            <option value="">Все сотрудники</option>
+            {authors.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+          </select>
+        )}
+      </div>
+      {items.length === 0
+        ? <div className="kd-empty">За выбранный период таких звонков нет.</div>
+        : <div className="kd-callq-list">{items.slice(0, 100).map((entry) => <JournalRow key={entry.jobId} entry={entry} people={people} jobs={jobs} userId={userId} isAdmin={isAdmin} onDelete={onDelete} onCall={onCall} onOpenJob={onOpenJob} />)}</div>}
+      {items.length > 100 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны последние 100 из {items.length}. Сузь фильтр или период.</div>}
+    </>
+  );
+}
+
+const WINDOWS =[["30", "30 дн."], ["60", "60 дн."], ["90", "90 дн."], ["0", "Все"]];
 
 // Очередь обзвона на вкладке «Обзвон и качество».
-export function CallQueue({ queue, view, onViewChange, windowDays, onWindowChange, people = [], onCall, onOpenJob }) {
+export function CallQueue({ queue, view, onViewChange, windowDays, onWindowChange, people = [], onCall, onOpenJob, jobs = [], calls = [], userId, isAdmin, onDelete }) {
   const views = [
     { id: "after_primary", label: "После первичной", count: queue.after_primary.length },
     { id: "after_secondary", label: "После вторичной", count: queue.after_secondary.length },
     { id: "later", label: "Перезвонить позже", count: queue.later.length },
+    { id: "journal", label: "Обзвонили", count: buildCallJournal(jobs, calls, { sinceIso: journalSince(windowDays) }).items.length },
   ];
   const items = queue[view] || [];
   const hint = {
     after_primary: "Клиенты через 5+ дней после первичной. Цель — посадить на вторичную. Кого посадили, уходят в «Повторные выезды»; «не дозвонился» остаётся здесь до ответа.",
     after_secondary: "Клиенты через 7+ дней после вторичной: проверить результат. Если всё хорошо — закрыть; если нужна ещё обработка — на повтор.",
     later: "Клиенты попросили перезвонить. Появятся в своих списках в назначенный день.",
+    journal: "Все, кому уже звонили: что ответил клиент, оценка и комментарии. Период — по дате последнего звонка.",
   }[view];
   return (
     <section className="kd-card kd-callq">
@@ -137,7 +236,7 @@ export function CallQueue({ queue, view, onViewChange, windowDays, onWindowChang
           <div className="kd-title">Обзвон после выездов</div>
           <div className="kd-muted">{hint}</div>
         </div>
-        <div className="kd-seg" role="group" aria-label="Давность выезда">
+        <div className="kd-seg" role="group" aria-label={view === "journal" ? "Период звонков" : "Давность выезда"}>
           {WINDOWS.map(([value, label]) => <button key={value} type="button" className={`kd-segbtn ${String(windowDays) === value ? "on" : ""}`} onClick={() => onWindowChange(Number(value))}>{label}</button>)}
         </div>
       </div>
@@ -148,10 +247,12 @@ export function CallQueue({ queue, view, onViewChange, windowDays, onWindowChang
           </button>
         ))}
       </div>
-      {items.length === 0
+      {view === "journal"
+        ? <CallJournal jobs={jobs} calls={calls} people={people} windowDays={windowDays} userId={userId} isAdmin={isAdmin} onDelete={onDelete} onCall={onCall} onOpenJob={onOpenJob} />
+        : items.length === 0
         ? <div className="kd-empty">{view === "later" ? "Отложенных звонков нет." : "Всех обзвонили — очередь пуста."}{queue.upcoming && view !== "later" ? ` Ещё ${queue.upcoming} ${plural(queue.upcoming, "клиент подойдёт", "клиента подойдут", "клиентов подойдут")} в ближайшие дни.` : ""}</div>
         : <div className="kd-callq-list">{items.slice(0, 60).map((item) => <QueueRow key={item.job.id} item={item} people={people} onCall={onCall} onOpenJob={onOpenJob} />)}</div>}
-      {items.length > 60 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны первые 60 из {items.length}. Сначала те, кто ждёт дольше.</div>}
+      {view !== "journal" && items.length > 60 && <div className="kd-muted" style={{ marginTop: 8 }}>Показаны первые 60 из {items.length}. Сначала те, кто ждёт дольше.</div>}
     </section>
   );
 }

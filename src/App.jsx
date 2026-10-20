@@ -4789,7 +4789,8 @@ function Dashboard({ session, profile }) {
             <CallQueue queue={callQueue} view={callQueueView} onViewChange={setCallQueueView}
               windowDays={callWindowDays} onWindowChange={setCallWindowDays} people={allProfiles}
               onCall={canCallClients ? openCall : () => showToast("Нет прав на обзвон")}
-              onOpenJob={(j) => { loadClientEvents(); setModal({ kind: "history", job: j }); }} />
+              onOpenJob={(j) => { loadClientEvents(); setModal({ kind: "history", job: j }); }}
+              jobs={jobs} calls={clientCalls} userId={session.user.id} isAdmin={isAdmin} onDelete={askDeleteClientCall} />
 
             <section className="kd-card">
               <div className="kd-stage2head"><div><div className="kd-title">Повторные касания</div><div className="kd-muted">Просроченные и запланированные звонки</div></div><CalendarClock size={20} /></div>
