@@ -50,6 +50,8 @@ import { formatDate, formatMoney, formatPhone } from "./ui/formatters";
 import { taskParticipant } from "./workflows/taskModel";
 import { qualityHistoryForPhone } from "./workflows/QualityHistory";
 import { CallQueue, JobCallPanel } from "./workflows/ClientCalls";
+import { RepeatPendingList, RepeatTriageBar } from "./workflows/RepeatTriage";
+import { buildRepeatTriage } from "./workflows/repeatTriageModel";
 import CallModal from "./workflows/CallModal";
 import { HUNTER_FUNNEL_MIGRATION, lostReasonLabel, nextStageHint } from "./workflows/hunterFunnelModel";
 import { DealSummary } from "./workflows/HunterDeal";
@@ -436,6 +438,7 @@ function Dashboard({ session, profile }) {
   const [doneSortDir, setDoneSortDir] = useState("desc");
   const [doneBrandFilter, setDoneBrandFilter] = useState("all");
   const [doneClientFilter, setDoneClientFilter] = useState("all");
+  const [doneRepeatFilter, setDoneRepeatFilter] = useState("all");
   const [showAllSubscriptionLeads, setShowAllSubscriptionLeads] = useState(false);
   const [expandedActiveId, setExpandedActiveId] = useState("");
   const [expandedDoneId, setExpandedDoneId] = useState("");
@@ -3158,6 +3161,16 @@ function Dashboard({ session, profile }) {
   const openSubscriptionDraft = (job) => setModal({ kind: "contract", draft: contractDraftFromJob(job, jobClient(job), todayIso) });
   const subscriptionLeads = tab === "subscriptions" ? subscriptionCandidates({ jobs, clients, contracts }) : [];
   const doneJobClientLabel = (job) => (jobIsSubscribed(job) ? "Абонент" : jobClientType(job) === "company" ? "Юрлицо" : "");
+  const laterJobIndex = buildLaterJobIndex(jobs);
+  const qualityCheckByJob = new Map(qualityChecks.map((q) => [String(q.job_id), q]));
+  const jobCallState = (job) => callStateOf(job, { ownCalls: callsForJob(clientCalls, job.id), legacy: qualityCheckByJob.get(String(job.id)), laterIndex: laterJobIndex });
+  // Через 5 дней после первичной по каждой нужно решение: повтор или закрыть.
+  // Не разобранные — недополученные деньги, их подсвечиваем и считаем в ₸.
+  const repeatTriage = buildRepeatTriage(jobs, {
+    stateOf: jobCallState, laterIndex: laterJobIndex, today: new Date().toISOString().slice(0, 10),
+    policyOf: (j) => (j.brand === "partner" ? partnerById(j.partner_id)?.repeat_policy : "half"),
+  });
+  const repeatTriageOfJob = (j) => repeatTriage.byJob.get(String(j.id)) || null;
   const doneFiltered = doneJobs
     .filter(matchSearch)
     .filter((j) => {
@@ -3167,6 +3180,7 @@ function Dashboard({ session, profile }) {
       return jobClientType(j) === "person" && !jobIsSubscribed(j);
     })
     .filter((j) => dateInFilter(j.scheduled_date, doneDateFilter))
+    .filter((j) => doneRepeatFilter === "all" || repeatTriageOfJob(j)?.bucket === doneRepeatFilter)
     .filter((j) => {
       if (doneBrandFilter === "all") return true;
       const partnerJob = j.brand === "partner" || !!j.partner_id || !!j.partner_name;
@@ -3174,6 +3188,7 @@ function Dashboard({ session, profile }) {
       if (doneBrandFilter === "Sanitex") return j.brand === "Sanitex";
       return !partnerJob && j.brand !== "Sanitex";
     });
+  const doneFilteredIds = new Set(doneFiltered.map((j) => String(j.id)));
   const doneSorted = [...doneFiltered].sort((a, b) => {
     const da = new Date(a.scheduled_date || a.reported_at || 0).getTime();
     const db = new Date(b.scheduled_date || b.reported_at || 0).getTime();
@@ -3301,9 +3316,6 @@ function Dashboard({ session, profile }) {
   // попадают; «не дозвонился» остаётся до ответа.
   const callQueue = buildCallQueue(jobs, { calls: clientCalls, qualityChecks, today: todayIso, windowDays: callWindowDays });
   const callQueueDue = callQueue.after_primary.length + callQueue.after_secondary.length;
-  const laterJobIndex = buildLaterJobIndex(jobs);
-  const qualityCheckByJob = new Map(qualityChecks.map((q) => [String(q.job_id), q]));
-  const jobCallState = (job) => callStateOf(job, { ownCalls: callsForJob(clientCalls, job.id), legacy: qualityCheckByJob.get(String(job.id)), laterIndex: laterJobIndex });
   const canCallClients = canEditJobs || canAccess("tab.retention");
   // Из карточки клиента звонок открывается поверх неё и возвращает обратно.
   const openCall = (job) => setModal((current) => ({ kind: "call", job, back: current && current.kind !== "call" ? current : null }));
@@ -3459,6 +3471,7 @@ function Dashboard({ session, profile }) {
     trainingAlerts.length ? { id: "training", label: "Пора перепроверить обучение", value: trainingAlerts.length, tab: "team", tone: "warning" } : null,
     isAdmin && tenderOverdue ? { id: "tenders", label: "Просрочены работы по тендерам", value: tenderOverdue, tab: "tenders", tone: "danger" } : null,
     isAdmin && dueFollowups.length ? { id: "client-followups", label: "Пора связаться с клиентами", value: dueFollowups.length, tab: "retention", tone: "warning" } : null,
+    canCallClients && repeatTriage.totals.pending.count ? { id: "repeat-triage", label: "Первичные без решения по повтору", value: `${repeatTriage.totals.pending.count} · ~${fmt(repeatTriage.totals.pending.value)} ₸`, tab: "done", tone: "warning", open: () => { setDoneRepeatFilter("pending"); setDoneJobPage(1); setTab("done"); } } : null,
     isAdmin && callQueueDue ? { id: "quality", label: "Ждут звонка после выезда", value: callQueueDue, tab: "retention", tone: "warning" } : null,
     isAdmin && dueContracts.length ? { id: "contracts", label: "Пора создать плановые выезды", value: dueContracts.length, tab: "subscriptions", tone: "danger" } : null,
     isAdmin && overdueTransfers.length ? { id: "transfers", label: "Оплата просрочена более 3 дней", value: overdueTransfers.length, tab: "done", tone: "danger" } : null,
@@ -3600,7 +3613,7 @@ function Dashboard({ session, profile }) {
     { id: "today", icon: LayoutDashboard, label: `Сегодня${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "schedule", icon: CalendarClock, label: "График" },
-    { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}` },
+    { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}${canCallClients && repeatTriage.totals.pending.count ? " · повтор " + repeatTriage.totals.pending.count : ""}` },
     { id: "canceled", icon: XCircle, label: `Отменённые${canceledJobs.length ? " · " + canceledJobs.length : ""}` },
     { id: "tasks", icon: ListTodo, label: `Задачи${allOpenTasks ? " · " + allOpenTasks : ""}` },
     { id: "leads", icon: Contact, label: `Лиды${activeLeads ? " · " + activeLeads : ""}` },
@@ -3856,7 +3869,7 @@ function Dashboard({ session, profile }) {
                   {dashboardAlerts.length === 0
                     ? <div className="kd-globalempty">{dataWarnings.length ? "Сначала обновите данные" : "По загруженным данным замечаний нет"}</div>
                     : dashboardAlerts.map((a) => (
-                        <button key={a.id} className={a.tone === "danger" ? "urgent" : "warning"} onClick={() => { setTab(a.tab); setNotificationOpen(false); }}>
+                        <button key={a.id} className={a.tone === "danger" ? "urgent" : "warning"} onClick={() => { if (a.open) a.open(); else setTab(a.tab); setNotificationOpen(false); }}>
                           <span className="kd-notification-dot" />
                           <span><strong>{a.label}</strong><small>{a.value} — открыть раздел</small></span>
                           <ChevronRight size={15} />
@@ -3974,7 +3987,7 @@ function Dashboard({ session, profile }) {
             <section className="kd-todaysection">
               <div className="kd-todaysection-head"><div><div className="kd-title">{isAdmin ? "SLA и решения" : "Требуют внимания"}</div><div className="kd-muted">{isAdmin ? "Автоматически рассчитанные просрочки, риски и контрольные точки" : "Только то, что нужно решить сейчас"}</div></div></div>
               {dashboardAlerts.length === 0 ? <div className="kd-allgood"><CheckCircle2 size={20} />Критичных предупреждений нет</div> : <div className="kd-alertgrid">
-                {dashboardAlerts.map((a) => <button key={a.id} className={a.tone} onClick={() => setTab(a.tab)}><AlertTriangle size={18} /><span>{a.label}</span><strong>{a.value}</strong><ArrowRight size={16} /></button>)}
+                {dashboardAlerts.map((a) => <button key={a.id} className={a.tone} onClick={() => (a.open ? a.open() : setTab(a.tab))}><AlertTriangle size={18} /><span>{a.label}</span><strong>{a.value}</strong><ArrowRight size={16} /></button>)}
               </div>}
             </section>
 
@@ -4189,6 +4202,7 @@ function Dashboard({ session, profile }) {
 
         {!loading && tab === "done" && (
           <>
+            {canCallClients && <RepeatTriageBar triage={repeatTriage} value={doneRepeatFilter} onChange={(v) => { setDoneRepeatFilter(v); setExpandedDoneId(""); setDoneJobPage(1); }} />}
             <div className="kd-done-filters">
               <div className="kd-seg">
                 <button className={`kd-segbtn ${doneSortDir === "desc" ? "on" : ""}`} onClick={() => setDoneSortDir("desc")}>Сначала новые</button>
@@ -4209,13 +4223,18 @@ function Dashboard({ session, profile }) {
             </div>
             {doneClientFilter === "company" && <div className="kd-muted" style={{ margin: "0 0 10px" }}>Юрлица, которые ещё не на абонементе. Открой заявку и нажми «Сделать абонентом» — договор заполнится из неё. Сводный список — во вкладке «Абоненты».</div>}
             <DateFilterBar filter={doneDateFilter} onChange={setDoneDateFilter} hide={["tomorrow"]} />
-            {doneFiltered.length === 0 ? <div className="kd-empty">{doneJobs.length === 0 ? "Выполненных заявок пока нет." : "По этому поиску ничего не найдено."}</div> :
+            {doneRepeatFilter === "pending" ? (
+              <RepeatPendingList entries={repeatTriage.pending.filter((e) => doneFilteredIds.has(String(e.job.id)))} people={allProfiles}
+                onCall={canCallClients ? openCall : null}
+                onRepeat={canEditJobs ? (j) => askConfirm(`Посадить «${j.pest} · ${addressPlain(j.address)}» на вторичную? Заявка уйдёт в «Повторные выезды».`, () => putOnRepeat(j), { danger: false, confirmLabel: "Да, на повтор" }) : null}
+                onOpenJob={(j) => { loadClientEvents(); setModal({ kind: "history", job: j }); }} />
+            ) : doneFiltered.length === 0 ? <div className="kd-empty">{doneJobs.length === 0 ? "Выполненных заявок пока нет." : "По этому поиску ничего не найдено."}</div> :
               doneGroups.map((g) => (
                 <div key={g.key} className="kd-group">
                   <div className="kd-datehead"><span>{g.label}</span><span className="kd-datecount">{g.jobs.length}</span></div>
                   <div className="kd-list">
                     {g.jobs.map((j) => (
-                      <JobCard key={j.id} job={j} debt={debtOfJob(j)} clientLabel={doneJobClientLabel(j)}
+                      <JobCard key={j.id} job={j} debt={debtOfJob(j)} clientLabel={doneJobClientLabel(j)} repeatTriage={canCallClients ? repeatTriageOfJob(j) : null}
                       callPanel={expandedDoneId === j.id ? <JobCallPanel job={j} state={jobCallState(j)} people={allProfiles} userId={session.user.id} isAdmin={isAdmin} onCall={canCallClients ? () => openCall(j) : null} onDelete={canCallClients ? askDeleteClientCall : null} /> : null}
                       onCall={canCallClients ? () => openCall(j) : null}
                       onSubscribe={canEditJobs && !jobIsSubscribed(j) ? () => openSubscriptionDraft(j) : null} compact={expandedDoneId !== j.id} onExpand={() => setExpandedDoneId(j.id)} onCollapse={() => setExpandedDoneId("")} isAdmin={canEditJobs} onCert={() => certifyJob(j)} onAct={() => certifyAct(j)} assignedName={techById(j.assigned_to)?.full_name} partnerName={partnerNameOf(j)} partnerRepeat={j.brand === "partner" ? repeatLabel(partnerById(j.partner_id)?.repeat_policy) : ""} share={partnerShareAmt(j)}
@@ -4249,7 +4268,7 @@ function Dashboard({ session, profile }) {
                   </div>
                 </div>
               ))}
-            <Pagination page={doneJobPage} pageSize={jobPageSize} total={doneSorted.length} onPageChange={(page) => { setExpandedDoneId(""); setDoneJobPage(page); }} />
+            {doneRepeatFilter !== "pending" && <Pagination page={doneJobPage} pageSize={jobPageSize} total={doneSorted.length} onPageChange={(page) => { setExpandedDoneId(""); setDoneJobPage(page); }} />}
           </>
         )}
 

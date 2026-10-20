@@ -18,6 +18,7 @@ import { contractHistorySummary, contractVisitState, subscriptionIntervalLabel }
 import { PeoplePicker } from "./workflows/TaskWorkspace";
 import QualityHistory from "./workflows/QualityHistory";
 import { CallLog } from "./workflows/ClientCalls";
+import { RepeatTag } from "./workflows/RepeatTriage";
 import { callsForClient, outcomeLabel } from "./workflows/clientCallsModel";
 import JobObjectFields from "./workflows/JobObjectFields";
 import { DEBT_MODES, debtModeLabel } from "./workflows/jobDebtModel";
@@ -76,7 +77,7 @@ function PartnerOrigin({ name, compact = false }) {
   );
 }
 
-function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete, clientLabel, onSubscribe, onCall, callPanel, debt, onDebtPay }) {
+function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked, isAdmin, assignedName, partnerName, partnerRepeat, share, executorName, onExecutorDone, onExecutorPaid, onCopy, onReport, onAssign, onView, onEdit, onRepeat, onPayPartner, onCompPaid, onHistory, onOpenDetails, onCancel, onRestore, onTransferPaid, onTechExtras, onRequestEdit, onApproveEdit, onRejectEdit, onDelete, onCert, onAct, onStageChange, onCopyPublicLink, onProof, proofComplete, clientLabel, onSubscribe, onCall, callPanel, debt, onDebtPay, repeatTriage }) {
   const st = STATUS[job.status] || STATUS.new;
   // Заявки «в долг» админ должен отличать от остальных с первого взгляда.
   const debtTag = debt?.kind === "open" ? `долг ${fmt(debt.amount)} ₸${debt.dueOn ? ` · до ${isoToRu(debt.dueOn)}` : ""}`
@@ -91,15 +92,19 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
   // Тег «пора связаться» гаснет, как только обзвон по заявке закрыт: панель
   // обращений передаёт это через callPanel.props.state.
   const callState = callPanel?.props?.state;
-  const needsFollowup = job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5 && !(callState && callState.closed);
+  // Решение по повтору после первичной считает repeatTriageModel; без него —
+  // прежняя оценка по дате отчёта.
+  const needsFollowup = repeatTriage ? repeatTriage.bucket === "pending"
+    : job.type === "Первичная" && job.status === "done" && !job.repeat_state && daysSince(job.reported_at) >= 5 && !(callState && callState.closed);
+  const followupDays = repeatTriage ? repeatTriage.days : daysSince(job.reported_at);
   const phoneDigits = String(job.client_phone || "").replace(/\D/g, "");
   const mapUrl = yandexMapUrl(job.address);
   const whatsappUrl = roleWhatsappUrl(job, isAdmin);
   const rowAmount = job.report_paid ?? job.price_options?.[0]?.amount;
   const rowAssignee = assignedName || executorName || "Не назначен";
   const compactRow = (
-    <button type="button" className={`kd-done-row kd-job-row ${job.status === "done" ? "done" : "active"} ${debtTone}`} onClick={onExpand} aria-label={`Открыть заявку: ${job.pest || "без названия"}, ${addressPlain(job.address) || "адрес не указан"}`}>
-      <span className="kd-job-row-main"><strong>{job.pest || "Заявка"}</strong><small>{addressPlain(job.address) || "Адрес не указан"}</small>{debtTag && <span className={`kd-debttag ${debtTone ? "" : "paid"}`}>{debtTag}</span>}</span>
+    <button type="button" className={`kd-done-row kd-job-row ${job.status === "done" ? "done" : "active"} ${debtTone} ${!debtTone && repeatTriage?.bucket === "pending" ? "repeat-due" : ""}`} onClick={onExpand} aria-label={`Открыть заявку: ${job.pest || "без названия"}, ${addressPlain(job.address) || "адрес не указан"}`}>
+      <span className="kd-job-row-main"><strong>{job.pest || "Заявка"}</strong><small>{addressPlain(job.address) || "Адрес не указан"}</small>{debtTag && <span className={`kd-debttag ${debtTone ? "" : "paid"}`}>{debtTag}</span>}<RepeatTag entry={repeatTriage} /></span>
       <span data-label="Дата">{formatDate(job.scheduled_date)}{job.scheduled_time ? ` · ${job.scheduled_time}` : ""}</span>
       <span data-label="Клиент">{clientLabel ? `${clientLabel} · ` : ""}{formatPhone(job.client_phone)}</span>
       <span data-label="Исполнитель">{rowAssignee}</span>
@@ -137,8 +142,8 @@ function JobCard({ job, compact = false, onExpand, onCollapse, onObject, blocked
         {job.repeat_state === "on_repeat" && <span className="kd-repeattag">на повторе</span>}
         {job.repeat_state === "finished" && <span className="kd-muted">завершена</span>}
         {needsFollowup && (onCall
-          ? <button type="button" className="kd-followuptag" onClick={onCall}>💬 пора связаться · {daysSince(job.reported_at)} дн. после первичной{callState?.attempts ? ` · ${callState.attempts} без ответа` : ""}</button>
-          : <span className="kd-followuptag">💬 пора связаться · {daysSince(job.reported_at)} дн. после первичной</span>)}
+          ? <button type="button" className="kd-followuptag" onClick={onCall}>💬 пора решить повтор · {followupDays} дн. после первичной{callState?.attempts ? ` · ${callState.attempts} без ответа` : ""}</button>
+          : <span className="kd-followuptag">💬 пора решить повтор · {followupDays} дн. после первичной</span>)}
       </div>
       <div className="kd-card-foot">
         {onObject && (

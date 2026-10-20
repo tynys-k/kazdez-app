@@ -26,7 +26,9 @@ import "../ui/legacy-bridge.css";
 import "./workflows.css";
 import { CallQueue, JobCallPanel } from "./ClientCalls";
 import CallModal from "./CallModal";
-import { buildCallQueue, callStateOf, callsForJob, callStageOf } from "./clientCallsModel";
+import { buildCallQueue, buildLaterJobIndex, callStateOf, callsForJob, callStageOf } from "./clientCallsModel";
+import { RepeatPendingList, RepeatTriageBar } from "./RepeatTriage";
+import { buildRepeatTriage } from "./repeatTriageModel";
 import { DateFilterBar } from "../shared";
 const people = [{ id: "demo-admin", full_name: "Администратор" }, { id: "demo-worker", full_name: "Аян" }, { id: "demo-observer", full_name: "Менеджер" }];
 const initialTasks = [
@@ -116,6 +118,26 @@ function CallsPreview() {
     {callJob && <CallModal job={callJob} calls={callsForJob(calls, callJob.id)} people={people} userId="demo-admin" isAdmin onClose={() => setCallJob(null)} onSave={save} onDelete={remove} />}
   </section>;
 }
+const repeatJobs = [
+  ...callJobs,
+  { id: "rep-1", pest: "Постельные клопы", type: "Первичная", brand: "KazDez", status: "done", work_stage: "done", scheduled_date: isoAgo(16), address: "мкр. Аксай-4, д. 12, кв. 31", client_phone: "+7 707 111 2233", contact_name: "Ерлан", report_paid: 32000 },
+  { id: "rep-2", pest: "Тараканы", type: "Первичная", brand: "KazDez", status: "done", work_stage: "done", scheduled_date: isoAgo(11), address: "ул. Розыбакиева, д. 247", client_phone: "+7 705 444 5566", report_paid: 22000, repeat_state: "on_repeat" },
+  { id: "rep-3", pest: "Клещи", type: "Первичная", brand: "KazDez", status: "done", work_stage: "done", scheduled_date: isoAgo(8), address: "Талгарский тракт, уч. 5", client_phone: "+7 777 909 1010", report_paid: 40000, repeat_state: "finished" },
+];
+function RepeatPreview() {
+  const [calls, setCalls] = useState(initialCalls), [filter, setFilter] = useState("all"), [callJob, setCallJob] = useState(null), [jobs, setJobs] = useState(repeatJobs), [expanded, setExpanded] = useState("");
+  const laterIndex = buildLaterJobIndex(jobs);
+  const triage = buildRepeatTriage(jobs, { laterIndex, today: isoAgo(0), stateOf: (j) => callStateOf(j, { ownCalls: callsForJob(calls, j.id), laterIndex }) });
+  const save = async (payload) => { setCalls((rows) => [{ id: `pc-${rows.length + 1}`, job_id: callJob.id, client_phone: callJob.client_phone, stage: callStageOf(callJob), created_by: "demo-admin", created_at: new Date().toISOString(), ...payload }, ...rows]); setCallJob(null); return ""; };
+  const visible = jobs.filter((j) => j.status === "done" && (filter === "all" || triage.byJob.get(j.id)?.bucket === filter));
+  return <section>
+    <RepeatTriageBar triage={triage} value={filter} onChange={setFilter} />
+    {filter === "pending"
+      ? <RepeatPendingList entries={triage.pending} people={people} onCall={setCallJob} onRepeat={(j) => setJobs((rows) => rows.map((r) => (r.id === j.id ? { ...r, repeat_state: "on_repeat" } : r)))} onOpenJob={noop} />
+      : <div className="kd-list">{visible.map((job) => <JobCard key={job.id} job={job} repeatTriage={triage.byJob.get(job.id) || null} compact={expanded !== job.id} onExpand={() => setExpanded(job.id)} onCollapse={() => setExpanded("")} isAdmin assignedName="Олжас" onHistory={noop} onView={noop} onEdit={noop} onAssign={noop} onDelete={noop} onCall={() => setCallJob(job)} />)}</div>}
+    {callJob && <CallModal job={callJob} calls={callsForJob(calls, callJob.id)} people={people} userId="demo-admin" isAdmin onClose={() => setCallJob(null)} onSave={save} onDelete={noop} />}
+  </section>;
+}
 const ym = new Date().toISOString().slice(0, 7);
 const previewAdAccounts = [{ id: "acc-kd", platform: "olx", name: "Бренд KazDez" }, { id: "acc-dz", platform: "olx", name: "Dezline" }];
 const previewAdAssets = [
@@ -153,9 +175,10 @@ function ResponsivePreview() {
 }
 function Preview() {
   const [page, setPage] = useState("Задачи"), [tasks, setTasks] = useState(initialTasks), [selected, setSelected] = useState(null), [expandedJob, setExpandedJob] = useState(""), [jobFormOpen, setJobFormOpen] = useState(false), [form, setForm] = useState({ object_kind: "commercial", object_details: { measurement: "fumigation", volume_method: "dimensions", length_m: 5, width_m: 4, height_m: 3 } });
-  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Обзвон", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП", "Реклама", "Сделка"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
+  return <main style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}><p className="kd-notebox">Локальный макет · вымышленные данные · сохранение в рабочую базу отключено</p><nav className="wf-toolbar" style={{ marginBottom: 24 }}>{["Задачи", "Обзвон", "Повтор", "Заявки", "Склад", "Договоры", "Тип объекта", "Выписки", "Финансы", "КП", "Реклама", "Сделка"].map((label) => <button className="kd-btn ghost" key={label} onClick={() => setPage(label)}>{label}</button>)}</nav>
     {page === "Задачи" && <TaskBoard tasks={tasks} people={people} userId={people[0].id} canManage onCreate={noop} onEdit={noop} onRemove={noop} onStatus={async (task, status) => { setTasks(tasks.map((t) => t.id === task.id ? { ...t, status } : t)); return true; }} />}
     {page === "Обзвон" && <CallsPreview />}
+    {page === "Повтор" && <RepeatPreview />}
     {page === "Заявки" && <section><h2>Заявки</h2><p className="kd-muted">Нажмите на строку, чтобы увидеть детали и действия.</p><div className="kd-list">{previewJobs.map((job) => <JobCard key={job.id} job={job} debt={jobDebtState(job, previewDebts)} onDebtPay={noop} compact={expandedJob !== job.id} onExpand={() => setExpandedJob(job.id)} onCollapse={() => setExpandedJob("")} isAdmin assignedName="Аян" onHistory={noop} onObject={noop} onProof={noop} onCopyPublicLink={noop} onReport={noop} onCancel={noop} onAssign={noop} onEdit={noop} onDelete={noop} />)}</div><button className="kd-btn primary" style={{ marginTop: 16 }} onClick={() => setJobFormOpen(true)}>Новая заявка</button>{jobFormOpen && <JobFormModal title="Новая заявка" submitLabel="Создать" draftOwnerId="demo-admin" techs={people} onClose={() => setJobFormOpen(false)} onSave={async () => { setJobFormOpen(false); return true; }} />}</section>}
     {page === "Склад" && <StockRegister warehouses={warehouses} warehouseMoves={moves} suppliers={suppliers} supplierOffers={offers} inventory={[chemical]} techs={people} techLedger={(id) => id === people[1].id ? [{ chem: chemical, received: 1000, consumed: 0, balance: 1000 }] : []} purchases={[]} handouts={[]} adjustments={[]} jobs={[]} sales={[]} equipment={[]} equipIssuedQty={() => 0} totalStockValue={102000} totalEquipValue={0} selectedId={chemical.id} onSelect={noop} canEditStock canManageTeam onStockIn={noop} onMovement={noop} onRemoveChem={noop} onAddEquipment={noop} onEditEquipment={noop} onRemoveEquipment={noop} techEquipment={() => []} onTransferEquipment={noop} onEquipStatus={noop} />}
     {page === "Договоры" && <ContractsRegister contracts={[{ id: "demo-contract", client_id: "demo-client", number: "Д-2026/15", signed_on: "2026-09-14", organization: "ТОО Тестовая организация", title: "Абонентское обслуживание", status: "active", amount: 180000 }]} clients={[{ id: "demo-client", name: "Тестовый клиент", phone: "+7 700 000 0000" }]} people={people} canEdit selectedId={selected} onSelect={setSelected} onReload={noop} onOpenClient={noop} />}
