@@ -6,7 +6,7 @@ import SessionGate from "./SessionGate";
 import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
 import {
   ClipboardList, CheckCircle2, RefreshCw, Wallet, Package, Users, Handshake, FileText, History, Trash2, BarChart3,
-  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, Mail, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera, FileSignature,
+  Plus, MessageCircle, Pencil, UserPlus, Download, Search, X, LogOut, Bug, ChevronLeft, ChevronRight, ChevronDown, Wrench, Settings, Receipt, Banknote, XCircle, ListTodo, Calendar, Landmark, ArrowRightLeft, ArrowDownCircle, ArrowUpCircle, Gavel, ShieldCheck, FolderOpen, ExternalLink, GraduationCap, Contact, ArrowRight, CalendarClock, LayoutDashboard, AlertTriangle, Phone, Mail, MapPin, TrendingUp, ClipboardCheck, Repeat2, Route, Star, Sparkles, UserRoundX, Navigation, Menu, Wifi, WifiOff, Bell, BellRing, Smartphone, CloudUpload, Camera, FileSignature, Gauge,
 } from "lucide-react";
 
 // ----------------------------- helpers -----------------------------
@@ -36,6 +36,8 @@ import ContractsRegister from "./workflows/ContractsRegister";
 import PayrollCarryoverModal, { PayrollCarryoverHistory } from "./workflows/PayrollCarryover";
 import { defaultPayrollPeriod, paymentPeriod, payrollPaymentDeleteMessage, payrollPaymentsFor, payrollPeriodLabel } from "./workflows/payrollPaymentModel";
 import ExecutivePulse from "./workflows/ExecutivePulse";
+import Pulse from "./workflows/Pulse";
+import { COMPANY_PULSE_MIGRATION, b2bFunnel, cashRunway, decisionQueue, historicalRates, monthProgress, monthStartIso, planFact } from "./workflows/pulseModel";
 import ReportPeriodBar from "./workflows/ReportPeriodBar";
 import MarketingMonthReport from "./workflows/MarketingMonthReport";
 import PersonalDebts from "./workflows/PersonalDebts";
@@ -402,6 +404,8 @@ function Dashboard({ session, profile }) {
   const [chemSales, setChemSales] = useState([]);
   const [jobEquipment, setJobEquipment] = useState([]);
   const [debts, setDebts] = useState([]);
+  const [pulseTargets, setPulseTargets] = useState([]);
+  const [pulseDecisions, setPulseDecisions] = useState([]);
   const [repeatCauses, setRepeatCauses] = useState([]);
   const [branches, setBranches] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -718,6 +722,8 @@ function Dashboard({ session, profile }) {
     { key: "orders", label: "Заказы", run: () => supabase.from("orders").select("*"), set: setOrders },
     { key: "repeat_causes", label: "Разбор повторных выездов", run: () => supabase.from("repeat_causes").select("*"), set: setRepeatCauses },
     { key: "job_debts", label: "Долги клиентов", run: () => supabase.from("job_debts").select("*").order("due_on"), set: setDebts },
+    { key: "pulse_targets", when: () => canAccess("tab.pulse"), label: "Цели пульса", run: () => supabase.from("pulse_targets").select("*").order("month", { ascending: false }).limit(24), set: setPulseTargets },
+    { key: "pulse_decisions", when: () => canAccess("tab.pulse"), label: "Решения пульса", run: () => supabase.from("pulse_decisions").select("*").eq("status", "open"), set: setPulseDecisions },
     { key: "job_equipment", label: "Оборудование на заявках", run: () => supabase.from("job_equipment").select("*"), set: setJobEquipment },
     { key: "chemical_sales", when: () => canManageCash || canAccess("action.stock_edit"), label: "Продажа препаратов", run: () => fetchAllRows("chemical_sales", { column: "sold_on", ascending: false }), set: setChemSales },
     { key: "paperwork", when: () => canManageCash || canEditDocs, label: "Проведение документов", run: () => supabase.from("paperwork").select("*").order("created_at", { ascending: false }), set: setPaperwork },
@@ -3580,6 +3586,58 @@ function Dashboard({ session, profile }) {
     },
     trend: pulseTrend,
   };
+  // Вкладка «Пульс»: цели месяца, деньги на 4 недели, B2B-воронка и решения.
+  // Таблиц пульса может ещё не быть — тогда показываем расчёты без целей и решений.
+  const pulseReady = !dataWarnings.some((warning) => warning.startsWith("Цели пульса:") || warning.startsWith("Решения пульса:"));
+  const pulseTarget = pulseTargets.find((row) => String(row.month).slice(0, 10) === monthStartIso(pulseNow)) || null;
+  const pulseFunnel = b2bFunnel({ leads, stages: leadStages, contracts, today: pulseNow });
+  const pulsePlan = planFact({
+    target: pulseTarget, today: pulseNow,
+    fact: { revenue: pulseRevenue, profit: pulseProfit, jobs: pulseMonthJobs.length, new_subscribers: pulseFunnel.mrr.newThisMonth, mrr: pulseFunnel.mrr.current },
+  });
+  const pulseRates = historicalRates(jobs, { today: pulseNow, directProfitOf: (job) => jobEconomics(job).profit });
+  const pulseAssumptions = {
+    completionRate: pulseRates.completionRate,
+    directCostShare: pulseRates.directCostShare,
+    monthlyOpex: calc.monthlyOpexAverage(opex),
+    monthlyMarketing: calc.monthlyOpexAverage(mktTopups.map((topup) => ({ spent_date: topup.topup_date, amount: topup.amount }))),
+    monthlySalaries: allProfiles.filter((profile) => profile.is_active !== false).reduce((sum, profile) => sum + (Number(profile.salary_monthly) || 0), 0),
+  };
+  const pulseRunway = cashRunway({
+    today: pulseNow,
+    startBalance: totalOnAccounts + totalInHands,
+    receivables: totalReceivables,
+    debts,
+    plannedJobs: activeJobs,
+    contracts,
+    completionRate: pulseAssumptions.completionRate,
+    directCostShare: pulseAssumptions.directCostShare,
+    payrollOwed: Math.max(0, payrollTotals.owed),
+    monthlyOpex: pulseAssumptions.monthlyOpex || 0,
+    monthlySalaries: pulseAssumptions.monthlySalaries,
+    monthlyMarketing: pulseAssumptions.monthlyMarketing || 0,
+  });
+  const pulseQueue = decisionQueue({ alerts: dashboardAlerts, decisions: pulseDecisions, tasks, profiles: allProfiles, today: pulseNow });
+  async function savePulseTargets(values) {
+    const month = monthStartIso(pulseNow);
+    const { error } = await supabase.from("pulse_targets").upsert({ month, ...values, updated_by: session.user.id, updated_at: new Date().toISOString() }, { onConflict: "month" });
+    if (error) return `Цели не сохранены: ${error.message}`;
+    await logAction("Пульс", `Цели на ${month.slice(0, 7)} обновлены`);
+    showToast("Цели месяца сохранены"); load(["pulse_targets"]);
+    return null;
+  }
+  async function decidePulse(alert, action, { ownerId = null, due = null, until = null, note = "" } = {}) {
+    const { error } = await supabase.rpc("kd_pulse_decide", {
+      p_alert_key: alert.id, p_alert_label: alert.label, p_action: action,
+      p_owner_id: ownerId, p_due_on: due, p_snoozed_until: until, p_note: note || null,
+    });
+    if (error) return error.message.includes("kd_pulse_decide") ? `Выполни supabase/${COMPANY_PULSE_MIGRATION} — решение не сохранено.` : error.message;
+    const summary = action === "assign" ? `${alert.label} → ${personName(ownerId)} до ${isoToRu(due)}` : action === "snooze" ? `${alert.label} отложено до ${isoToRu(until)}` : `${alert.label}: решение снято`;
+    await logAction("Пульс", summary);
+    showToast(action === "assign" ? "Ответственный назначен, задача создана" : action === "snooze" ? "Отложено" : "Решение снято");
+    load(["pulse_decisions", "tasks"]);
+    return null;
+  }
   const globalQ = globalSearch.trim().toLowerCase();
   const globalDigits = globalQ.replace(/\D/g, "");
   const includesGlobal = (...parts) => {
@@ -3611,6 +3669,7 @@ function Dashboard({ session, profile }) {
   // ежедневный показатель работы. Без счётчика оставлены только справочные разделы.
   const baseTabs = [
     { id: "today", icon: LayoutDashboard, label: `Сегодня${dashboardAlerts.length ? " · " + dashboardAlerts.length : ""}` },
+    { id: "pulse", icon: Gauge, label: `Пульс${pulseQueue.totals.unowned + pulseQueue.totals.overdue ? " · " + (pulseQueue.totals.unowned + pulseQueue.totals.overdue) : ""}` },
     { id: "jobs", icon: ClipboardList, label: `Заявки${activeJobs.length ? " · " + activeJobs.length : ""}` },
     { id: "schedule", icon: CalendarClock, label: "График" },
     { id: "done", icon: CheckCircle2, label: `Выполненные${doneJobs.length ? " · " + doneJobs.length : ""}${canCallClients && repeatTriage.totals.pending.count ? " · повтор " + repeatTriage.totals.pending.count : ""}` },
@@ -3655,7 +3714,7 @@ function Dashboard({ session, profile }) {
   // Все четыре «денежных» раздела собраны в одну группу — раньше они были раскиданы
   // между «Результатами» и «Учётом», и приходилось вспоминать, в каком из них что лежит.
   const navGroups = [
-    { label: "Ежедневная работа", ids: ["today", "jobs", "schedule", "routes", "tasks"] },
+    { label: "Ежедневная работа", ids: ["today", "pulse", "jobs", "schedule", "routes", "tasks"] },
     { label: "Клиенты и возвраты", ids: ["leads", "proposals", "clients", "contracts", "retention", "subscriptions", "repeats"] },
     { label: "Деньги и аналитика", ids: ["finance", "analytics", "growth", "opex", "cash"] },
     { label: "Архив заявок", ids: ["done", "canceled"] },
@@ -3908,6 +3967,26 @@ function Dashboard({ session, profile }) {
             channels={sourceRatings}
             onNavigate={setTab}
             onCopy={() => copyText(ownerSummaryText, () => showToast("Сводка скопирована"))}
+          />
+        )}
+
+        {!loading && tab === "pulse" && canAccess("tab.pulse") && (
+          <Pulse
+            monthLabel={new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(pulseNow)}
+            elapsedShare={monthProgress(pulseNow).share}
+            plan={pulsePlan}
+            target={pulseTarget}
+            runway={pulseRunway}
+            assumptions={pulseAssumptions}
+            funnel={pulseFunnel}
+            queue={pulseQueue}
+            people={assignableProfiles.filter((profile) => profile.is_active !== false)}
+            ready={pulseReady}
+            onSaveTargets={savePulseTargets}
+            onDecide={decidePulse}
+            onNavigate={setTab}
+            onOpenLead={(lead) => setModal({ kind: "lead", lead })}
+            onOpenAlert={(alert) => (alert.open ? alert.open() : setTab(alert.tab))}
           />
         )}
 
