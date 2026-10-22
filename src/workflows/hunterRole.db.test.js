@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs";
 import path from "node:path";
-import { HUNTER_FUNNEL_MIGRATION, HUNTER_ROLE_MIGRATION } from "./hunterFunnelModel";
+import { HUNTER_FUNNEL_MIGRATION, HUNTER_PROPOSALS_MIGRATION, HUNTER_ROLE_MIGRATION } from "./hunterFunnelModel";
 
 // Проверяем доступ так же, как его видит приложение: под ролью authenticated
 // с включённым RLS и теми же «разрешающими» политиками, что в живой базе.
@@ -35,7 +35,7 @@ create table public.leads(id uuid primary key default gen_random_uuid(), name te
 create table public.orders(id uuid primary key default gen_random_uuid(), address text, client_phone text, contact_name text, branch_id uuid, status text, opened_on date, created_by uuid, root_job_id uuid);
 create table public.jobs(id uuid primary key default gen_random_uuid(), type text, scheduled_date date, address text, area numeric, source text, client_phone text, brand text,
   guarantee_months int, pest text, price_options jsonb, note text, created_by uuid, branch_id uuid, order_id uuid, visit_no int, visit_kind text, work_stage text, status text default 'new');
-create table public.proposals(id uuid primary key default gen_random_uuid(), lead_id uuid);
+create table public.proposals(id uuid primary key default gen_random_uuid(), lead_id uuid, author_id uuid, number text);
 insert into public.lead_stages(name, sort) values ('Новый лид',10),('Связались',20),('КП выдано',30),('Договор',40);
 insert into public.lead_stages(name, sort, is_final) values ('Готов к выезду',50,true);
 insert into public.lead_stages(name, sort, is_final, is_lost) values ('Отказ',60,true,true);
@@ -48,6 +48,9 @@ alter table public.clients enable row level security;
 create policy kd_module_guard on public.leads for all using (public.kd_account_active() and public.kd_has_permission('tab.leads')) with check (public.kd_account_active() and public.kd_has_permission('tab.leads'));
 create policy leads_all on public.leads for all using (public.kd_has_role(array['admin','manager'])) with check (public.kd_has_role(array['admin','manager']));
 create policy kd_module_guard on public.lead_stages for all using (public.kd_account_active() and public.kd_has_permission('tab.leads')) with check (public.kd_account_active() and public.kd_has_permission('tab.leads'));
+alter table public.proposals enable row level security;
+create policy "proposals select" on public.proposals for select using (public.is_admin() or public.kd_has_permission('tab.proposals'));
+create policy "proposals update" on public.proposals for update using (public.is_admin() or public.kd_has_permission('tab.proposals')) with check (public.is_admin() or public.kd_has_permission('tab.proposals'));
 create policy "clients select" on public.clients for select using (public.is_admin() or public.kd_has_permission('action.jobs_edit'));
 create policy "clients write" on public.clients for all using (public.is_admin() or public.kd_has_permission('action.jobs_edit')) with check (public.is_admin() or public.kd_has_permission('action.jobs_edit'));
 grant usage on schema public to authenticated;
@@ -66,7 +69,9 @@ beforeAll(async () => {
     try { await db.exec(read(name)); } catch (e) { throw new Error(`${name}: ${e.message}`); }
   }
   await db.exec(livePolicies);
-  try { await db.exec(read(HUNTER_ROLE_MIGRATION)); } catch (e) { throw new Error(`${HUNTER_ROLE_MIGRATION}: ${e.message}`); }
+  for (const name of [HUNTER_ROLE_MIGRATION, HUNTER_PROPOSALS_MIGRATION]) {
+    try { await db.exec(read(name)); } catch (e) { throw new Error(`${name}: ${e.message}`); }
+  }
   await db.query("update profiles set role='hunter' where id = any($1)", [[hunter, otherHunter]]);
   const stageNew = (await rows("select id from lead_stages where code='new'"))[0].id;
   for (const [name, owner] of [["Кафе хантера", hunter], ["Склад другого хантера", otherHunter], ["Лид менеджера", manager]]) {
@@ -132,5 +137,25 @@ describe("роль «Хантер»", () => {
     // Повтор с тем же БИН не плодит дубль.
     const [{ create_lead_company: again }] = await rows("select create_lead_company($1,'ТОО Кафе','120340005678','+7 727 300 11 22')", [own.id]);
     expect(again).toBe(companyId);
+  });
+  it("с доступом «КП» хантер видит только свои КП и КП по своим сделкам", async () => {
+    await as(admin);
+    const [own] = await rows("select id from leads where name='Кафе хантера'");
+    const [foreign] = await rows("select id from leads where name='Лид менеджера'");
+    // КП в живой базе создаёт только create_proposal (security definer) — сеем в обход RLS.
+    await db.exec("reset role");
+    await db.query("insert into proposals(number, author_id) values('КП-хантера', $1), ('КП-менеджера', $2)", [hunter, manager]);
+    await db.query("insert into proposals(number, author_id, lead_id) values('КП-по-сделке-хантера', $1, $2), ('КП-по-чужой-сделке', $1, $3)", [manager, own.id, foreign.id]);
+    await as(hunter);
+    expect((await rows("select count(*)::int n from proposals"))[0].n).toBe(0);
+    await as(admin);
+    await db.query("update profiles set access_overrides=$2::jsonb where id=$1", [hunter, JSON.stringify({ "tab.proposals": true })]);
+    await as(hunter);
+    expect((await rows("select number from proposals order by number")).map((r) => r.number)).toEqual(["КП-по-сделке-хантера", "КП-хантера"]);
+    expect((await db.query("update proposals set number=number where number='КП-менеджера'")).affectedRows).toBe(0);
+    await as(manager);
+    expect((await rows("select count(*)::int n from proposals"))[0].n).toBe(0);
+    await as(admin);
+    expect((await rows("select count(*)::int n from proposals"))[0].n).toBe(4);
   });
 });
