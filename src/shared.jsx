@@ -408,6 +408,8 @@ const ROLE_DEFAULT_PERMISSIONS = {
   accountant: ["tab.today", "tab.finance", "tab.opex", "tab.cash", "tab.payroll", "tab.docs", "action.docs_edit", "tab.tasks", "action.finance_edit", "tab.materials"],
   tender: ["tab.today", "tab.tenders", "action.tenders_edit", "tab.proposals", "tab.docs", "action.docs_edit", "tab.tasks", "action.tasks_manage", "tab.materials", "tab.knowledge"],
   curator: ["tab.today", "tab.jobs", "tab.schedule", "tab.done", "tab.canceled", "tab.routes", "tab.tasks", "action.tasks_manage", "action.jobs_edit", "tab.clients", "tab.retention", "action.leads_edit", "tab.team", "tab.stock", "data.stock_self", "data.equipment", "tab.materials", "tab.knowledge"],
+  // Хантер: только вкладка «Лиды». Что он видит лишь свои сделки, держит база (2026-10-22_hunter_role.sql).
+  hunter: ["tab.leads", "action.leads_edit"],
 };
 
 const makeRole = (label, description, permissions = []) => ({
@@ -426,6 +428,7 @@ const ROLE_DEFINITIONS = {
   accountant: makeRole("Бухгалтер", "Финансы, касса и документы", ROLE_DEFAULT_PERMISSIONS.accountant),
   tender: makeRole("Тендерщик", "Тендеры, задачи и документы", ROLE_DEFAULT_PERMISSIONS.tender),
   curator: makeRole("Куратор", "Контроль заявок, команды, склада и задач", ROLE_DEFAULT_PERMISSIONS.curator),
+  hunter: makeRole("Хантер", "Только свои B2B-сделки во вкладке «Лиды»", ROLE_DEFAULT_PERMISSIONS.hunter),
 };
 
 function effectivePermissions(profileOrRole, overridesArg = {}) {

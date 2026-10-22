@@ -3789,7 +3789,7 @@ function localDateTimeIso(value) {
   return date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
-function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, pestOptions = [], companies = [], funnelCtx = {}, onClose, onSave }) {
+function LeadModal({ lead, stages, sources, owners = [], keepers, defaultOwnerId, pestOptions = [], companies = [], funnelCtx = {}, onCreateCompany, onClose, onSave }) {
   const [name, setName] = useState(lead?.name || "");
   const [clientType, setClientType] = useState(lead?.client_type || "person");
   const [phone, setPhone] = useState(lead?.phone || "+7 ");
@@ -3852,7 +3852,8 @@ function LeadModal({ lead, stages, sources, owners = [], defaultOwnerId, pestOpt
         ? <select value={source} onChange={(e) => setSource(e.target.value)}><option value="">Не указан</option>{sourceOptions.map((name) => <option key={name} value={name}>{name}</option>)}</select>
         : <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="OLX / Instagram / рекомендация" />}</Field>
       {owners.length > 0 && <Field label={clientType === "company" ? "Хантер (ведёт сделку)" : "Ответственный менеджер"}><select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>{owners.map((person) => <option key={person.id} value={person.id}>{person.full_name || "Без имени"}</option>)}</select></Field>}
-      {clientType === "company" && <DealFields form={deal} onChange={(patch) => setDeal((prev) => ({ ...prev, ...patch }))} stageCode={stageCode} Field={Field} pestOptions={pestOptions} companies={companies} keepers={owners} />}
+      {clientType === "company" && <DealFields form={deal} onChange={(patch) => setDeal((prev) => ({ ...prev, ...patch }))} stageCode={stageCode} Field={Field} pestOptions={pestOptions} companies={companies} keepers={keepers || owners}
+        onCreateCompany={lead?.id && onCreateCompany ? async (payload) => { const result = await onCreateCompany(payload); if (result?.id) setDeal((prev) => ({ ...prev, company_id: result.id })); return result; } : null} />}
       {isLost || isSnoozed ? (
         <ExitFields stageCode={stageCode} lostReason={lostReason} onLostReason={setLostReason} form={deal} onChange={(patch) => setDeal((prev) => ({ ...prev, ...patch }))} Field={Field} />
       ) : isClosed ? (

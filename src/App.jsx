@@ -55,7 +55,7 @@ import { CallQueue, JobCallPanel } from "./workflows/ClientCalls";
 import { RepeatPendingList, RepeatTriageBar } from "./workflows/RepeatTriage";
 import { buildRepeatTriage } from "./workflows/repeatTriageModel";
 import CallModal from "./workflows/CallModal";
-import { HUNTER_FUNNEL_MIGRATION, lostReasonLabel, nextStageHint } from "./workflows/hunterFunnelModel";
+import { HUNTER_FUNNEL_MIGRATION, HUNTER_ROLE_MIGRATION, lostReasonLabel, nextStageHint } from "./workflows/hunterFunnelModel";
 import { DealSummary } from "./workflows/HunterDeal";
 import { canonicalPestOptions } from "./pestNormalization";
 import { JOB_DEBT_MIGRATION, debtJobs, jobDebtState } from "./workflows/jobDebtModel";
@@ -475,6 +475,8 @@ function Dashboard({ session, profile }) {
   });
   const [syncingOffline, setSyncingOffline] = useState(false);
   const isAdmin = profile?.role === "admin";
+  // Хантер ведёт только свои B2B-сделки: видит одну вкладку «Лиды», остальное закрыто и в базе.
+  const isHunter = profile?.role === "hunter";
   const permissions = effectivePermissions(profile);
   const canAccess = (key) => isAdmin || (key === "tab.contracts" ? ["tab.clients", "tab.subscriptions", "tab.docs"].some((p) => permissions.has(p)) : permissions.has(key));
   const canManageTasks = canAccess("action.tasks_manage");
@@ -2292,6 +2294,18 @@ function Dashboard({ session, profile }) {
     await logAction("CRM", `Лид «${lead.name || lead.phone || "?"}» → ${stName}`);
     setModal(null); showToast("Стадия и следующий шаг сохранены"); load(["leads", "lead_activities"]); return null;
   }
+  async function createLeadCompany(lead, payload) {
+    const { data, error } = await supabase.rpc("create_lead_company", {
+      p_lead_id: lead.id, p_legal_name: payload.legal_name, p_bin: payload.bin, p_phone: payload.phone,
+    });
+    if (error) {
+      const message = atomicReceiptRpcUnavailable(error, "create_lead_company") ? `Сначала выполни supabase/${HUNTER_ROLE_MIGRATION}.` : error.message;
+      return { error: message };
+    }
+    await logAction("CRM", `Юрлицо привязано к сделке «${lead.name || lead.phone || "?"}»: ${payload.legal_name}`);
+    await load(["leads", "clients"]);
+    return { id: data };
+  }
   async function removeLead(lead) {
     await supabase.from("leads").delete().eq("id", lead.id);
     await logAction("CRM", `Лид удалён: ${lead.name || lead.phone || "?"}`);
@@ -3407,7 +3421,10 @@ function Dashboard({ session, profile }) {
   })).sort((a, b) => b.profit - a.profit);
   // Сколько лидов ждут ответа. Первая стадия воронки = «ещё никто не взял».
   const leadSla = calc.leadSlaStats(leads, { firstStageId: leadStages[0]?.id || null, closedStageIds: closedLeadStageIds });
-  const leadOwners = allProfiles.filter((person) => person.is_active !== false && ["admin", "manager"].includes(person.role));
+  const leadManagers = allProfiles.filter((person) => person.is_active !== false && ["admin", "manager"].includes(person.role));
+  const leadOwners = isHunter
+    ? allProfiles.filter((person) => person.id === session.user.id)
+    : allProfiles.filter((person) => person.is_active !== false && ["admin", "manager", "hunter"].includes(person.role));
   const leadSourceOptions = canonicalSourceOptions([...sources, ...leads.map((lead) => ({ name: lead.source }))]);
   const leadActivityMap = groupLeadActivities(leadActivities);
   const leadTimeline = (leadId) => leadActivityMap.get(String(leadId)) || [];
@@ -3721,7 +3738,10 @@ function Dashboard({ session, profile }) {
     { label: "Команда и склад", ids: ["team", "payroll", "partners", "stock", "myequip"] },
   ];
   const moreNavGroup = { label: "Ещё разделы", ids: ["tenders", "docs", "materials", "knowledge", "journal", "trash"] };
-  const mobileTabIds = (isAdmin ? ["today", "jobs", "leads", "routes"] : ["today", "jobs", "tasks", "cash", "tenders", "finance"]).filter((id) => tabs.some((item) => item.id === id)).slice(0, 4);
+  const mobileTabIds = (isAdmin ? ["today", "jobs", "leads", "routes"] : ["today", "jobs", "tasks", "cash", "tenders", "finance", "leads"]).filter((id) => tabs.some((item) => item.id === id)).slice(0, 4);
+  // Роль без «Сегодня» (хантер) открывает первую доступную вкладку, а не пустую страницу.
+  const tabIds = tabs.map((item) => item.id).join(",");
+  useEffect(() => { if (tabIds && !tabIds.split(",").includes(tab)) setTab(tabIds.split(",")[0]); }, [tab, tabIds]);
   const mobileTabs = mobileTabIds.map((id) => tabs.find((item) => item.id === id)).filter(Boolean);
   const additionalAnalytics = <section className="wf-workspace"><h2>Планы и показатели клиентов</h2>
             <div className="kd-periodbar">
@@ -4612,7 +4632,7 @@ function Dashboard({ session, profile }) {
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l })}>Сменить стадию</button>
                           {!l.converted_job_id && <button className="kd-btn ghost sm" onClick={() => askConfirm(`Создать заявку из клиента «${l.name || l.phone || "?"}»? Перенесём телефон, адрес и источник${l.client_type === "company" ? ", сделка встанет на «Первую обработку»" : ""}.`, () => convertLeadToJob(l), { danger: false, confirmLabel: "Да, создать" })}><Plus size={13} />Заявка</button>}
                           <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "lead", lead: l })}><Pencil size={13} /></button>
-                          <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить клиента «${l.name || l.phone || "?"}» из воронки?`, () => removeLead(l))}><Trash2 size={13} /></button>
+                          {!isHunter && <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить клиента «${l.name || l.phone || "?"}» из воронки?`, () => removeLead(l))}><Trash2 size={13} /></button>}
                         </div>
                       </div>
                         </DetailDrawer>
@@ -6894,7 +6914,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal people={allProfiles} tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
-      {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} owners={leadOwners} defaultOwnerId={session.user.id} pestOptions={canonicalPestOptions(pestTypes)} companies={leadCompanies} funnelCtx={leadFunnelCtx(modal.lead)} onClose={() => setModal(null)} onSave={saveLead} />}
+      {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} owners={leadOwners} keepers={leadManagers} defaultOwnerId={session.user.id} pestOptions={canonicalPestOptions(pestTypes)} companies={leadCompanies} funnelCtx={leadFunnelCtx(modal.lead)} onCreateCompany={(payload) => createLeadCompany(modal.lead, payload)} onClose={() => setModal(null)} onSave={saveLead} />}
       {modal?.kind === "leadActivity" && <LeadActivityModal lead={modal.lead} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : actorName} defaultKind={modal.defaultKind || "call"} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onSave={(payload) => recordLeadActivity(modal.lead, payload)} />}
       {modal?.kind === "leadHistory" && <LeadHistoryModal lead={modal.lead} stageName={leadStageById(modal.lead?.stage_id)?.name} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : ""} activities={leadTimeline(modal.lead?.id)} profileName={(id) => profileById(id)?.full_name || ""} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onAddContact={() => setModal({ kind: "leadActivity", lead: modal.lead })} onAddNote={() => setModal({ kind: "leadActivity", lead: modal.lead, defaultKind: "note" })} />}
       {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}

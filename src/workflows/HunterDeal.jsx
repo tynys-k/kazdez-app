@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { DEAL_STAGES, FREQUENCIES, LOST_REASONS, OBJECT_TYPES, frequencyLabel, lostReasonLabel, missingText, objectPriority, objectTypeLabel, stageIndex, suggestedMrr } from "./hunterFunnelModel";
 import { formatMoney } from "../ui/formatters";
 
@@ -34,13 +34,44 @@ export function dealPayload(form) {
   return row;
 }
 
+// Новое юрлицо прямо из сделки: хантер не видит справочник клиентов,
+// сервер находит клиента по БИН или телефону либо создаёт его и привязывает к сделке.
+function NewCompany({ Field, onCreate }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ legal_name: "", bin: "", phone: "" });
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+  const set = (key) => (e) => setForm((prev) => ({ ...prev, [key]: e.target.value }));
+  const ok = form.legal_name.trim() && form.bin.replace(/\D/g, "").length === 12 && form.phone.replace(/\D/g, "").length >= 10;
+  async function create() {
+    setSaving(true); setProblem("");
+    const result = await onCreate({ legal_name: form.legal_name.trim(), bin: form.bin, phone: form.phone.trim() });
+    setSaving(false);
+    if (result?.error) { setProblem(result.error); return; }
+    setOpen(false); setForm({ legal_name: "", bin: "", phone: "" });
+  }
+  if (!open) return <button type="button" className="kd-btn ghost sm" style={{ marginTop: -4, marginBottom: 10 }} onClick={() => setOpen(true)}>+ Новое юрлицо</button>;
+  return <div className="kd-notebox" style={{ marginBottom: 10 }}>
+    <Field label="Название юрлица"><input value={form.legal_name} onChange={set("legal_name")} placeholder="ТОО «Дастархан Групп»" /></Field>
+    <div className="kd-grid2">
+      <Field label="БИН (12 цифр)"><input value={form.bin} onChange={set("bin")} inputMode="numeric" placeholder="120340005678" /></Field>
+      <Field label="Телефон юрлица"><input value={form.phone} onChange={set("phone")} placeholder="+7 727 ..." /></Field>
+    </div>
+    {problem && <div className="kd-err" style={{ marginBottom: 8 }}>{problem}</div>}
+    <div className="kd-actions">
+      <button type="button" className="kd-btn ghost sm" onClick={() => setOpen(false)}>Отмена</button>
+      <button type="button" className="kd-btn primary sm" disabled={!ok || saving} onClick={create}>{saving ? "…" : "Создать и привязать"}</button>
+    </div>
+  </div>;
+}
+
 function Section({ title, children }) {
   return <div className="kd-deal-section"><div className="kd-section">{title}</div>{children}</div>;
 }
 
 // Блоки карточки появляются по мере продвижения: видно текущую стадию и
 // следующую, чтобы Хантер заранее знал, что спросить у клиента.
-export function DealFields({ form, onChange, stageCode, Field, pestOptions = [], companies = [], keepers = [] }) {
+export function DealFields({ form, onChange, stageCode, Field, pestOptions = [], companies = [], keepers = [], onCreateCompany }) {
   const shown = Math.max(stageIndex(stageCode), 0) + 1;
   const visible = (code) => stageCode === "lost" || stageCode === "snoozed" || stageIndex(code) <= shown;
   const set = (key) => (e) => onChange({ [key]: e.target.value });
@@ -89,7 +120,8 @@ export function DealFields({ form, onChange, stageCode, Field, pestOptions = [],
       <Field label="Юрлицо (карточка клиента)"><select value={form.company_id} onChange={set("company_id")}>
         <option value="">— выбери юрлицо —</option>{companies.map((client) => <option key={client.id} value={client.id}>{client.legal_name || client.name}{client.bin_iin ? ` · БИН ${client.bin_iin}` : ""}</option>)}
       </select></Field>
-      {companies.length === 0 && <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>Юрлиц пока нет — заведи карточку с БИН во вкладке «Клиенты».</div>}
+      {onCreateCompany ? <NewCompany Field={Field} onCreate={onCreateCompany} />
+        : companies.length === 0 && <div className="kd-muted" style={{ marginTop: -6, marginBottom: 10 }}>Юрлиц пока нет — сохрани сделку, затем добавь юрлицо здесь.</div>}
       <div className="kd-grid2">
         <Field label="Подписант"><input value={form.signer_name} onChange={set("signer_name")} placeholder="Директор Иванов И. И." /></Field>
         <Field label="Дата первой обработки"><input type="date" value={form.first_service_at} onChange={set("first_service_at")} /></Field>
