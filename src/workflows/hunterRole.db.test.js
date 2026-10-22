@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs";
 import path from "node:path";
-import { HUNTER_FUNNEL_MIGRATION, HUNTER_PROPOSALS_MIGRATION, HUNTER_ROLE_MIGRATION, LEAD_CLIENT_HISTORY_MIGRATION } from "./hunterFunnelModel";
+import { HUNTER_FUNNEL_MIGRATION, HUNTER_PROPOSALS_MIGRATION, HUNTER_ROLE_MIGRATION, LEAD_CLIENT_HISTORY_MIGRATION, LEAD_CLIENT_TIMELINE_MIGRATION } from "./hunterFunnelModel";
 
 // Проверяем доступ так же, как его видит приложение: под ролью authenticated
 // с включённым RLS и теми же «разрешающими» политиками, что в живой базе.
@@ -175,5 +175,24 @@ describe("роль «Хантер»", () => {
     expect(String(history[0].last_date.toISOString?.() ?? history[0].last_date)).toMatch(/2026-06-0[12]/);
     await as(manager);
     expect((await rows("select count(*)::int n from lead_client_history()"))[0].n).toBe(2);
+  });
+  it("лента карточки лида отдаёт прошлые заявки и звонки обзвона — хантеру только по своей сделке", async () => {
+    await db.exec("reset role");
+    await db.exec("alter table jobs add column if not exists report_paid numeric");
+    await db.exec(`create table if not exists public.client_calls(id uuid primary key default gen_random_uuid(), job_id uuid, client_id uuid, client_phone text,
+      stage text, outcome text, rating int, note text, created_at timestamptz default now(), deleted_at timestamptz)`);
+    await db.exec(read(LEAD_CLIENT_TIMELINE_MIGRATION));
+    const [job] = await rows("select id from jobs where pest='Мыши'");
+    await db.query("update jobs set report_paid=25000 where id=$1", [job.id]);
+    await db.query("insert into client_calls(job_id, stage, outcome, rating, note) values($1, 'after_primary', 'satisfied', 5, 'Всё ушло')", [job.id]);
+    await db.query("insert into client_calls(client_phone, stage, outcome, deleted_at) values('+77471088385', 'after_primary', 'no_answer', now())");
+    const [own] = await rows("select id from leads where name='Кафе хантера'");
+    const [foreign] = await rows("select id from leads where name='Склад другого хантера'");
+    await as(hunter);
+    const feed = await rows("select kind, title, status, amount, rating, details from lead_client_timeline($1)", [own.id]);
+    expect(feed.map((r) => r.kind).sort()).toEqual(["call", "job", "job", "job"]);
+    expect(feed.find((r) => r.kind === "call")).toMatchObject({ status: "satisfied", rating: 5, details: "Всё ушло" });
+    expect(feed.find((r) => r.title === "Мыши")).toMatchObject({ status: "done", amount: "25000" });
+    await expect(db.query("select * from lead_client_timeline($1)", [foreign.id])).rejects.toThrow(/другого сотрудника/);
   });
 });

@@ -7,6 +7,9 @@ import { callsForClient, outcomeLabel } from "./workflows/clientCallsModel";
 import { Building2, Camera, FileText, FolderOpen, Mail, MapPin, MessageCircle, Paperclip, Pencil, Phone, PhoneCall, Plus, Trash2, UserRound } from "lucide-react";
 import { addressPlain, fmt, fmtTs, isoToRu, samePhone } from "./shared";
 import { clientAddresses as collectAddresses, clientContracts, clientJobs, clientSummary } from "./clientDirectory";
+import { DetailDrawer } from "./ui/primitives";
+import { Composer, CrmSection, Feed, InfoList } from "./workflows/CrmCard";
+import { leadActivityItems } from "./workflows/crmFeed";
 
 const blankContact = () => ({ name: "", role: "", phone: "", email: "", note: "" });
 const blankAddress = () => ({ label: "", address: "", contact_name: "", contact_phone: "", note: "" });
@@ -55,45 +58,113 @@ export function ClientProfileModal({ client, contacts = [], addresses = [], onCl
     </div>
   </Shell>;
 }
-
+
+// Карточка клиента в духе Bitrix: слева данные клиента, справа комментарий и
+// единая лента — заявки, касания из воронки, обзвон, заметки, договоры, файлы.
+// История по заявкам, обзвон, контроль и файлы — отдельными вкладками.
 export function ClientDetailsModal({ regularClientThreshold = 3, onBlock, onOpenLegalContract, qualityChecks = [], people = [], legalContracts = [], client, jobs = [], contacts = [], addresses = [], contracts = [], followups = [], events = [], leads = [], leadActivities = [], attachments = [], jobProofs = [], calls = [], callPeople = [], userId, isAdmin, onCall, onDeleteCall, canEdit, onClose, onEdit, onAddNote, onUpload, onOpenAttachment, onOpenJob, onOpenContract, onOpenProof }) {
-  const [view, setView] = useState("overview");
-  const [note, setNote] = useState("");
-  const [savingNote, setSavingNote] = useState(false);
+  const [view, setView] = useState("card");
   const rows = useMemo(() => clientJobs(client, jobs), [client, jobs]);
   const summary = useMemo(() => clientSummary(client, jobs, contracts, followups), [client, jobs, contracts, followups]);
   const linkedContacts = contacts.filter((row) => String(row.client_id) === String(client.id));
   const linkedAddresses = collectAddresses(client, addresses, jobs);
   const linkedContracts = legalContracts.filter((c) => c.client_id === client.id);
   const linkedAttachments = attachments.filter((row) => String(row.client_id) === String(client.id));
-  const linkedLeads = leads.filter((row) => samePhone(row.phone, client.phone));
+  const linkedLeads = leads.filter((row) => samePhone(row.phone, client.phone) || samePhone(row.lpr_phone, client.phone) || String(row.company_id || "") === String(client.id));
   const leadIds = new Set(linkedLeads.map((row) => String(row.id)));
   const rowIds = new Set(rows.map((row) => String(row.id)));
   const proofRows = jobProofs.filter((row) => rowIds.has(String(row.job_id)));
   const clientCallRows = callsForClient(calls, { clientId: client.id, phone: client.phone, jobIds: rowIds });
   const lastDoneJob = rows.filter((row) => row.status === "done").sort((a, b) => String(b.scheduled_date || "").localeCompare(String(a.scheduled_date || "")))[0];
-  const timeline = [
-    ...rows.map((row) => ({ id: `job-${row.id}`, at: row.scheduled_date || row.created_at, type: row.status, title: `${row.status === "done" ? "Выполнена заявка" : row.status === "canceled" ? "Заявка отменена" : "Создана заявка"}: ${row.pest || row.type || "услуга"}`, details: `${addressPlain(row.address)}${row.status === "done" ? ` · ${fmt(row.report_paid)} ₸` : ""}` })),
-    ...events.filter((row) => (row.client_id && String(row.client_id) === String(client.id)) || samePhone(row.client_phone, client.phone)).map((row) => ({ id: `event-${row.id}`, at: row.created_at, type: row.event_type, title: row.title, details: row.details })),
-    ...followups.filter((row) => (row.client_id && String(row.client_id) === String(client.id)) || samePhone(row.phone, client.phone)).map((row) => ({ id: `follow-${row.id}`, at: row.completed_at || row.due_date, type: "contact", title: row.status === "done" ? "Контакт с клиентом завершён" : "Запланирован контакт", details: row.result || row.note })),
-    ...leadActivities.filter((row) => leadIds.has(String(row.lead_id))).map((row) => ({ id: `lead-${row.id}`, at: row.occurred_at || row.created_at, type: row.kind, title: ({ call: "Телефонный разговор", whatsapp: "Переписка WhatsApp", meeting: "Встреча", message: "Сообщение", note: "Заметка" })[row.kind] || "Обращение", details: row.comment || row.result })),
-    ...clientCallRows.map((row) => ({ id: `call-${row.id}`, at: row.created_at, type: "call", title: `Звонок: ${outcomeLabel(row.outcome, row.stage)}${row.rating ? ` · ${row.rating}/5` : ""}`, details: [row.note, row.callback_on ? `перезвонить ${isoToRu(row.callback_on)}` : ""].filter(Boolean).join(" · ") })),
-    ...linkedContracts.map((row) => ({ id: `contract-${row.id}`, at: row.created_at, type: "contract", title: `Договор № ${row.number}`, details: row.organization })),
-    ...linkedAttachments.map((row) => ({ id: `file-${row.id}`, at: row.created_at, type: "file", title: `Добавлен файл: ${row.name}`, details: row.note })),
-  ].filter((row) => row.at).sort((a, b) => new Date(b.at) - new Date(a.at));
-  async function saveNote() { if (!note.trim()) return; setSavingNote(true); const ok = await onAddNote(client, note); if (ok) setNote(""); setSavingNote(false); }
+  const personName = (id) => [...people, ...callPeople].find((p) => String(p.id) === String(id))?.full_name || "";
+  const jobStatus = { done: "выполнена", canceled: "отменена", assigned: "назначена", new: "новая" };
+  const feed = [
+    ...rows.map((row) => ({ id: `job-${row.id}`, at: row.scheduled_date || row.created_at, dateOnly: !!row.scheduled_date, group: "job", icon: "job",
+      title: `Заявка: ${row.pest || row.type || "услуга"}`, body: addressPlain(row.address),
+      meta: [jobStatus[row.status] || row.status, row.status === "done" && Number(row.report_paid) > 0 ? `${fmt(row.report_paid)} ₸` : ""].filter(Boolean).join(" · "),
+      tone: row.status === "canceled" ? "muted" : row.status === "done" ? "positive" : "" })),
+    ...events.filter((row) => (row.client_id && String(row.client_id) === String(client.id)) || samePhone(row.client_phone, client.phone)).map((row) => ({
+      id: `event-${row.id}`, at: row.created_at, group: row.event_type === "note" ? "touch" : "system", icon: row.event_type === "note" ? "note" : "system",
+      title: row.event_type === "note" ? "Комментарий" : row.title, body: row.details, meta: personName(row.created_by) })),
+    ...followups.filter((row) => (row.client_id && String(row.client_id) === String(client.id)) || samePhone(row.phone, client.phone)).map((row) => ({
+      id: `follow-${row.id}`, at: row.completed_at || row.due_date, group: "touch", icon: "call",
+      title: row.status === "done" ? "Контакт с клиентом завершён" : "Запланирован контакт", body: row.result || row.note || "", meta: "" })),
+    ...leadActivityItems(leadActivities.filter((row) => leadIds.has(String(row.lead_id))), personName),
+    ...clientCallRows.map((row) => ({ id: `call-${row.id}`, at: row.created_at, group: "call", icon: "retention",
+      title: `Обзвон: ${outcomeLabel(row.outcome, row.stage)}${row.rating ? ` · ${row.rating}/5` : ""}`,
+      body: row.note || "", meta: [personName(row.created_by), row.callback_on ? `перезвонить ${isoToRu(row.callback_on)}` : ""].filter(Boolean).join(" · ") })),
+    ...linkedContracts.map((row) => ({ id: `contract-${row.id}`, at: row.created_at, group: "system", icon: "proposal", title: `Договор № ${row.number}`, body: row.organization || "", meta: "" })),
+    ...linkedAttachments.map((row) => ({ id: `file-${row.id}`, at: row.created_at, group: "system", icon: "system", title: `Добавлен файл: ${row.name}`, body: row.note || "", meta: "" })),
+  ];
+  async function addComment({ comment }) {
+    const ok = await onAddNote(client, comment);
+    return ok ? null : "Не удалось сохранить комментарий";
+  }
   const digits = String(client.phone || "").replace(/\D/g, "");
-  return <Shell title={`Клиент 360° · ${client.name || client.phone}`} onClose={onClose} footer={<button className="kd-btn primary" onClick={onClose}>Закрыть</button>}>
-    <div className="kd-client360-head"><div><div className="kd-client360-name">{client.name || "Клиент"}</div><a href={`tel:+${digits}`}>{client.phone}</a><span>{client.legal_name || (client.client_type === "company" ? "Организация" : "Физическое лицо")}{client.bin_iin ? ` · БИН/ИИН ${client.bin_iin}` : ""}</span></div><div className="kd-client360-actions">{digits && <a className="kd-btn ghost sm" href={`tel:+${digits}`}><Phone size={14} />Позвонить</a>}{digits && <a className="kd-btn wa sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={14} />WhatsApp</a>}{client.email && <a className="kd-btn ghost sm" href={`mailto:${client.email}`}><Mail size={14} />E-mail</a>}{onCall && lastDoneJob && <button className="kd-btn primary sm" onClick={() => onCall(lastDoneJob)}><PhoneCall size={14} />Связаться</button>}{canEdit && <button className="kd-btn ghost sm" onClick={onEdit}><Pencil size={14} />Изменить</button>}</div></div>
-    <ClientStatusBadges client={client} jobs={jobs} threshold={regularClientThreshold} />
-    {canEdit && onBlock && <button className="kd-btn ghost sm" onClick={() => onBlock(client)}>{client.blocked ? "Изменить блокировку клиента" : "Чёрный список"}</button>}
-    <div className="kd-client360-kpis"><div><span>Заявки</span><strong>{summary.jobs}</strong><small>{summary.done} выполнено</small></div><div><span>LTV клиента</span><strong>{fmt(summary.revenue)} ₸</strong><small>за всё время</small></div><div><span>Договоры</span><strong>{linkedContracts.filter((c) => c.status === "active").length}</strong><small>активных</small></div><div><span>Контакты</span><strong>{linkedContacts.length + 1}</strong><small>{summary.openFollowups} требуют действия</small></div></div>
-    <div className="kd-client360-tabs">{[{ id: "overview", label: "Обзор" }, { id: "calls", label: `Обращения · ${clientCallRows.length}` }, { id: "quality", label: "Контроль и отзывы" }, { id: "timeline", label: `Хронология · ${timeline.length}` }, { id: "jobs", label: `Заявки · ${rows.length}` }, { id: "files", label: `Файлы · ${linkedAttachments.length + proofRows.length}` }].map((item) => <button key={item.id} className={view === item.id ? "on" : ""} onClick={() => setView(item.id)}>{item.label}</button>)}</div>
-    {view === "overview" && <div className="kd-client-profile-grid"><section className="kd-client360-panel"><div className="kd-section"><UserRound size={16} />Контакты</div><a href={`tel:+${digits}`}>{client.phone} · основной</a>{client.email && <a href={`mailto:${client.email}`}>{client.email}</a>}{linkedContacts.map((row) => <div className="kd-client-contact" key={row.id}><strong>{row.name || row.phone || row.email}</strong><span>{[row.role, row.phone, row.email, row.note].filter(Boolean).join(" · ")}</span></div>)}</section><section className="kd-client360-panel"><div className="kd-section"><MapPin size={16} />Адреса и объекты</div>{linkedAddresses.length ? linkedAddresses.map((row, index) => <div className="kd-client-contact" key={row.id || index}><strong>{row.label || (row.fromHistory ? "Из истории заявок" : "Адрес")}</strong><span>{row.address}</span></div>) : <span>Адресов пока нет.</span>}</section><section className="kd-client360-panel"><div className="kd-section"><Building2 size={16} />Договоры</div>{linkedContracts.length ? linkedContracts.map((row) => <button className="kd-client-linkrow" key={row.id} onClick={() => onOpenLegalContract(row)}><span><strong>№ {row.number} · {row.organization}</strong><small>от {isoToRu(row.signed_on)} · {row.status === "closed" ? "Закрыт" : row.status === "draft" ? "Черновик" : "Действует"}</small></span><FolderOpen size={15} /></button>) : <span>Договоров нет.</span>}</section><section className="kd-client360-note"><div className="kd-section">Внутренняя заметка</div>{client.note && <p>{client.note}</p>}{canEdit && <><textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Итог звонка, договорённость, важный контекст…"/><button className="kd-btn primary sm" disabled={!note.trim() || savingNote} onClick={saveNote}>{savingNote ? "Сохраняем…" : "Добавить в хронологию"}</button></>}</section></div>}
-    {view === "calls" && <section className="kd-client360-panel"><div className="kd-section">Звонки и комментарии</div><CallLog calls={clientCallRows} people={callPeople.length ? callPeople : people} jobs={rows} userId={userId} isAdmin={isAdmin} onDelete={onDeleteCall} showJob empty="Клиенту ещё не звонили после выездов." /></section>}
-    {view === "quality" && <QualityHistory checks={qualityHistoryForPhone(client.phone, jobs, qualityChecks)} jobs={jobs} people={people} />}
-    {view === "timeline" && <div className="kd-client-timeline">{timeline.length ? timeline.map((row) => <div className={`kd-client-event ${row.type}`} key={row.id}><span className="kd-client-event-dot"/><div><time>{fmtTs(row.at)}</time><strong>{row.title}</strong>{row.details && <p>{row.details}</p>}</div></div>) : <div className="kd-empty">История клиента пока пустая.</div>}</div>}
-    {view === "jobs" && <div className="kd-client360-jobs">{rows.map((row) => <button key={row.id} className="kd-histrow" onClick={() => onOpenJob(row)}><div><div className="kd-histmain">{row.pest || row.type || "Заявка"}</div><div className="kd-muted">{isoToRu(row.scheduled_date) || "без даты"} · {addressPlain(row.address)}</div></div><div><strong>{row.status === "done" ? `${fmt(row.report_paid)} ₸` : row.status === "canceled" ? "Отменена" : "В работе"}</strong></div></button>)}</div>}
-    {view === "files" && <div><div className="kd-client-filebar"><div><strong>Фото, видео и документы</strong><span>До 25 МБ: JPG, PNG, WebP, MP4, MOV или PDF</span></div>{canEdit && <label className="kd-btn primary sm"><Paperclip size={14}/>Прикрепить<input type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,application/pdf" hidden onChange={(e) => { const file=e.target.files?.[0]; if(file) onUpload(client,file); e.target.value=""; }}/></label>}</div>{linkedAttachments.map((row) => <button className="kd-client-file" key={row.id} onClick={() => onOpenAttachment(row)}>{String(row.mime_type).startsWith("image/") ? <Camera size={18}/> : <FileText size={18}/>}<span><strong>{row.name}</strong><small>{row.size_bytes ? `${Math.ceil(row.size_bytes/1024)} КБ` : "Файл клиента"} · {fmtTs(row.created_at)}</small></span><FolderOpen size={15}/></button>)}{proofRows.map((proof) => { const job=rows.find((row)=>String(row.id)===String(proof.job_id)); return <button className="kd-client-file" key={`proof-${proof.id}`} onClick={()=>onOpenProof(job)}><Camera size={18}/><span><strong>Фотоотчёт по заявке</strong><small>{isoToRu(job?.scheduled_date)} · {(proof.before_paths?.length||0)+(proof.after_paths?.length||0)} фото</small></span><FolderOpen size={15}/></button>;})}{linkedAttachments.length + proofRows.length === 0 && <div className="kd-empty">Файлов пока нет.</div>}</div>}
-  </Shell>;
+  const tabs = [
+    { id: "card", label: "Карточка" },
+    { id: "jobs", label: `Заявки · ${rows.length}` },
+    { id: "calls", label: `Обзвон · ${clientCallRows.length}` },
+    { id: "quality", label: "Контроль и отзывы" },
+    { id: "files", label: `Файлы · ${linkedAttachments.length + proofRows.length}` },
+  ];
+  return <DetailDrawer open size="wide" title={client.name || client.phone || "Клиент"} onClose={onClose}>
+    <div className="crm-card">
+      <div className="crm-card-head">
+        <div className="crm-card-title">
+          <div className="crm-sub">
+            <span className="kd-badge" style={{ color: client.client_type === "company" ? "#2557B0" : "#6E3FCF", background: client.client_type === "company" ? "#E9F0FC" : "#F0EAFC" }}>{client.client_type === "company" ? "Юрлицо" : "Физлицо"}</span>
+            {client.legal_name && <strong>{client.legal_name}</strong>}
+            {client.bin_iin && <span>БИН/ИИН {client.bin_iin}</span>}
+            {digits && <a href={`tel:+${digits}`}>{client.phone}</a>}
+          </div>
+          <ClientStatusBadges client={client} jobs={jobs} threshold={regularClientThreshold} />
+        </div>
+        <div className="crm-card-actions">
+          {digits && <a className="kd-btn ghost sm" href={`tel:+${digits}`}><Phone size={14} />Позвонить</a>}
+          {digits && <a className="kd-btn wa sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={14} />WhatsApp</a>}
+          {client.email && <a className="kd-btn ghost sm" href={`mailto:${client.email}`}><Mail size={14} />E-mail</a>}
+          {onCall && lastDoneJob && <button className="kd-btn primary sm" onClick={() => onCall(lastDoneJob)}><PhoneCall size={14} />Обзвон</button>}
+          {canEdit && <button className="kd-btn ghost sm" onClick={onEdit}><Pencil size={14} />Изменить</button>}
+          {canEdit && onBlock && <button className="kd-btn ghost sm" onClick={() => onBlock(client)}>{client.blocked ? "Блокировка" : "Чёрный список"}</button>}
+        </div>
+      </div>
+      <div className="crm-tabs">{tabs.map((item) => <button key={item.id} className={view === item.id ? "on" : ""} onClick={() => setView(item.id)}>{item.label}</button>)}</div>
+
+      {view === "card" && <div className="crm-columns">
+        <div className="crm-left">
+          <CrmSection title="Итоги">
+            <InfoList rows={[
+              ["Заявки", `${summary.jobs} · выполнено ${summary.done}`],
+              ["LTV", `${fmt(summary.revenue)} ₸`],
+              ["Договоры", `${linkedContracts.filter((c) => c.status === "active").length} активных`],
+              ["Ждут действия", summary.openFollowups ? `${summary.openFollowups}` : ""],
+            ]} />
+          </CrmSection>
+          <CrmSection title="Контакты">
+            <InfoList rows={[["Основной", digits ? <a href={`tel:+${digits}`}>{client.phone}</a> : ""], ["E-mail", client.email], ...linkedContacts.map((row) => [row.name || row.phone || row.email, [row.role, row.phone, row.email, row.note].filter(Boolean).join(" · ")])]} />
+          </CrmSection>
+          <CrmSection title="Адреса и объекты">
+            {linkedAddresses.length ? <InfoList rows={linkedAddresses.map((row, index) => [row.label || (row.fromHistory ? "Из заявок" : `Адрес ${index + 1}`), row.address])} /> : <span className="kd-muted">Адресов пока нет.</span>}
+          </CrmSection>
+          <CrmSection title="Договоры">
+            {linkedContracts.length ? linkedContracts.map((row) => <button className="kd-client-linkrow" key={row.id} onClick={() => onOpenLegalContract(row)}><span><strong>№ {row.number} · {row.organization}</strong><small>от {isoToRu(row.signed_on)} · {row.status === "closed" ? "Закрыт" : row.status === "draft" ? "Черновик" : "Действует"}</small></span><FolderOpen size={15} /></button>) : <span className="kd-muted">Договоров нет.</span>}
+          </CrmSection>
+          {linkedLeads.length > 0 && <CrmSection title="Сделки в воронке">
+            <InfoList rows={linkedLeads.map((row) => [row.name || row.phone, row.next_action ? `${row.next_action}${row.next_action_at ? ` · ${fmtTs(row.next_action_at)}` : ""}` : "без следующего шага"])} />
+          </CrmSection>}
+          {client.note && <CrmSection title="Заметка в карточке"><div style={{ whiteSpace: "pre-wrap" }}>{client.note}</div></CrmSection>}
+        </div>
+        <div className="crm-right">
+          {canEdit && <Composer kinds={["note"]} closed notePlaceholder="Итог звонка, договорённость, важный контекст…" onSubmit={addComment} />}
+          <Feed items={feed} empty="История клиента пока пустая." />
+        </div>
+      </div>}
+
+      {view === "jobs" && <div className="crm-pane"><div className="kd-client360-jobs">{rows.length ? rows.map((row) => <button key={row.id} className="kd-histrow" onClick={() => onOpenJob(row)}><div><div className="kd-histmain">{row.pest || row.type || "Заявка"}</div><div className="kd-muted">{isoToRu(row.scheduled_date) || "без даты"} · {addressPlain(row.address)}</div></div><div><strong>{row.status === "done" ? `${fmt(row.report_paid)} ₸` : row.status === "canceled" ? "Отменена" : "В работе"}</strong></div></button>) : <div className="kd-empty">Заявок пока нет.</div>}</div></div>}
+      {view === "calls" && <div className="crm-pane"><CallLog calls={clientCallRows} people={callPeople.length ? callPeople : people} jobs={rows} userId={userId} isAdmin={isAdmin} onDelete={onDeleteCall} showJob empty="Клиенту ещё не звонили после выездов." /></div>}
+      {view === "quality" && <div className="crm-pane"><QualityHistory checks={qualityHistoryForPhone(client.phone, jobs, qualityChecks)} jobs={jobs} people={people} /></div>}
+      {view === "files" && <div className="crm-pane"><div className="kd-client-filebar"><div><strong>Фото, видео и документы</strong><span>До 25 МБ: JPG, PNG, WebP, MP4, MOV или PDF</span></div>{canEdit && <label className="kd-btn primary sm"><Paperclip size={14}/>Прикрепить<input type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,application/pdf" hidden onChange={(e) => { const file=e.target.files?.[0]; if(file) onUpload(client,file); e.target.value=""; }}/></label>}</div>{linkedAttachments.map((row) => <button className="kd-client-file" key={row.id} onClick={() => onOpenAttachment(row)}>{String(row.mime_type).startsWith("image/") ? <Camera size={18}/> : <FileText size={18}/>}<span><strong>{row.name}</strong><small>{row.size_bytes ? `${Math.ceil(row.size_bytes/1024)} КБ` : "Файл клиента"} · {fmtTs(row.created_at)}</small></span><FolderOpen size={15}/></button>)}{proofRows.map((proof) => { const job=rows.find((row)=>String(row.id)===String(proof.job_id)); return <button className="kd-client-file" key={`proof-${proof.id}`} onClick={()=>onOpenProof(job)}><Camera size={18}/><span><strong>Фотоотчёт по заявке</strong><small>{isoToRu(job?.scheduled_date)} · {(proof.before_paths?.length||0)+(proof.after_paths?.length||0)} фото</small></span><FolderOpen size={15}/></button>;})}{linkedAttachments.length + proofRows.length === 0 && <div className="kd-empty">Файлов пока нет.</div>}</div>}
+    </div>
+  </DetailDrawer>;
 }

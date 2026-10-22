@@ -19,19 +19,35 @@ describe("client card UI", () => {
       addresses={[]} legalContracts={[{ id: "contract-1", client_id: "client-1", number: "Д-41", organization: "Дезинсекция", signed_on: "2026-09-01", status: "active" }]}
       attachments={[]} jobProofs={[]} onClose={vi.fn()} onEdit={vi.fn()} onAddNote={vi.fn()} onUpload={vi.fn()}
       onOpenAttachment={vi.fn()} onOpenJob={vi.fn()} onOpenLegalContract={vi.fn()} onOpenContract={vi.fn()} onOpenProof={vi.fn()} />));
-    expect(container.textContent).toContain("Клиент 360° · ТОО Посиделки");
-    expect(container.textContent).toContain("Айжан");
-    expect(container.textContent).toContain("Макатаева 127");
-    expect(container.textContent).toContain("Дезинсекция");
-    expect(container.textContent).toContain("Заявки · 1");
-    expect(container.textContent).toContain("Файлы · 0");
+    expect(document.body.textContent).toContain("ТОО Посиделки");
+    // Лента карточки: выполненная заявка видна сразу, без перехода по вкладкам.
+    expect(document.body.textContent).toContain("Заявка: Тараканы");
+    expect(document.body.textContent).toContain("Айжан");
+    expect(document.body.textContent).toContain("Макатаева 127");
+    expect(document.body.textContent).toContain("Дезинсекция");
+    expect(document.body.textContent).toContain("Заявки · 1");
+    expect(document.body.textContent).toContain("Файлы · 0");
+  });
+
+  it("добавляет комментарий прямо из карточки и объясняет пустой", async () => {
+    const onAddNote = vi.fn().mockResolvedValue(true);
+    await act(async () => root.render(<ClientDetailsModal client={client} jobs={[]} contacts={[]} addresses={[]} legalContracts={[]} attachments={[]} jobProofs={[]} canEdit
+      onClose={vi.fn()} onEdit={vi.fn()} onAddNote={onAddNote} onUpload={vi.fn()} onOpenAttachment={vi.fn()} onOpenJob={vi.fn()} onOpenLegalContract={vi.fn()} onOpenContract={vi.fn()} onOpenProof={vi.fn()} />));
+    const add = [...document.body.querySelectorAll("button")].find((b) => b.textContent === "Добавить комментарий");
+    await act(async () => add.click());
+    expect(document.body.textContent).toContain("Напиши комментарий.");
+    expect(onAddNote).not.toHaveBeenCalled();
+    const text = document.body.querySelector(".crm-composer-text");
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(text, "Просил КП на почту"); text.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => add.click());
+    expect(onAddNote).toHaveBeenCalledWith(client, "Просил КП на почту");
   });
 
   it("provides structured company, contact and address editing", async () => {
     await act(async () => root.render(<ClientProfileModal client={client} contacts={[]} addresses={[]} onClose={vi.fn()} onSave={vi.fn()} />));
-    expect(container.textContent).toContain("Юридическое наименование");
-    expect(container.textContent).toContain("БИН / ИИН");
-    expect(container.textContent).toContain("Контактные лица");
-    expect(container.textContent).toContain("Адреса клиента");
+    expect(document.body.textContent).toContain("Юридическое наименование");
+    expect(document.body.textContent).toContain("БИН / ИИН");
+    expect(document.body.textContent).toContain("Контактные лица");
+    expect(document.body.textContent).toContain("Адреса клиента");
   });
 });

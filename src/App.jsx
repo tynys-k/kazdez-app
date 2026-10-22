@@ -1,6 +1,6 @@
 // KAZDEZ-USABILITY-YANDEX-2026-07-18
 // Этап 3: единое окно, SLA, клиент 360, жизненный цикл и публичная страница заявки.
-import React, { useState, useEffect, useRef } from "react";
+import React, { useCallback, useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import SessionGate from "./SessionGate";
 import { attachReportChemicals, createSourceLoader, fetchAllRows as fetchRows, mergeLoadWarnings } from "./dataLoading";
@@ -23,7 +23,7 @@ import { yandexRouteUrl } from "./routePlanning";
 import { AnalyticsTab } from "./analytics";
 import { canonicalPestName, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceKey, canonicalSourceName, canonicalSourceOptions, sourceNamesMatch } from "./sourceNormalization";
-import { groupLeadActivities, leadActivitySummary } from "./leadActivities";
+import { groupLeadActivities } from "./leadActivities";
 import { clientTypeLookup, contractDraftFromJob, contractHistorySummary, subscriptionCandidates, subscriptionIntervalLabel, subscriptionLookup } from "./subscriptionHistory";
 import { clientAddresses as collectClientAddresses, clientSummary, searchClients } from "./clientDirectory";
 import { ClientDetailsModal, ClientProfileModal } from "./clientModals";
@@ -55,8 +55,8 @@ import { CallQueue, JobCallPanel } from "./workflows/ClientCalls";
 import { RepeatPendingList, RepeatTriageBar } from "./workflows/RepeatTriage";
 import { buildRepeatTriage } from "./workflows/repeatTriageModel";
 import CallModal from "./workflows/CallModal";
-import { HUNTER_FUNNEL_MIGRATION, HUNTER_ROLE_MIGRATION, lostReasonLabel, nextStageHint } from "./workflows/hunterFunnelModel";
-import { ClientHistoryNote, DealSummary } from "./workflows/HunterDeal";
+import { HUNTER_FUNNEL_MIGRATION, HUNTER_ROLE_MIGRATION, LEAD_CLIENT_TIMELINE_MIGRATION, nextStageHint } from "./workflows/hunterFunnelModel";
+import LeadCard from "./workflows/LeadCard";
 import { canonicalPestOptions } from "./pestNormalization";
 import { JOB_DEBT_MIGRATION, debtJobs, jobDebtState } from "./workflows/jobDebtModel";
 import { CALL_OUTCOMES, CLIENT_CALLS_MIGRATION, buildCallQueue, buildLaterJobIndex, callStageOf, callStateOf, callsForJob, liveCalls, outcomeLabel } from "./workflows/clientCallsModel";
@@ -2297,6 +2297,13 @@ function Dashboard({ session, profile }) {
     await logAction("CRM", `Лид «${lead.name || lead.phone || "?"}» → ${stName}`);
     setModal(null); showToast("Стадия и следующий шаг сохранены"); load(["leads", "lead_activities"]); return null;
   }
+  // Прошлые заявки и звонки обзвона по номеру лида — для ленты карточки.
+  // Стабильная ссылка: карточка перезапрашивает ленту только при смене лида.
+  const loadLeadTimeline = useCallback(async (leadId) => {
+    const { data, error } = await supabase.rpc("lead_client_timeline", { p_lead_id: leadId });
+    if (error) return { rows: [], error: atomicReceiptRpcUnavailable(error, "lead_client_timeline") ? `выполни supabase/${LEAD_CLIENT_TIMELINE_MIGRATION}` : error.message };
+    return { rows: data || [] };
+  }, []);
   async function createLeadCompany(lead, payload) {
     const { data, error } = await supabase.rpc("create_lead_company", {
       p_lead_id: lead.id, p_legal_name: payload.legal_name, p_bin: payload.bin, p_phone: payload.phone,
@@ -4571,74 +4578,26 @@ function Dashboard({ session, profile }) {
                     {stageLeads.length === 0 && <div className="kd-muted" style={{ padding: "2px 2px 8px" }}>Пусто</div>}
                     {visibleStageLeads.map((l) => {
                       const timeline = leadTimeline(l.id);
-                      const latest = leadActivitySummary(timeline[0]);
-                      const lastContact = timeline.find((event) => ["call", "whatsapp", "message", "meeting"].includes(event.kind));
-                      const digits = String(l.phone || "").replace(/\D/g, "");
                       const nextAction = calc.leadNextActionState(l);
                       return <React.Fragment key={l.id}>
                         <ListRow title={l.name || formatPhone(l.phone)} meta={addressPlain(l.address) || l.source || "Адрес не указан"}
                           status={<Badge tone={nextAction.kind === "overdue" ? "danger" : nextAction.kind === "today" ? "warning" : st.is_final ? "neutral" : "positive"}>{st.name}</Badge>}
                           aside={<><span>{formatPhone(l.phone)}</span><small>{l.next_action_at ? fmtTs(l.next_action_at) : "Следующий шаг не задан"}</small></>}
                           onClick={() => setSelectedLeadId(l.id)} />
-                        <DetailDrawer open={selectedLeadId === l.id} title={l.name || formatPhone(l.phone)} onClose={() => setSelectedLeadId(null)}>
-                        <div className="kd-card kd-leadcard">
-                        <div className="kd-card-head">
-                          <div className="kd-pest">{l.name || l.phone || "Без имени"}</div>
-                          {(() => {
-                            const h = calc.leadWaitingHours(l);
-                            if (h === null) return null;
-                            const late = String(l.stage_id) === String(leadStages[0]?.id) ? h >= leadSla.reactionHours : h >= leadSla.staleDays * 24;
-                            return <span className={late ? "kd-flag warn" : "kd-muted"} style={{ fontSize: 11, marginLeft: 8 }}>{h < 24 ? `ждёт ${h} ч` : `ждёт ${Math.floor(h / 24)} дн.`}</span>;
-                          })()}
-                          <span className="kd-badge" style={{ color: l.client_type === "company" ? "#2557B0" : "#6E3FCF", background: l.client_type === "company" ? "#E9F0FC" : "#F0EAFC" }}>{l.client_type === "company" ? "Юрлицо" : "Физлицо"}</span>
-                        </div>
-                        <div className="kd-meta">
-                          {l.source && <span>{l.source}</span>}
-                          {l.phone && <a href={`tel:${(l.phone || "").replace(/\s/g, "")}`} style={{ color: "var(--primary-d)", fontWeight: 700 }}>{l.phone}</a>}
-                        </div>
-                        {l.address && <div className="kd-addr" style={{ marginTop: 2 }}><AddressText text={l.address} /></div>}
-                        {!st.is_final && !st.is_lost && (() => {
-                          const action = calc.leadNextActionState(l);
-                          const labels = { overdue: "Просрочено", today: "Сегодня", planned: "Запланировано", missing: "Нет следующего шага" };
-                          return <div className={`kd-leadnext ${action.kind}`}>
-                            <CalendarClock size={15} />
-                            <span><strong>{l.next_action || labels.missing}</strong><small>{l.next_action_at ? `${labels[action.kind]} · ${fmtTs(l.next_action_at)}` : "Назначь действие и срок"}{l.owner_id ? ` · ${profileById(l.owner_id)?.full_name || "ответственный"}` : " · ответственный не указан"}</small></span>
-                          </div>;
-                        })()}
-                        <ClientHistoryNote history={leadClientHistory.find((h) => String(h.lead_id) === String(l.id))} />
-                        <DealSummary lead={l} hint={l.client_type === "company" ? nextStageHint(l, st.code, leadFunnelCtx(l)) : null} />
-                        {st.is_lost && <div className="kd-notebox">Причина отказа: {lostReasonLabel(l.lost_reason) || "не указана"}</div>}
-                        {(() => {
-                          const lastAt = lastContact?.occurred_at || lastContact?.created_at || l.created_at;
-                          const d = daysSince(lastAt);
-                          const stale = d >= 7;
-                          return (
-                            <div className="kd-touch" style={stale ? { color: "#B3261E" } : {}}>
-                              <Calendar size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-                              {lastContact ? `Последний контакт: ${fmtTs(lastAt)}` : "Контактов ещё не было"}
-                              <span style={{ marginLeft: 6, fontWeight: 700 }}>· {d === 0 ? "сегодня" : d === 1 ? "вчера" : `${d} дн. назад`}</span>
-                              {stale && <span style={{ marginLeft: 6 }}>⚠ давно без контакта</span>}
-                            </div>
-                          );
-                        })()}
-                        {latest && <button className="kd-crm-latest" onClick={() => setModal({ kind: "leadHistory", lead: l })}>
-                          <span><strong>{latest.title}</strong><small>{latest.comment || "Без комментария"}</small></span><ArrowRight size={14} />
-                        </button>}
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 2px" }}>
-                          {l.kp_url && <a className="kd-btn ghost sm" href={l.kp_url} target="_blank" rel="noopener noreferrer"><FileText size={13} />КП клиента</a>}
-                        </div>
-                        {l.note && <div className="kd-notebox">Важная заметка: {l.note}</div>}
-                        <div className="kd-actions">
-                          {!st.is_final && !st.is_lost && <button className="kd-btn primary sm" onClick={() => setModal({ kind: "leadActivity", lead: l })}><MessageCircle size={13} />Записать контакт</button>}
-                          {digits && <a className="kd-btn ghost sm" href={`tel:+${digits}`}><Phone size={13} />Позвонить</a>}
-                          {digits && <a className="kd-btn wa sm" href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer"><MessageCircle size={13} />WhatsApp</a>}
-                          <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadHistory", lead: l })}><History size={13} />История · {timeline.length}</button>
-                          <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "leadStageSelect", lead: l })}>Сменить стадию</button>
-                          {!l.converted_job_id && <button className="kd-btn ghost sm" onClick={() => askConfirm(`Создать заявку из клиента «${l.name || l.phone || "?"}»? Перенесём телефон, адрес и источник${l.client_type === "company" ? ", сделка встанет на «Первую обработку»" : ""}.`, () => convertLeadToJob(l), { danger: false, confirmLabel: "Да, создать" })}><Plus size={13} />Заявка</button>}
-                          <button className="kd-btn ghost sm" onClick={() => setModal({ kind: "lead", lead: l })}><Pencil size={13} /></button>
-                          {!isHunter && <button className="kd-btn ghost danger sm" onClick={() => askConfirm(`Удалить клиента «${l.name || l.phone || "?"}» из воронки?`, () => removeLead(l))}><Trash2 size={13} /></button>}
-                        </div>
-                      </div>
+                        <DetailDrawer open={selectedLeadId === l.id} size="wide" title={l.name || formatPhone(l.phone)} onClose={() => setSelectedLeadId(null)}>
+                          <LeadCard lead={l} stages={leadStages} activities={timeline}
+                            proposals={proposals.filter((p) => String(p.lead_id) === String(l.id))}
+                            clientHistory={leadClientHistory.find((h) => String(h.lead_id) === String(l.id))}
+                            nextHint={l.client_type === "company" ? nextStageHint(l, st.code, leadFunnelCtx(l)) : null}
+                            actionState={calc.leadNextActionState(l)}
+                            waitingLabel={(() => { const h = calc.leadWaitingHours(l); return h === null ? "" : h < 24 ? `ждёт ${h} ч` : `ждёт ${Math.floor(h / 24)} дн.`; })()}
+                            profileName={(id) => profileById(id)?.full_name || ""}
+                            loadTimeline={loadLeadTimeline}
+                            onPickStage={(stage) => setModal({ kind: "leadStageSelect", lead: l, initialStageId: stage.id })}
+                            onRecord={(payload) => recordLeadActivity(l, payload)}
+                            onEdit={() => setModal({ kind: "lead", lead: l })}
+                            onConvert={() => askConfirm(`Создать заявку из клиента «${l.name || l.phone || "?"}»? Перенесём телефон, адрес и источник${l.client_type === "company" ? ", сделка встанет на «Первую обработку»" : ""}.`, () => convertLeadToJob(l), { danger: false, confirmLabel: "Да, создать" })}
+                            onDelete={isHunter ? null : () => askConfirm(`Удалить клиента «${l.name || l.phone || "?"}» из воронки?`, () => removeLead(l))} />
                         </DetailDrawer>
                       </React.Fragment>;
                     })}

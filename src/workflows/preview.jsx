@@ -31,6 +31,9 @@ import { RepeatPendingList, RepeatTriageBar } from "./RepeatTriage";
 import { buildRepeatTriage } from "./repeatTriageModel";
 import { DateFilterBar } from "../shared";
 import Pulse from "./Pulse";
+import LeadCard from "./LeadCard";
+import { DetailDrawer } from "../ui/primitives";
+import { ClientDetailsModal } from "../clientModals";
 import { b2bFunnel, cashRunway, decisionQueue, monthProgress, planFact } from "./pulseModel";
 const people = [{ id: "demo-admin", full_name: "Администратор" }, { id: "demo-worker", full_name: "Аян" }, { id: "demo-observer", full_name: "Менеджер" }];
 const initialTasks = [
@@ -166,8 +169,16 @@ const previewDeal = { id: "deal-1", name: "Кафе «Дастархан»", cli
 function DealPreview() {
   const [open, setOpen] = useState("");
   return <section className="kd-card"><h2>{previewDeal.name}</h2><DealSummary lead={previewDeal} hint={nextStageHint(previewDeal, "lpr_found")} />
-    <div className="kd-actions"><button className="kd-btn ghost" onClick={() => setOpen("card")}>Карточка сделки</button><button className="kd-btn ghost" onClick={() => setOpen("stage")}>Сменить стадию</button></div>
+    <div className="kd-actions"><button className="kd-btn primary" onClick={() => setOpen("bitrix")}>Открыть карточку</button><button className="kd-btn ghost" onClick={() => setOpen("client")}>Карточка клиента</button><button className="kd-btn ghost" onClick={() => setOpen("card")}>Карточка сделки</button><button className="kd-btn ghost" onClick={() => setOpen("stage")}>Сменить стадию</button></div>
     {open === "card" && <LeadModal lead={previewDeal} clientHistory={{ lead_id: previewDeal.id, client_name: "Айдос", client_type: "person", jobs_count: 2, last_date: "2026-06-02", last_pest: "Мыши", last_address: "Алматы, Абая 10" }} stages={dealStages} sources={[]} owners={people} defaultOwnerId={people[0].id} pestOptions={previewPests.map((p) => p.name)} companies={previewClients} onCreateCompany={async () => ({ id: "demo-cl-1" })} onClose={() => setOpen("")} onSave={noop} />}
+    {open === "bitrix" && <DetailDrawer open size="wide" title={previewDeal.name} onClose={() => setOpen("")}><LeadCard lead={previewDeal} stages={dealStages} profileName={() => "Сейлжан"}
+      actionState={{ kind: "overdue" }} clientHistory={{ lead_id: previewDeal.id, client_name: "Два Японца", client_type: "company", jobs_count: 1, last_date: "2026-08-18", last_pest: "Насекомые" }}
+      activities={[{ id: "a1", kind: "system", outcome: "created", comment: "Карточка лида создана · стадия «ЛПР найден»", occurred_at: isoAgo(0) + "T14:19:00", created_by: people[0].id }, { id: "a2", kind: "call", outcome: "no_answer", comment: "", occurred_at: isoAgo(0) + "T18:05:00", created_by: people[0].id }, { id: "a3", kind: "note", outcome: "note", comment: "Админ занят, надо перезвонить", occurred_at: isoAgo(0) + "T18:06:00", created_by: people[0].id }]}
+      loadTimeline={async () => ({ rows: [{ kind: "job", ref_id: "j1", happened_at: "2026-08-18", status: "done", title: "Насекомые", details: "с. Байкент, Гагарина 1г", amount: 25000 }, { kind: "call", ref_id: "c1", happened_at: "2026-08-25T12:00:00", status: "all_good", title: "after_primary", details: "Довольны, звонить через месяц", rating: 5 }] })}
+      onPickStage={() => setOpen("stage")} onRecord={async () => null} onEdit={() => setOpen("card")} onConvert={noop} /></DetailDrawer>}
+    {open === "client" && <ClientDetailsModal client={previewClients[0]} jobs={[{ id: "cj1", client_id: "demo-cl-1", status: "done", pest: "Крысы", address: "Склад, Райымбека", scheduled_date: isoAgo(20), report_paid: 105000 }]} contacts={previewContacts} addresses={[]} legalContracts={[]} attachments={[]} jobProofs={[]} people={people} canEdit
+      events={[{ id: "e1", client_id: "demo-cl-1", event_type: "note", title: "Внутренняя заметка", details: "Директор просит акт на почту", created_at: isoAgo(1) + "T11:00:00", created_by: people[0].id }]}
+      onClose={() => setOpen("")} onEdit={noop} onAddNote={async () => true} onUpload={noop} onOpenAttachment={noop} onOpenJob={noop} onOpenLegalContract={noop} onOpenContract={noop} onOpenProof={noop} />}
     {open === "stage" && <LeadStageSelectModal lead={previewDeal} stages={dealStages} initialStageId="st-kp_sent" onEditDeal={() => setOpen("card")} onClose={() => setOpen("")} onPick={noop} />}
   </section>;
 }
