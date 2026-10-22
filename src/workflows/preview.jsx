@@ -167,7 +167,7 @@ function DealPreview() {
   const [open, setOpen] = useState("");
   return <section className="kd-card"><h2>{previewDeal.name}</h2><DealSummary lead={previewDeal} hint={nextStageHint(previewDeal, "lpr_found")} />
     <div className="kd-actions"><button className="kd-btn ghost" onClick={() => setOpen("card")}>Карточка сделки</button><button className="kd-btn ghost" onClick={() => setOpen("stage")}>Сменить стадию</button></div>
-    {open === "card" && <LeadModal lead={previewDeal} stages={dealStages} sources={[]} owners={people} defaultOwnerId={people[0].id} pestOptions={previewPests.map((p) => p.name)} companies={previewClients} onCreateCompany={async () => ({ id: "demo-cl-1" })} onClose={() => setOpen("")} onSave={noop} />}
+    {open === "card" && <LeadModal lead={previewDeal} clientHistory={{ lead_id: previewDeal.id, client_name: "Айдос", client_type: "person", jobs_count: 2, last_date: "2026-06-02", last_pest: "Мыши", last_address: "Алматы, Абая 10" }} stages={dealStages} sources={[]} owners={people} defaultOwnerId={people[0].id} pestOptions={previewPests.map((p) => p.name)} companies={previewClients} onCreateCompany={async () => ({ id: "demo-cl-1" })} onClose={() => setOpen("")} onSave={noop} />}
     {open === "stage" && <LeadStageSelectModal lead={previewDeal} stages={dealStages} initialStageId="st-kp_sent" onEditDeal={() => setOpen("card")} onClose={() => setOpen("")} onPick={noop} />}
   </section>;
 }

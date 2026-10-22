@@ -163,6 +163,21 @@ export function MissingHint({ stageName, missing }) {
   return <div className="kd-err" style={{ marginTop: 10 }}>Чтобы перевести на «{stageName}», заполни: {missingText(missing)}.</div>;
 }
 
+const ruDate = (iso) => (iso ? String(iso).slice(0, 10).split("-").reverse().join(".") : "");
+
+// «Этот номер уже обслуживали»: сводка прошлых заявок по телефонам лида.
+// Хантер не видит заявки и справочник клиентов — сводку собирает база.
+export function ClientHistoryNote({ history }) {
+  if (!history || (!history.jobs_count && !history.client_name)) return null;
+  const who = history.client_name ? `${history.client_type === "company" ? "юрлицо" : "физлицо"} «${history.client_name}»` : "";
+  const jobs = history.jobs_count ? `${history.jobs_count} заявк${history.jobs_count === 1 ? "а" : history.jobs_count < 5 ? "и" : ""}` : "заявок не было";
+  const last = history.last_date ? `последняя ${ruDate(history.last_date)}${history.last_pest ? ` · ${history.last_pest}` : ""}` : "";
+  return <div className="kd-notebox" style={{ marginBottom: 12 }}>
+    <strong>Уже наш клиент</strong>{who ? ` — ${who}` : ""}: {[jobs, last].filter(Boolean).join(", ")}.
+    {history.last_address && <div className="kd-muted" style={{ marginTop: 2 }}>{history.last_address}</div>}
+  </div>;
+}
+
 // Короткая сводка сделки для карточки в списке.
 export function DealSummary({ lead, hint }) {
   const facts = [

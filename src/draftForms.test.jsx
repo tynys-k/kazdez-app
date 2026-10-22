@@ -177,6 +177,25 @@ describe("lead work queue forms", () => {
     expect(onPick).toHaveBeenCalledWith("lost", { next_action: null, next_action_at: null, lost_reason: "competitor" });
   });
 
+  it("сохраняет правку карточки с просроченным шагом и объясняет, почему сохранить нельзя", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    const past = new Date(Date.now() - 3 * 3600000).toISOString();
+    const lead = { id: "lead", name: "Два Японца", client_type: "company", stage_id: "lpr", phone: "+7 747 108 8385", next_action: "Позвонить клиенту", next_action_at: past };
+    const history = { lead_id: "lead", client_name: "Айдос", client_type: "person", jobs_count: 2, last_date: "2026-06-02", last_pest: "Мыши" };
+    await act(async () => root.render(<LeadModal lead={lead} clientHistory={history} stages={stages} sources={[]} owners={[{ id: "manager", full_name: "Менеджер" }]} defaultOwnerId="manager" onSave={onSave} onClose={vi.fn()} />));
+    expect(container.textContent).toContain("Уже наш клиент — физлицо «Айдос»: 2 заявки, последняя 02.06.2026 · Мыши.");
+    expect(container.textContent).toContain("Следующий шаг просрочен");
+    await change(field("Постоянная заметка в карточке"), "админ занят, надо перезвонить");
+    expect(button("Сохранить").disabled).toBe(false);
+    await change(field("Следующий шаг"), "Перезвонить админу");
+    expect(button("Сохранить").disabled).toBe(true);
+    expect(container.textContent).toContain("Срок следующего шага уже прошёл — поставь время позже.");
+    const later = new Date(Date.now() + 86400000);
+    await change(field("Когда сделать"), new Date(later.getTime() - later.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+    await click("Сохранить");
+    expect(onSave.mock.calls[0][0]).toMatchObject({ next_action: "Перезвонить админу", note: "админ занят, надо перезвонить" });
+  });
+
   it("не пускает сделку юрлица вперёд, пока не заполнены поля стадии", async () => {
     const onEditDeal = vi.fn();
     await act(async () => root.render(<LeadStageSelectModal lead={{ id: "lead", name: "Кафе", client_type: "company", stage_id: "new" }} stages={stages} initialStageId="lpr" onPick={vi.fn()} onEditDeal={onEditDeal} onClose={vi.fn()} />));

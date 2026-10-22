@@ -12,7 +12,7 @@ import { VISIT_KINDS, CONTROL_POINT_KINDS, CHECK_RESULTS, TREATMENT_METHODS, MET
 import { canonicalPestName, canonicalPestOptions, pestNamesMatch } from "./pestNormalization";
 import { canonicalSourceName, canonicalSourceOptions } from "./sourceNormalization";
 import { LEAD_ACTIVITY_KINDS, LEAD_ACTIVITY_OUTCOMES, leadActivityKindLabel, leadActivityOutcomeLabel } from "./leadActivities";
-import { DealFields, ExitFields, MissingHint, dealFormFrom, dealPayload } from "./workflows/HunterDeal";
+import { ClientHistoryNote, DealFields, ExitFields, MissingHint, dealFormFrom, dealPayload } from "./workflows/HunterDeal";
 import { stageTransition } from "./workflows/hunterFunnelModel";
 import { contractHistorySummary, contractVisitState, subscriptionIntervalLabel } from "./subscriptionHistory";
 import { PeoplePicker } from "./workflows/TaskWorkspace";
@@ -3789,7 +3789,7 @@ function localDateTimeIso(value) {
   return date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
-function LeadModal({ lead, stages, sources, owners = [], keepers, defaultOwnerId, pestOptions = [], companies = [], funnelCtx = {}, onCreateCompany, onClose, onSave }) {
+function LeadModal({ lead, clientHistory, stages, sources, owners = [], keepers, defaultOwnerId, pestOptions = [], companies = [], funnelCtx = {}, onCreateCompany, onClose, onSave }) {
   const [name, setName] = useState(lead?.name || "");
   const [clientType, setClientType] = useState(lead?.client_type || "person");
   const [phone, setPhone] = useState(lead?.phone || "+7 ");
@@ -3800,6 +3800,7 @@ function LeadModal({ lead, stages, sources, owners = [], keepers, defaultOwnerId
   const [note, setNote] = useState(lead?.note || "");
   const [nextAction, setNextAction] = useState(lead?.next_action || "Позвонить клиенту");
   const [nextActionAt, setNextActionAt] = useState(localDateTimeInput(lead?.next_action_at, 1));
+  const [initialActionAt] = useState(() => localDateTimeInput(lead?.next_action_at, 1));
   const [lostReason, setLostReason] = useState(lead?.lost_reason || "");
   const [ownerId, setOwnerId] = useState(lead?.owner_id || defaultOwnerId || owners[0]?.id || "");
   const [deal, setDeal] = useState(() => dealFormFrom(lead));
@@ -3813,9 +3814,19 @@ function LeadModal({ lead, stages, sources, owners = [], keepers, defaultOwnerId
   const isClosed = !!selectedStage?.is_final;
   const actionDate = nextActionAt ? new Date(nextActionAt) : null;
   const futureAction = actionDate && Number.isFinite(actionDate.getTime()) && actionDate.getTime() > Date.now();
+  // Правка данных карточки не заставляет переносить старый шаг: будущий срок
+  // нужен, только когда план или стадию меняют (или это новый клиент).
+  const planUntouched = !!lead && nextActionAt === initialActionAt && nextAction === (lead.next_action || "Позвонить клиенту") && String(stageId) === String(lead.stage_id || "");
   const transition = stageTransition({ ...deal, client_type: clientType, address, kp_url: kpUrl, lost_reason: lostReason }, fromCode, stageCode, funnelCtx);
-  const ok = !!(name.trim() || (phone.trim() && phone.trim() !== "+7")) && transition.ok
-    && (isLost ? !!lostReason.trim() : isClosed || isSnoozed ? true : !!nextAction.trim() && !!futureAction);
+  const needsPlan = !isLost && !isClosed && !isSnoozed;
+  const blockers = [
+    !(name.trim() || (phone.trim() && phone.trim() !== "+7")) && "Укажи название или телефон.",
+    isLost && !lostReason.trim() && "Выбери причину отказа.",
+    needsPlan && !nextAction.trim() && "Напиши следующий шаг.",
+    needsPlan && nextAction.trim() && !futureAction && !planUntouched && "Срок следующего шага уже прошёл — поставь время позже.",
+  ].filter(Boolean);
+  const ok = blockers.length === 0 && transition.ok;
+  const overdueKept = needsPlan && planUntouched && !futureAction;
   async function save() {
     setSaving(true);
     // «Отложено»: срок возврата ставит сервер из даты возврата.
@@ -3842,6 +3853,7 @@ function LeadModal({ lead, stages, sources, owners = [], keepers, defaultOwnerId
         <button className={`kd-segbtn ${clientType === "person" ? "on" : ""}`} onClick={() => setClientType("person")}>Физлицо</button>
         <button className={`kd-segbtn ${clientType === "company" ? "on" : ""}`} onClick={() => setClientType("company")}>Юрлицо</button>
       </div>
+      <ClientHistoryNote history={clientHistory} />
       <Field label={clientType === "company" ? "Вывеска / название объекта" : "Имя клиента"}><input value={name} onChange={(e) => setName(e.target.value)} placeholder={clientType === "company" ? "Кафе «Дастархан»" : "Иван"} /></Field>
       <div className="kd-grid2">
         <Field label="Телефон"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 ..." /></Field>
@@ -3866,6 +3878,8 @@ function LeadModal({ lead, stages, sources, owners = [], keepers, defaultOwnerId
       )}
       <Field label="Ссылка на файл КП (Google Диск)"><input value={kpUrl} onChange={(e) => setKpUrl(e.target.value)} placeholder="https://drive.google.com/... (файл этого клиента)" /></Field>
       <Field label="Постоянная заметка в карточке"><textarea className="kd-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Важная информация, которая всегда должна быть на виду" /></Field>
+      {overdueKept && <div className="kd-hint" style={{ marginTop: 10 }}>Следующий шаг просрочен. Сохранить можно, но лучше сразу перенести срок.</div>}
+      {blockers.length > 0 && <div className="kd-err" style={{ marginTop: 10 }}>{blockers.join(" ")}</div>}
       <MissingHint stageName={selectedStage?.name} missing={transition.missing} />
     </ModalShell>
   );
