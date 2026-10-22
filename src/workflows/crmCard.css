@@ -1,0 +1,73 @@
+/* Карточка CRM в духе Bitrix: шапка, воронка, две колонки (данные | лента). */
+/* Ряды с горизонтальной прокруткой в сетке сжимаются до нуля — держим высоту явно. */
+.crm-card{display:grid;grid-template-columns:minmax(0,1fr);align-content:start}
+.crm-tabs{min-height:41px}
+.crm-stages{min-height:34px}
+.crm-card-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 20px 12px;background:var(--surface);border-bottom:1px solid var(--line)}
+.crm-card-title{display:grid;gap:4px;min-width:0}
+.crm-card-title h2{margin:0;font-size:22px;line-height:1.2;color:var(--ink)}
+.crm-card-title .crm-sub{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:13px;color:var(--ink-soft)}
+.crm-card-actions{display:flex;flex-wrap:wrap;gap:8px}
+
+.crm-stagebar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:10px 20px;background:var(--surface);border-bottom:1px solid var(--line)}
+.crm-stages{display:flex;flex:1 1 520px;min-width:0;overflow-x:auto;scrollbar-width:thin}
+.crm-stage{flex:1 1 0;min-width:72px;overflow:hidden;text-overflow:ellipsis;padding:8px 12px 8px 18px;border:0;background:var(--surface-sunk);color:var(--ink-soft);font:inherit;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%,10px 50%);margin-right:-6px}
+.crm-stage:first-child{clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%);border-radius:8px 0 0 8px;padding-left:14px}
+.crm-stage:last-child{margin-right:0}
+.crm-stage.done{background:var(--primary-tint);color:var(--primary-d)}
+.crm-stage.on{background:var(--primary);color:#fff}
+.crm-stage:hover:not(.on){filter:brightness(.97)}
+.crm-exits{display:flex;gap:6px}
+.crm-exits .on{border-color:var(--danger);color:var(--danger)}
+
+.crm-columns{display:grid;grid-template-columns:minmax(280px,380px) minmax(0,1fr);gap:16px;padding:16px 20px;align-items:start}
+.crm-left,.crm-right{display:grid;gap:12px;min-width:0}
+.crm-section{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+.crm-section>header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.crm-section h3{margin:0;font-size:13px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
+.crm-info{display:grid;grid-template-columns:minmax(96px,40%) 1fr;gap:6px 10px;margin:0;font-size:13px}
+.crm-info dt{color:var(--muted)}
+.crm-info dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
+
+.crm-composer{display:grid;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}
+.crm-composer-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:8px}
+.crm-composer-tabs button{border:0;background:transparent;padding:6px 10px;border-radius:8px;font:inherit;font-size:13px;font-weight:700;color:var(--ink-soft);cursor:pointer}
+.crm-composer-tabs button.on{background:var(--primary-tint);color:var(--primary-d)}
+.crm-composer-text,.crm-field input,.crm-field select{width:100%;box-sizing:border-box;font:inherit;font-size:14px;color:var(--ink);background:var(--surface-sunk);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.crm-composer-text{resize:vertical}
+.crm-field{display:grid;gap:4px;font-size:12px;color:var(--muted);font-weight:700}
+.crm-composer-next{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.crm-composer-foot{display:flex;justify-content:flex-end;align-items:center;gap:10px}
+.crm-composer-foot .kd-muted{font-size:12px;margin-right:auto}
+
+.crm-feed{display:grid;gap:10px}
+.crm-feed-filters{display:flex;flex-wrap:wrap;gap:6px}
+.crm-day{display:grid;gap:8px}
+.crm-day-label{display:flex;justify-content:center}
+.crm-day-label span{font-size:12px;font-weight:700;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.crm-event{display:grid;grid-template-columns:30px 1fr;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.crm-event-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--surface-sunk);color:var(--ink-soft)}
+.crm-event.touch .crm-event-icon{background:var(--primary-tint);color:var(--primary-d)}
+.crm-event.job .crm-event-icon{background:var(--blue-tint);color:var(--blue)}
+.crm-event.call .crm-event-icon{background:var(--amber-tint);color:var(--amber)}
+.crm-event.warning{border-left:3px solid var(--amber)}
+.crm-event.danger{border-left:3px solid var(--danger)}
+.crm-event.positive{border-left:3px solid var(--positive)}
+.crm-event.muted{opacity:.7}
+.crm-event-body{min-width:0}
+.crm-event-body header{display:flex;justify-content:space-between;gap:8px}
+.crm-event-body strong{font-size:13px;color:var(--ink)}
+.crm-event-body time{font-size:12px;color:var(--muted);white-space:nowrap}
+.crm-event-body p{margin:4px 0 0;font-size:14px;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+.crm-event-body small{display:block;margin-top:4px;font-size:12px;color:var(--muted)}
+
+.crm-tabs{display:flex;gap:4px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--line);overflow-x:auto}
+.crm-tabs button{border:0;border-bottom:2px solid transparent;background:transparent;padding:10px 12px;font:inherit;font-size:13px;font-weight:700;color:var(--ink-soft);cursor:pointer;white-space:nowrap}
+.crm-tabs button.on{border-bottom-color:var(--primary);color:var(--primary-d)}
+
+@media (max-width:860px){
+  .crm-columns{grid-template-columns:minmax(0,1fr);padding:12px}
+  .crm-card-head,.crm-stagebar{padding-left:12px;padding-right:12px}
+  .crm-composer-next{grid-template-columns:1fr}
+}
+.crm-pane{padding:16px 20px}

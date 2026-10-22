@@ -7,6 +7,7 @@ export const HUNTER_FUNNEL_MIGRATION = "2026-10-18_hunter_funnel.sql";
 export const HUNTER_ROLE_MIGRATION = "2026-10-22_hunter_role.sql";
 export const HUNTER_PROPOSALS_MIGRATION = "2026-10-22_hunter_proposals.sql";
 export const LEAD_CLIENT_HISTORY_MIGRATION = "2026-10-22_lead_client_history.sql";
+export const LEAD_CLIENT_TIMELINE_MIGRATION = "2026-10-23_lead_client_timeline.sql";
 
 // Линейная часть воронки в порядке прохождения.
 export const DEAL_STAGES = [
