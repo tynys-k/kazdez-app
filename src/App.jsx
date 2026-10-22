@@ -56,7 +56,7 @@ import { RepeatPendingList, RepeatTriageBar } from "./workflows/RepeatTriage";
 import { buildRepeatTriage } from "./workflows/repeatTriageModel";
 import CallModal from "./workflows/CallModal";
 import { HUNTER_FUNNEL_MIGRATION, HUNTER_ROLE_MIGRATION, lostReasonLabel, nextStageHint } from "./workflows/hunterFunnelModel";
-import { DealSummary } from "./workflows/HunterDeal";
+import { ClientHistoryNote, DealSummary } from "./workflows/HunterDeal";
 import { canonicalPestOptions } from "./pestNormalization";
 import { JOB_DEBT_MIGRATION, debtJobs, jobDebtState } from "./workflows/jobDebtModel";
 import { CALL_OUTCOMES, CLIENT_CALLS_MIGRATION, buildCallQueue, buildLaterJobIndex, callStageOf, callStateOf, callsForJob, liveCalls, outcomeLabel } from "./workflows/clientCallsModel";
@@ -350,6 +350,7 @@ function Dashboard({ session, profile }) {
   const [leads, setLeads] = useState([]);
   const [leadStages, setLeadStages] = useState([]);
   const [leadActivities, setLeadActivities] = useState([]);
+  const [leadClientHistory, setLeadClientHistory] = useState([]);
   const [leadStageFilter, setLeadStageFilter] = useState("all");
   const [leadQueueFilter, setLeadQueueFilter] = useState("all");
   const [leadSearch, setLeadSearch] = useState("");
@@ -673,8 +674,10 @@ function Dashboard({ session, profile }) {
     { key: "tender_services", label: "Работы по тендерам", run: () => supabase.from("tender_services").select("*").order("seq"), set: setTenderServices },
     { key: "guarantee_returns", label: "Возвраты", run: () => supabase.from("guarantee_returns").select("*").order("return_date", { ascending: false }), set: setGuaranteeReturns },
     { key: "leads", label: "Клиенты", run: () => supabase.from("leads").select("*").order("updated_at", { ascending: false }), set: setLeads },
+    { key: "lead_client_history", when: () => canAccess("tab.leads"), label: "Прошлые заявки клиентов", run: () => supabase.rpc("lead_client_history"), set: setLeadClientHistory },
     { key: "lead_stages", label: "Этапы CRM", run: () => supabase.from("lead_stages").select("*").order("sort"), set: setLeadStages },
-    { key: "lead_activities", when: () => canEditJobs, label: "История CRM", run: () => fetchAllRows("lead_activities", { column: "occurred_at", ascending: false }), set: setLeadActivities },
+    // Хантер не правит заявки, но свою историю касаний видеть должен (база отдаёт ему только свои сделки).
+    { key: "lead_activities", when: () => canEditJobs || canAccess("tab.leads"), label: "История CRM", run: () => fetchAllRows("lead_activities", { column: "occurred_at", ascending: false }), set: setLeadActivities },
     { key: "mkt_channels", label: "Рекламные каналы", run: () => supabase.from("mkt_channels").select("*").order("sort"), set: setMktChannels },
     { key: "mkt_topups", label: "Расходы рекламы", run: () => supabase.from("mkt_topups").select("*").order("topup_date", { ascending: false }), set: setMktTopups },
     { key: "ad_accounts", when: () => canAccess("tab.analytics"), label: "Рекламные аккаунты", run: () => supabase.from("ad_accounts").select("*").order("name"), set: setAdAccounts },
@@ -4602,6 +4605,7 @@ function Dashboard({ session, profile }) {
                             <span><strong>{l.next_action || labels.missing}</strong><small>{l.next_action_at ? `${labels[action.kind]} · ${fmtTs(l.next_action_at)}` : "Назначь действие и срок"}{l.owner_id ? ` · ${profileById(l.owner_id)?.full_name || "ответственный"}` : " · ответственный не указан"}</small></span>
                           </div>;
                         })()}
+                        <ClientHistoryNote history={leadClientHistory.find((h) => String(h.lead_id) === String(l.id))} />
                         <DealSummary lead={l} hint={l.client_type === "company" ? nextStageHint(l, st.code, leadFunnelCtx(l)) : null} />
                         {st.is_lost && <div className="kd-notebox">Причина отказа: {lostReasonLabel(l.lost_reason) || "не указана"}</div>}
                         {(() => {
@@ -6914,7 +6918,7 @@ function Dashboard({ session, profile }) {
       {modal?.kind === "cancelJob" && <CancelJobModal job={modal.job} onClose={() => setModal(null)} onSave={(reason) => cancelJob(modal.job, reason)} />}
       {modal?.kind === "task" && <TaskModal task={modal.task} people={assignableProfiles} onClose={() => setModal(null)} onSave={saveTask} />}
       {modal?.kind === "tender" && <TenderModal people={allProfiles} tender={modal.tender} partners={partners} onClose={() => setModal(null)} onSave={saveTender} />}
-      {modal?.kind === "lead" && <LeadModal lead={modal.lead} stages={leadStages} sources={sources} owners={leadOwners} keepers={leadManagers} defaultOwnerId={session.user.id} pestOptions={canonicalPestOptions(pestTypes)} companies={leadCompanies} funnelCtx={leadFunnelCtx(modal.lead)} onCreateCompany={(payload) => createLeadCompany(modal.lead, payload)} onClose={() => setModal(null)} onSave={saveLead} />}
+      {modal?.kind === "lead" && <LeadModal lead={modal.lead} clientHistory={leadClientHistory.find((h) => String(h.lead_id) === String(modal.lead?.id))} stages={leadStages} sources={sources} owners={leadOwners} keepers={leadManagers} defaultOwnerId={session.user.id} pestOptions={canonicalPestOptions(pestTypes)} companies={leadCompanies} funnelCtx={leadFunnelCtx(modal.lead)} onCreateCompany={(payload) => createLeadCompany(modal.lead, payload)} onClose={() => setModal(null)} onSave={saveLead} />}
       {modal?.kind === "leadActivity" && <LeadActivityModal lead={modal.lead} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : actorName} defaultKind={modal.defaultKind || "call"} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onSave={(payload) => recordLeadActivity(modal.lead, payload)} />}
       {modal?.kind === "leadHistory" && <LeadHistoryModal lead={modal.lead} stageName={leadStageById(modal.lead?.stage_id)?.name} ownerName={modal.lead?.owner_id ? profileById(modal.lead.owner_id)?.full_name : ""} activities={leadTimeline(modal.lead?.id)} profileName={(id) => profileById(id)?.full_name || ""} closed={leadIsClosed(modal.lead)} onClose={() => setModal(null)} onAddContact={() => setModal({ kind: "leadActivity", lead: modal.lead })} onAddNote={() => setModal({ kind: "leadActivity", lead: modal.lead, defaultKind: "note" })} />}
       {modal?.kind === "mktChannel" && <MktChannelModal item={modal.item} sources={sources} onClose={() => setModal(null)} onSave={saveMktChannel} />}

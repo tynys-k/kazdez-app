@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs";
 import path from "node:path";
-import { HUNTER_FUNNEL_MIGRATION, HUNTER_PROPOSALS_MIGRATION, HUNTER_ROLE_MIGRATION } from "./hunterFunnelModel";
+import { HUNTER_FUNNEL_MIGRATION, HUNTER_PROPOSALS_MIGRATION, HUNTER_ROLE_MIGRATION, LEAD_CLIENT_HISTORY_MIGRATION } from "./hunterFunnelModel";
 
 // Проверяем доступ так же, как его видит приложение: под ролью authenticated
 // с включённым RLS и теми же «разрешающими» политиками, что в живой базе.
@@ -157,5 +157,23 @@ describe("роль «Хантер»", () => {
     expect((await rows("select count(*)::int n from proposals"))[0].n).toBe(0);
     await as(admin);
     expect((await rows("select count(*)::int n from proposals"))[0].n).toBe(4);
+  });
+  it("показывает, что номер уже обслуживали, — хантеру только по своим сделкам", async () => {
+    await db.exec("reset role");
+    await db.exec("alter table jobs add column if not exists client_id uuid, add column if not exists reported_at timestamptz, add column if not exists created_at timestamptz default now()");
+    await db.exec(read(LEAD_CLIENT_HISTORY_MIGRATION));
+    await db.query("update leads set phone='+7 747 108 8385' where name in ('Кафе хантера', 'Склад другого хантера')");
+    await db.query("insert into clients(phone_key, phone, name, client_type) values('7471088385', '+7 747 108 8385', 'Айдос', 'person')");
+    await db.query(`insert into jobs(client_phone, scheduled_date, pest, address, status) values
+      ('87471088385', '2026-03-10', 'Тараканы', 'Гагарина 1г', 'done'),
+      ('+7 (747) 108-83-85', '2026-06-02', 'Мыши', 'Гагарина 1г', 'done'),
+      ('+7 747 108 8385', '2026-07-01', 'Мухи', 'Гагарина 1г', 'canceled')`);
+    await as(hunter);
+    const history = await rows("select h.*, l.name from lead_client_history() h join leads l on l.id = h.lead_id");
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ name: "Кафе хантера", client_name: "Айдос", client_type: "person", jobs_count: 2, done_count: 2, last_pest: "Мыши" });
+    expect(String(history[0].last_date.toISOString?.() ?? history[0].last_date)).toMatch(/2026-06-0[12]/);
+    await as(manager);
+    expect((await rows("select count(*)::int n from lead_client_history()"))[0].n).toBe(2);
   });
 });

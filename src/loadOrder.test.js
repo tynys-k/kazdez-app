@@ -31,7 +31,8 @@ function readSources() {
       const label = /label: "([^"]+)"/.exec(line);
       const table = /(?:from|fetchAllRows)\("([a-z_]+)"/.exec(line);
       const rpc = /rpc\("([a-z_]+)"/.exec(line);
-      const rpcSource = { list_profiles_safe: "profiles" }[rpc && rpc[1]];
+      // Источник-функция: профили — безопасная проекция, история клиента — сводка по лидам.
+      const rpcSource = { list_profiles_safe: "profiles", lead_client_history: "lead_client_history" }[rpc && rpc[1]];
       return { key: key && key[1], label: label && label[1], table: (table && table[1]) || rpcSource, line };
     });
 }
