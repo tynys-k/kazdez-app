@@ -4,6 +4,7 @@
 // (supabase/2026-10-18_hunter_funnel.sql, kd_lead_stage_missing) — держи их одинаковыми.
 
 export const HUNTER_FUNNEL_MIGRATION = "2026-10-18_hunter_funnel.sql";
+export const HUNTER_ROLE_MIGRATION = "2026-10-22_hunter_role.sql";
 
 // Линейная часть воронки в порядке прохождения.
 export const DEAL_STAGES = [
