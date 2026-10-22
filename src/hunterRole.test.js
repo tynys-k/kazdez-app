@@ -20,5 +20,8 @@ describe("роль «Хантер»", () => {
     expect(edge.match(/"(\w+)"/g).map((s) => s.slice(1, -1)).sort()).toEqual(appRoles);
     const check = read("supabase", HUNTER_ROLE_MIGRATION).match(/check \(role = any \(array\[([^\]]+)\]\)\)/)[1];
     expect(check.match(/'(\w+)'/g).map((s) => s.slice(1, -1)).filter((role) => role !== "admin").sort()).toEqual(appRoles);
+    // Кадровая карточка проверяет роль своим списком — без хантера она падала с «Неизвестная роль доступа».
+    const card = read("supabase", "2026-10-22_hunter_employee_card.sql").match(/p_role not in \(([^)]+)\)/)[1];
+    expect(card.match(/'(\w+)'/g).map((s) => s.slice(1, -1)).sort()).toEqual(appRoles);
   });
 });
